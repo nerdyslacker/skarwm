@@ -1,0 +1,116 @@
+# skarwm full desktop configuration (plain text — no Lua).
+#
+# Full desktop configuration installed by `make install-extra`. When no file
+# is found skarwm falls back to its built-in defaults. Reload this file at any
+# time with Mod+Shift+r
+# (call : mod + Shift + r : reload); the reload is atomic — if a line is
+# malformed skarwm keeps the previous settings and logs the error.
+#
+# A '#' at the start of a line is a comment. Every line is `key : value`
+# (settings) or a directive with extra ':' fields. Legacy settings that only
+# decorate a titlebar skarwm does not draw (norm_bg, show_titlebar, snap, …)
+# are accepted and ignored for configuration compatibility.
+
+# ---- settings ---------------------------------------------------------------
+
+# Primary modifier: the `mod` token in every combo below. Mod1..Mod5, Super,
+# Hyper, Alt, Shift, Control are all valid.
+mod_key : super
+
+# Pixels of empty space around the work area / between tiled windows.
+outer_gap : 8
+inner_gap : 8
+# `gap : N` seeds both outer_gap and inner_gap at once.
+border_width : 2
+
+# Window border colours as #RRGGBB.
+norm_outer_border : #504D47
+sel_outer_border  : #FF5F00
+
+# True (default): moving the pointer over a window focuses it.
+focus_follows_mouse : true
+
+# ---- launching ----------------------------------------------------------------
+
+# bind: run a shell command. Combo = modifier tokens + one key.
+bind : mod + Return : "kitty"
+# Every spawn binding automatically gets an otherwise-unbound Shift variant.
+# While a tabbed column is focused, mod+Shift+Return runs the same command and
+# puts its next window in that tab group. An explicit shifted binding overrides
+# this generated behavior.
+
+# autostart: run once at startup (not re-run on reload). These paths match the
+# per-user tree installed by `make install-extra`.
+autostart : "lxqt-policykit-agent"
+autostart : "feh --bg-fill ~/.config/skarwm/wallpaper/default.jpeg"
+autostart : "dunst -config ~/.config/skarwm/dunst/dunstrc"
+autostart : "picom --config ~/.config/skarwm/picom/picom.conf -b"
+autostart : "qs -p ~/.config/skarwm/quickshell"
+autostart : "xss-lock -- betterlockscreen -l"
+autostart : "udiskie --smart-tray"
+
+# ---- key actions (call) ---------------------------------------------------------
+# Action tokens: focusleft/right/up/down moveleft/right/up/down ws_up ws_down
+# ws_next ws_prev togglefloating togglefullscreen layout_tabbed layout_stacked
+# toggle_tabbed show_bindings focus_output_next/prev move_to_output_next/prev
+# close_window reload_config quit.
+
+call : mod + h : focusleft
+call : mod + j : focusdown
+call : mod + k : focusup
+call : mod + l : focusright
+
+call : mod + Shift + h : moveleft
+call : mod + Shift + j : movedown
+call : mod + Shift + k : moveup
+call : mod + Shift + l : moveright
+
+call : mod + space : togglefloating
+call : mod + f     : togglefullscreen
+call : mod + t     : toggle_tabbed
+call : mod + slash : show_bindings
+# `layout_tabbed` and `layout_stacked` select a mode directly. In tabbed mode,
+# only the focused column becomes a tab group. Move chosen windows into that
+# column with mod+Shift+h/l; mod+k/j selects tabs and mod+Shift+k/j reorders.
+# Toggling tabs off splits them back into separate horizontal columns.
+call : mod + Shift + q : close_window
+call : mod + Shift + r : reload_config
+
+call : mod + n : ws_next
+call : mod + p : ws_prev
+call : mod + Control + n : tag_next
+call : mod + Control + p : tag_prev
+
+# Focus another monitor, or send the focused window there. Monitor order comes
+# from RandR and wraps at either end.
+call : mod + comma         : focus_output_prev
+call : mod + period        : focus_output_next
+call : mod + Shift + comma : move_to_output_prev
+call : mod + Shift + period : move_to_output_next
+
+# Fixed mouse actions use mod_key: Mod+wheel up/down scrolls the current
+# workspace strip left/right. Mod+left/right drag moves/resizes floating windows.
+
+# ---- dynamic workspaces --------------------------------------------------------
+# A workspace is created on demand the first time it is shown, so ids are not
+# limited to the rows bound below.
+
+workspace : mod + 1 : view 1
+workspace : mod + 2 : view 2
+workspace : mod + 3 : view 3
+workspace : mod + 4 : view 4
+
+workspace : mod + Shift + 1 : tag 1
+workspace : mod + Shift + 2 : tag 2
+workspace : mod + Shift + 3 : tag 3
+workspace : mod + Shift + 4 : tag 4
+
+# ---- window rules ------------------------------------------------------------
+# Match against the window class, instance or title. The pattern is a plain
+# substring test (not a regex); quote it with " when it contains spaces. Effects
+# (space-separated, any order): `workspace <N>` sends the window to that
+# workspace; `floating` (or `floating true` / `floating false`) overrides tiling.
+
+rule : class : XTerm : floating
+rule : instance : firefox : workspace 3
+rule : title : "Mozilla Firefox" : floating

@@ -1,0 +1,16 @@
+# Build artifacts
+build/
+local/
+src.bin
+*.o
+*.a
+*.so
+skarwm
+skarwm-msg
+!cmd/skarwm-msg/
+!cmd/skarwm-msg/main.odin
+
+# Editor / OS
+*.swp
+*~
+.DS_Store

@@ -1,0 +1,16 @@
+/* Srcery palette */
+
+* {
+    bg:          #121110;
+    fg:          #FCE8C3;
+    accent:      #FF5F00;
+    accent-2:    #68A8E4;
+    border:      #FF5F00;
+    urgent:      #EF2F27;
+    selected-fg: #0E0D0C;
+    entry-fg:    #68A8E4;
+    prompt-fg:   #FF5F00;
+    header:      #68A8E4;
+
+    background-color: @bg;
+}

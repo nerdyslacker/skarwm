@@ -1,0 +1,6 @@
+#!/bin/sh
+
+# Display-manager entry point. Environment setup belongs in ~/.profile or in
+# autostart lines in ~/.config/skarwm/config.rc.
+exec skarwm "$@"
+

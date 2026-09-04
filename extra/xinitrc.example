@@ -1,0 +1,6 @@
+#!/bin/sh
+
+# Optional session programs can instead be declared with `autostart` in
+# ~/.config/skarwm/config.rc.
+exec skarwm
+

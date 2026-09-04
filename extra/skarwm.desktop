@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=skarwm
+Comment=Scrolling column-based X11 window manager
+Exec=skarwm-session
+TryExec=skarwm
+Type=Application
+DesktopNames=skarwm
+
