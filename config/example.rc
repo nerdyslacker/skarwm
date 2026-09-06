@@ -105,5 +105,6 @@ workspace : mod + Shift + 4 : tag 4
 # workspace; `floating` (or `floating true` / `floating false`) overrides tiling.
 
 rule : class : XTerm : floating
+rule : title : Network : floating
 rule : instance : firefox : workspace 3
 rule : title : "Mozilla Firefox" : floating

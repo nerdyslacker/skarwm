@@ -26,11 +26,10 @@ Item {
                 radius: 0
                 color: urgent ? Theme.red
                     : selected ? Theme.orange
-                    : Qt.alpha(Theme.fg, 0.07)
+                    : Qt.alpha(Theme.fg, occupied ? 0.12 : 0.07)
                 border.width: 1
                 border.color: urgent ? Theme.red
                     : selected ? Theme.brightOrange
-                    : occupied ? Theme.brightBlack
                     : Theme.gray5
 
                 Behavior on width { NumberAnimation { duration: 160 } }

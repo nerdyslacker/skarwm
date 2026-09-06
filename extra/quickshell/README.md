@@ -10,7 +10,8 @@ The bar includes:
 - application launcher, workspace tags, and focused-window title;
 - media, weather, CPU/RAM/disk/battery metrics, volume, and network state;
 - Void Linux update count, system tray, notifications, clock and calendar;
-- microphone mute, Caps Lock, screenshots, and a quick-command panel.
+- microphone mute, Caps Lock, screenshots, power controls, and a quick-command
+  panel.
 
 The panel and all cards are square. The panel has no outer margin and is
 anchored directly to the top, left, and right screen edges. Its EWMH strut is
@@ -23,13 +24,17 @@ requires Quickshell and a Nerd Font; `JetBrainsMono Nerd Font` is configured.
 Individual modules use these optional programs when available:
 
 - `rofi` for the application launcher and `feh` for wallpaper selection;
-- `nmcli` and `nm-connection-editor` for network state and settings;
+- `nmcli` and `nm-connection-editor` for network state and settings, plus
+  `bluetoothctl` for the optional Bluetooth section;
 - PipeWire/PulseAudio-compatible `pactl` and `pavucontrol` for audio;
 - an MPRIS-compatible media player for media controls;
 - `curl` for weather and `xdg-open` for its web view;
 - `xbps-install`, `sudo`, and `xterm` for Void update actions;
 - `dunstctl`/`notify-send`, `flameshot`, `brightnessctl`, `powerprofilesctl`,
-  `redshift`, and `xset` for their corresponding optional controls.
+  `redshift`, `xset`, `loginctl`, and `betterlockscreen` for their corresponding
+  optional controls;
+- `xinput` and `xdotool` for outside-click popup dismissal on Quickshell 0.3.0
+  (newer releases handle this through `PopupWindow.grabFocus`).
 
 Missing optional tools only affect their corresponding module or action.
 

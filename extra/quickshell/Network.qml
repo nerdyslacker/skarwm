@@ -1,13 +1,18 @@
 import QtQuick
 import Quickshell
 
-// Active connection indicator (icon-only; connection details live in
-// the network app). Clicking opens NetworkManager's connection editor.
+// Active connection indicator. Left click toggles the skarwm network panel;
+// right click opens NetworkManager's full connection editor.
 BarModule {
     id: root
 
     icon: Sys.netIcon
     iconColor: Sys.vpnOn ? Theme.green : Sys.online ? Theme.cyan : Theme.red
 
-    onClicked: Quickshell.execDetached(["nm-connection-editor"])
+    onClicked: mouse => {
+        if (mouse.button === Qt.RightButton)
+            Quickshell.execDetached(["nm-connection-editor"])
+        else
+            Quickshell.execDetached([Theme.configDir + "/scripts/network"])
+    }
 }

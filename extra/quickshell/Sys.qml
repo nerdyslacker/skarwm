@@ -78,50 +78,111 @@ Singleton {
     property bool capsOn: false
     property bool dndOn: false
     property bool micMuted: false
+    property bool dndTarget: false
+    property bool micTarget: false
 
     Timer {
         interval: 1000
         running: true
         repeat: true
-        onTriggered: capsProc.running = true
+        triggeredOnStart: true
+        onTriggered: root.refreshIndicators()
     }
 
-    // one process per tick covers the indicators: caps lock + dunst
-    // paused + default-source mute
+    function restartQuery(proc) {
+        proc.running = false
+        proc.running = true
+    }
+
+    function refreshIndicators() {
+        restartQuery(capsProc)
+        restartQuery(dndProc)
+        restartQuery(micProc)
+    }
+
     Process {
         id: capsProc
-        command: ["sh", "-c", "xset q | awk '/Caps Lock/{print $4}'; " +
-            "dunstctl is-paused 2>/dev/null; " +
-            "pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null"]
+        command: ["sh", "-c", "xset q 2>/dev/null | awk '/Caps Lock/{print $4}'"]
         stdout: StdioCollector {
             onStreamFinished: {
-                const lines = text.trim().split("\n")
-                root.capsOn = lines[0] === "on"
-                root.dndOn = lines[1] === "true"
-                root.micMuted = lines[2] === "Mute: yes"
+                const state = text.trim()
+                if (state === "on" || state === "off")
+                    root.capsOn = state === "on"
             }
         }
     }
 
-    // fast re-poll so the icon settles right after a toggle instead of
-    // waiting out (or fighting) the 1s tick
+    Process {
+        id: dndProc
+        command: ["sh", "-c", "dunstctl is-paused 2>/dev/null"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const state = text.trim()
+                if (state === "true" || state === "false")
+                    root.dndOn = state === "true"
+            }
+        }
+    }
+
+    Process {
+        id: micProc
+        command: ["sh", "-c",
+            "pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const state = text.trim()
+                if (state.endsWith("yes") || state.endsWith("no"))
+                    root.micMuted = state.endsWith("yes")
+            }
+        }
+    }
+
     Timer {
         id: dndRefresh
         interval: 300
-        onTriggered: capsProc.running = true
+        onTriggered: root.refreshIndicators()
+    }
+
+    Process {
+        id: micToggleProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const state = text.trim()
+                if (state.endsWith("yes") || state.endsWith("no"))
+                    root.micMuted = state.endsWith("yes")
+            }
+        }
+        onExited: root.restartQuery(micProc)
+    }
+
+    Process {
+        id: dndToggleProc
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const state = text.trim()
+                if (state === "true" || state === "false")
+                    root.dndOn = state === "true"
+            }
+        }
+        onExited: root.restartQuery(dndProc)
     }
 
     function toggleMicMute() {
-        Quickshell.execDetached(["pactl", "set-source-mute",
-                                 "@DEFAULT_SOURCE@", "toggle"])
-        micMuted = !micMuted
-        dndRefresh.restart()
+        micTarget = !micMuted
+        micToggleProc.running = false
+        micToggleProc.command = ["sh", "-c",
+            "pactl set-source-mute @DEFAULT_SOURCE@ " + (micTarget ? "1" : "0") +
+            " 2>/dev/null && pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null"]
+        micToggleProc.running = true
     }
 
     function toggleDnd() {
-        Quickshell.execDetached(["dunstctl", "set-paused", "toggle"])
-        dndOn = !dndOn
-        dndRefresh.restart()
+        dndTarget = !dndOn
+        dndToggleProc.running = false
+        dndToggleProc.command = ["sh", "-c",
+            "dunstctl set-paused " + (dndTarget ? "true" : "false") +
+            " 2>/dev/null && dunstctl is-paused 2>/dev/null"]
+        dndToggleProc.running = true
     }
     function popNotification() {
         // replaying must always show something: leave DND first, and say so

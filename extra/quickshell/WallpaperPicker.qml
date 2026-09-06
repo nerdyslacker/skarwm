@@ -33,7 +33,7 @@ Popout {
 
     function apply(path) {
         activePath = path
-        Quickshell.execDetached(["feh", "--bg-fill", path])
+        Quickshell.execDetached([Theme.configDir + "/scripts/wallpaper-theme", path])
         visible = false
     }
 

@@ -23,9 +23,11 @@ SKARWM_CONFIG_DIR ?= $(HOME)/.config/skarwm
 ODIN_SRCS := $(shell find src -name '*.odin')
 EXTRA_CONFIG_FILES := $(shell find \
 	extra/dunst extra/kitty extra/picom extra/polybar extra/quickshell \
-	extra/rofi extra/wallpaper -type f ! -name '.gitkeep') \
+	extra/quickshell-network extra/rofi extra/wallpaper \
+	-type f ! -name '.gitkeep') \
 	extra/config.rc extra/bar-height extra/bar-scale extra/pomodoro \
 	extra/weather-location extra/weather-units
+EXTRA_SCRIPT_FILES := $(shell find extra/scripts -type f)
 
 all: build/skarwm build/skarwm-msg
 
@@ -56,6 +58,10 @@ install-extra:
 	@set -e; for src in $(EXTRA_CONFIG_FILES); do \
 		rel=$${src#extra/}; \
 		install -Dm644 "$$src" "$(SKARWM_CONFIG_DIR)/$$rel"; \
+	done
+	@set -e; for src in $(EXTRA_SCRIPT_FILES); do \
+		rel=$${src#extra/}; \
+		install -Dm755 "$$src" "$(SKARWM_CONFIG_DIR)/$$rel"; \
 	done
 	@printf 'Installed skarwm desktop configuration to %s\n' "$(SKARWM_CONFIG_DIR)"
 

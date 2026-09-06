@@ -15,6 +15,10 @@ independent workspaces per monitor, cross-monitor window movement,
 floating/fullscreen windows, atomic rc reloads, window rules, EWMH/ICCCM
 interoperability, dock struts, and a nonblocking Unix-socket IPC interface.
 
+> **Note:** skarwm was developed with the assistance of AI as a project for
+> learning Odin. Although it remains a hobby project, it is already my daily
+> driver.
+
 ## Dependencies
 
 Building requires:
@@ -58,16 +62,20 @@ configuration under `extra/` uses:
 - `xss-lock` and Betterlockscreen for screen locking;
 - Udiskie for removable-drive automounting and its tray item.
 
-The bar can additionally use NetworkManager tools, `pactl`, `pavucontrol`,
-`curl`, `xdg-open`, `flameshot`, `brightnessctl`, `powerprofilesctl`,
-`redshift`, `xset`, `notify-send`, `xterm`, and the Void `xbps-install` tool.
-Missing optional tools only disable their corresponding widget action.
+The bar and its companion network panel can additionally use NetworkManager
+tools, BlueZ's `bluetoothctl`, `pactl`, `pavucontrol`, `curl`, `xdg-open`,
+`flameshot`, `brightnessctl`, `powerprofilesctl`, `redshift`, `xset`,
+`notify-send`, `xterm`, and the Void `xbps-install` tool. On Quickshell 0.3.0,
+`xinput` and `xdotool` provide the bar popup outside-click fallback. Missing
+optional tools only disable their corresponding widget action.
 
 On Void, install the available packages with XBPS; Betterlockscreen and a Nerd
 Font may need to be installed separately depending on the enabled repositories:
 
 ```sh
-sudo xbps-install -S quickshell picom dunst rofi feh kitty xss-lock betterlockscreen udiskie lxqt-policykit NetworkManager pavucontrol curl flameshot xterm
+sudo xbps-install -S quickshell picom dunst rofi feh kitty xss-lock \
+  betterlockscreen udiskie lxqt-policykit NetworkManager bluez pavucontrol \
+  curl flameshot brightnessctl xterm xinput xdotool
 ```
 
 ## Build
@@ -154,11 +162,12 @@ make install-extra
 ```
 
 `make extra` is a shorter alias. This copies `extra/config.rc` and the Srcery
-Quickshell, Picom, Dunst, Kitty, Polybar, Rofi, wallpaper, weather, and bar
-configuration into `~/.config/skarwm`. Existing files with the same names are
-replaced, so back up a customized configuration first. An alternative target
-directory can be selected with `SKARWM_CONFIG_DIR=/path`—the autostart paths in
-`config.rc` must also be adjusted when it is not `~/.config/skarwm`.
+Quickshell bar and network panel, Picom, Dunst, Kitty, Polybar, Rofi, wallpaper,
+weather, helper scripts, and bar configuration into `~/.config/skarwm`.
+Existing files with the same names are replaced, so back up a customized
+configuration first. An alternative target directory can be selected with
+`SKARWM_CONFIG_DIR=/path`—the autostart paths in `config.rc` must also be
+adjusted when it is not `~/.config/skarwm`.
 
 The full rc starts:
 

@@ -2,5 +2,6 @@
 
 # Display-manager entry point. Environment setup belongs in ~/.profile or in
 # autostart lines in ~/.config/skarwm/config.rc.
+export KITTY_CONFIG_DIRECTORY="$HOME/.config/skarwm/kitty"
 exec skarwm "$@"
 

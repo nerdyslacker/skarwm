@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# Apply a wallpaper while keeping skarwm's fixed Srcery palette.
+set -eu
+
+image=${1:?usage: wallpaper-theme IMAGE}
+[ -f "$image" ] || {
+    printf 'wallpaper-theme: no such image: %s\n' "$image" >&2
+    exit 1
+}
+
+feh --bg-fill "$image"
+
+# Keep the lock screen in sync when Betterlockscreen is installed.
+if command -v betterlockscreen >/dev/null 2>&1; then
+    betterlockscreen -u "$image" >/dev/null 2>&1 &
+fi

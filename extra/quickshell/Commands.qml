@@ -346,6 +346,7 @@ BarModule {
                 applyFn: v => Quickshell.execDetached(
                     ["brightnessctl", "-c", "backlight", "set", v + "%"])
                 persistFn: v => {}   // hardware remembers; nothing to persist
+                onCommitted: v => root.brightness = Math.round(v)
             }
 
             Rectangle {

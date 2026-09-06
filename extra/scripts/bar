@@ -1,0 +1,24 @@
+#!/bin/sh
+
+# Manage the skarwm Quickshell instance from any working directory.
+set -eu
+
+config_root=$(dirname "$(dirname "$(readlink -f "$0")")")
+shell_dir="$config_root/quickshell"
+
+case "${1:-restart}" in
+    restart|reload)
+        qs -p "$shell_dir" kill 2>/dev/null || true
+        sleep 0.2
+        exec qs -p "$shell_dir" -d -n
+        ;;
+    stop)
+        exec qs -p "$shell_dir" kill
+        ;;
+    log)
+        exec qs -p "$shell_dir" log -f
+        ;;
+    *)
+        exec qs -p "$shell_dir" "$@"
+        ;;
+esac
