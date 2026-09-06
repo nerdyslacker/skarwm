@@ -9,12 +9,20 @@ import Quickshell.Io
 Singleton {
     id: root
 
-    // config root = parent of the running quickshell directory
+    // Asset/config root can be supplied by the session or inferred from the
+    // running quickshell directory. Mutable widget values may live elsewhere.
     readonly property string configDir: {
+        const configured = String(Quickshell.env("SKARWM_EXTRA_DIR") ?? "")
+        if (configured !== "")
+            return configured
         let sd = String(Quickshell.shellDir ?? "")
         if (sd.startsWith("file://"))
             sd = sd.slice(7)
         return sd.substring(0, sd.lastIndexOf("/"))
+    }
+    readonly property string stateDir: {
+        const configured = String(Quickshell.env("SKARWM_STATE_DIR") ?? "")
+        return configured !== "" ? configured : configDir
     }
 
     property int barHeight: 34
@@ -83,7 +91,7 @@ Singleton {
     readonly property int effectiveBarHeight: Math.max(barHeight, moduleHeight)
 
     FileView {
-        path: root.configDir + "/bar-height"
+        path: root.stateDir + "/bar-height"
         watchChanges: true
         onFileChanged: reload()
         onLoadFailed: root._barStateLoads++
@@ -96,7 +104,7 @@ Singleton {
     }
 
     FileView {
-        path: root.configDir + "/bar-scale"
+        path: root.stateDir + "/bar-scale"
         watchChanges: true
         onFileChanged: reload()
         onLoadFailed: root._barStateLoads++

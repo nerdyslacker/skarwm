@@ -166,8 +166,25 @@ Quickshell bar and network panel, Picom, Dunst, Kitty, Polybar, Rofi, wallpaper,
 weather, helper scripts, and bar configuration into `~/.config/skarwm`.
 Existing files with the same names are replaced, so back up a customized
 configuration first. An alternative target directory can be selected with
-`SKARWM_CONFIG_DIR=/path`—the autostart paths in `config.rc` must also be
-adjusted when it is not `~/.config/skarwm`.
+`SKARWM_CONFIG_DIR=/path`.
+
+Packaged desktop files can instead be used directly without copying them into
+the home directory. `skarwm-session` automatically selects
+`/usr/share/skarwm/extra` when it exists. The same behavior can be configured
+explicitly:
+
+```sh
+export SKARWM_CONFIG=/usr/share/skarwm/extra/config.rc
+export SKARWM_EXTRA_DIR=/usr/share/skarwm/extra
+export SKARWM_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/skarwm"
+exec skarwm-session
+```
+
+`SKARWM_CONFIG` selects the WM rc file, `SKARWM_EXTRA_DIR` is the root used by
+the bundled autostarts, QML, and helper scripts, and `SKARWM_STATE_DIR` holds
+writable bar settings such as weather and Pomodoro state. The state directory
+defaults to the extra directory for a per-user install and to the XDG state
+directory when the extras come from `/usr/share`.
 
 The full rc starts:
 
@@ -219,9 +236,9 @@ Logging defaults to `INFO`. Set `SKARWM_LOG=debug`, `info`, `warn`, `error`, or
 
 ## Configuration
 
-The search order is `$XDG_CONFIG_HOME/skarwm/config.rc`, then
-`~/.config/skarwm/config.rc`; `skarwm -c FILE` overrides discovery. Reload is
-atomic: a malformed replacement is reported and the previous configuration
+The search order is `skarwm -c FILE`, `$SKARWM_CONFIG`,
+`$XDG_CONFIG_HOME/skarwm/config.rc`, then `~/.config/skarwm/config.rc`. Reload
+is atomic: a malformed replacement is reported and the previous configuration
 stays active. The fully commented [`config/example.rc`](config/example.rc)
 documents settings, key actions, workspace bindings, rules, and autostart.
 

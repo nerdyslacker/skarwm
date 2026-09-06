@@ -3,7 +3,7 @@
 # Rofi power menu for an elogind/runit skarwm session.
 set -eu
 
-config_root=$(dirname "$(dirname "$(readlink -f "$0")")")
+config_root=${SKARWM_EXTRA_DIR:-$(dirname "$(dirname "$(readlink -f "$0")")")}
 theme="$config_root/rofi/power.rasi"
 
 chosen=$(printf '%s\n' '[Cancel]' 'Lock' 'Logout' 'Shutdown' 'Reboot' |

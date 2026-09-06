@@ -4,7 +4,8 @@
 # separate from the bar).
 
 
-P="$(dirname "$(dirname "$(readlink -f "$0")")")/quickshell-network"
+config_root=${SKARWM_EXTRA_DIR:-$(dirname "$(dirname "$(readlink -f "$0")")")}
+P="$config_root/quickshell-network"
 
 if pgrep -f "qs -p $P" >/dev/null 2>&1; then
     qs -p "$P" kill

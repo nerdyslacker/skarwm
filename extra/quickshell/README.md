@@ -49,9 +49,14 @@ qs -p ~/.config/skarwm/quickshell
 `Wm.qml` runs the installed `skarwm-msg` command. Set `SKARWM_SOCKET` for both
 skarwm and Quickshell if you use a non-default IPC socket path.
 
+For a system package, set `SKARWM_EXTRA_DIR` to the installed desktop root and
+`SKARWM_STATE_DIR` to a writable directory. `skarwm-session` does this
+automatically for `/usr/share/skarwm/extra`.
+
 ## Local settings
 
-The following optional plain-text files live in `~/.config/skarwm/`:
+The following optional plain-text files live in `~/.config/skarwm/` for a
+per-user install, or in `$SKARWM_STATE_DIR` when it is set:
 
 - `bar-height` — bar height in pixels, clamped to 28–80;
 - `bar-scale` — module scale, clamped to 0.7–2.0;

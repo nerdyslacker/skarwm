@@ -3,7 +3,7 @@
 # Manage the skarwm Quickshell instance from any working directory.
 set -eu
 
-config_root=$(dirname "$(dirname "$(readlink -f "$0")")")
+config_root=${SKARWM_EXTRA_DIR:-$(dirname "$(dirname "$(readlink -f "$0")")")}
 shell_dir="$config_root/quickshell"
 
 case "${1:-restart}" in

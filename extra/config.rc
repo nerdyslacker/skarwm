@@ -39,13 +39,13 @@ bind : mod + Return : "kitty"
 # puts its next window in that tab group. An explicit shifted binding overrides
 # this generated behavior.
 
-# autostart: run once at startup (not re-run on reload). These paths match the
-# per-user tree installed by `make install-extra`.
+# autostart: run once at startup (not re-run on reload). SKARWM_EXTRA_DIR can
+# point at either a per-user tree or packaged files under /usr/share.
 autostart : "lxqt-policykit-agent"
-autostart : "feh --bg-fill ~/.config/skarwm/wallpaper/default.jpeg"
-autostart : "dunst -config ~/.config/skarwm/dunst/dunstrc"
-autostart : "picom --config ~/.config/skarwm/picom/picom.conf -b"
-autostart : "qs -p ~/.config/skarwm/quickshell"
+autostart : "feh --bg-fill ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/wallpaper/default.jpeg"
+autostart : "dunst -config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/dunst/dunstrc"
+autostart : "picom --config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/picom/picom.conf -b"
+autostart : "qs -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell"
 autostart : "xss-lock -- betterlockscreen -l"
 autostart : "udiskie --smart-tray"
 

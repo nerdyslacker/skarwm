@@ -91,11 +91,11 @@ BarModule {
     function persistPomo() {
         Quickshell.execDetached(["sh", "-c",
             "printf '%s %s\\n' " + Math.round(pomoEndMs) + " " + pomoMinutes +
-            " > '" + Theme.configDir + "/pomodoro'"])
+            " > '" + Theme.stateDir + "/pomodoro'"])
     }
 
     FileView {
-        path: Theme.configDir + "/pomodoro"
+        path: Theme.stateDir + "/pomodoro"
         watchChanges: true
         onFileChanged: reload()
         onLoaded: {
