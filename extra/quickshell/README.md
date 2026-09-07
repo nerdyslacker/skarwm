@@ -23,7 +23,8 @@ Install skarwm first so `skarwm-msg` is available on `PATH`. The bar itself
 requires Quickshell and a Nerd Font; `JetBrainsMono Nerd Font` is configured.
 Individual modules use these optional programs when available:
 
-- `rofi` for the application launcher and `feh` for wallpaper selection;
+- `feh` for wallpaper selection; the application launcher is built into
+  Quickshell and reads the system's `.desktop` entries directly;
 - `nmcli` and `nm-connection-editor` for network state and settings, plus
   `bluetoothctl` for the optional Bluetooth section;
 - PipeWire/PulseAudio-compatible `pactl` and `pavucontrol` for audio;
@@ -66,6 +67,9 @@ per-user install, or in `$SKARWM_STATE_DIR` when it is set:
 
 Put `.png`, `.jpg`, `.jpeg`, or `.webp` images in
 `~/.config/skarwm/wallpaper/`.
+Left-click the launcher icon, type to filter applications, use the arrow keys to
+select a result, and press Enter to launch it. The launcher can also be toggled
+with `qs -p /path/to/quickshell ipc call launcher toggle`.
 Right-click the launcher icon to open the thumbnail picker, or middle-click it
 to apply a random image. Wallpaper changes do not alter the fixed Srcery
 palette.

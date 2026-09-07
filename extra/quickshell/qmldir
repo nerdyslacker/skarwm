@@ -6,6 +6,7 @@ BarModule BarModule.qml
 Tags Tags.qml
 Title Title.qml
 Launcher Launcher.qml
+ApplicationLauncher ApplicationLauncher.qml
 WallpaperPicker WallpaperPicker.qml
 Media Media.qml
 MediaPopup MediaPopup.qml

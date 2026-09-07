@@ -1,7 +1,7 @@
 import QtQuick
 
-// Left click opens the application launcher, right click opens the wallpaper
-// picker, and middle click applies a random wallpaper.
+// Left click opens the native application launcher, right click opens the
+// wallpaper picker, and middle click applies a random wallpaper.
 BarModule {
     id: root
 
@@ -13,7 +13,12 @@ BarModule {
         else if (mouse.button === Qt.MiddleButton)
             picker.applyRandom()
         else
-            Wm.openLauncher()
+            applications.toggle()
+    }
+
+    ApplicationLauncher {
+        id: applications
+        anchorItem: root
     }
 
     WallpaperPicker {

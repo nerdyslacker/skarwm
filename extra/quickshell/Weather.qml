@@ -71,7 +71,7 @@ BarModule {
 
     onClicked: mouse => {
         if (mouse.button === Qt.RightButton)
-            Quickshell.execDetached(["xdg-open", "https://wttr.in"])
+            Quickshell.execDetached([Theme.configDir + "/scripts/weather"])
         else
             forecast.visible = !forecast.visible
     }

@@ -56,7 +56,8 @@ configuration under `extra/` uses:
 
 - Quickshell and a JetBrainsMono Nerd Font for the bar;
 - Picom for compositing and Dunst for notifications;
-- Rofi for application launching and Feh for wallpaper handling;
+- the native searchable Quickshell application launcher and Feh for wallpaper
+  handling (Rofi is only used by the optional weather settings helper);
 - Kitty as the configured terminal;
 - `lxqt-policykit-agent` for graphical privilege prompts;
 - `xss-lock` and Betterlockscreen for screen locking;

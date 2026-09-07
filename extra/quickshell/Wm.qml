@@ -15,11 +15,6 @@ Singleton {
     property string activeWinId: ""
     readonly property string msgPath: "skarwm-msg"
 
-    function openLauncher() {
-        Quickshell.execDetached(["rofi", "-show", "drun", "-modi", "drun",
-            "-show-icons", "-theme", Theme.configDir + "/rofi/config.rasi"])
-    }
-
     function workspaceAt(index) {
         const id = index + 1
         for (const ws of workspaces)
