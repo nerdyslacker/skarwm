@@ -268,6 +268,12 @@ BarModule {
         anchorItem: root
     }
 
+    PowerMenu {
+        id: powerMenu
+        anchorItem: root
+        alignRight: true
+    }
+
     Popout {
         id: menu
         anchorItem: root
@@ -358,14 +364,15 @@ BarModule {
 
             Repeater {
                 model: [
-                    { icon: "󰚰", label: "Check updates",
-                      run: () => Quickshell.execDetached(["xterm", "-e", "sh", "-c",
-                          "xbps-install -Mun; " +
-                          "printf '\\ndone - press enter to close '; read _"]) },
+            { icon: "󰚰", label: "Check updates",
+              run: () => Quickshell.execDetached(["sh", "-c",
+                  "if command -v kitty >/dev/null 2>&1; then " +
+                  "exec kitty --hold sh -c 'xbps-install -Mun'; " +
+                  "else exec xterm -hold -e sh -c 'xbps-install -Mun'; fi"]) },
                     { icon: "󰌌", label: "Keybindings",
                       run: () => Quickshell.execDetached([Wm.msgPath, "show-bindings"]) },
-                    { icon: "󰑓", label: "Reload skarwm",
-                      run: () => Quickshell.execDetached([Wm.msgPath, "reload"]) }
+                    { icon: "󰐥", label: "Power menu",
+                      run: () => { powerMenu.visible = true } }
                 ]
                 CommandRow {}
             }

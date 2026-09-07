@@ -60,7 +60,6 @@ PanelWindow {
             MicMute {}
             CapsLock {}
             Screenshot {}
-            PowerButton {}
             Commands {}
         }
     }

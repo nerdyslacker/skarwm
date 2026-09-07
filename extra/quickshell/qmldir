@@ -22,7 +22,7 @@ CalendarPopup CalendarPopup.qml
 MicMute MicMute.qml
 CapsLock CapsLock.qml
 Screenshot Screenshot.qml
-PowerButton PowerButton.qml
+PowerMenu PowerMenu.qml
 Commands Commands.qml
 NotifyPopup NotifyPopup.qml
 Popout Popout.qml

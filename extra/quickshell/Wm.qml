@@ -20,10 +20,6 @@ Singleton {
             "-show-icons", "-theme", Theme.configDir + "/rofi/config.rasi"])
     }
 
-    function openPowerMenu() {
-        Quickshell.execDetached([Theme.configDir + "/scripts/power"])
-    }
-
     function workspaceAt(index) {
         const id = index + 1
         for (const ws of workspaces)
