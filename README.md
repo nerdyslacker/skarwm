@@ -27,9 +27,13 @@ Building requires:
 - libxcb and its RandR extension runtime/development files;
 - GNU Make and a normal C toolchain/linker.
 
-On Void Linux:
+Odin is available for Void through the Lazy Linux repository. Add the
+repository once, refresh its index, and install the build dependencies:
 
 ```sh
+printf '%s\n' 'repository=https://github.com/lazylinuxos/lazy-repo/releases/latest/download' \
+  | sudo tee /etc/xbps.d/99-repository-lazy.conf
+sudo xbps-install -S
 sudo xbps-install -S odin libxcb-devel make gcc
 ```
 
@@ -59,6 +63,8 @@ configuration under `extra/` uses:
 - the native searchable Quickshell application launcher and Feh for wallpaper
   handling (Rofi is only used by the optional weather settings helper);
 - Kitty as the configured terminal;
+- renCal for the full calendar interface and Python 3 for loading its local
+  events into the calendar popup;
 - `lxqt-policykit-agent` for graphical privilege prompts;
 - `xss-lock` and Betterlockscreen for screen locking;
 - Udiskie for removable-drive automounting and its tray item.
@@ -70,13 +76,17 @@ tools, BlueZ's `bluetoothctl`, `pactl`, `pavucontrol`, `curl`, `xdg-open`,
 `xinput` and `xdotool` provide the bar popup outside-click fallback. Missing
 optional tools only disable their corresponding widget action.
 
+renCal is available from the same Lazy Linux repository. The calendar widget
+continues to work without it, but omits its event list and keeps right-click
+equivalent to the normal clock click.
+
 On Void, install the available packages with XBPS; Betterlockscreen and a Nerd
 Font may need to be installed separately depending on the enabled repositories:
 
 ```sh
 sudo xbps-install -S quickshell picom dunst rofi feh kitty xss-lock \
   betterlockscreen udiskie lxqt-policykit NetworkManager bluez pavucontrol \
-  curl flameshot brightnessctl xterm xinput xdotool
+  curl flameshot brightnessctl python3 renCal xterm xinput xdotool
 ```
 
 ## Build

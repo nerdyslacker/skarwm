@@ -29,7 +29,9 @@ Individual modules use these optional programs when available:
   `bluetoothctl` for the optional Bluetooth section;
 - PipeWire/PulseAudio-compatible `pactl` and `pavucontrol` for audio;
 - an MPRIS-compatible media player for media controls;
-- `curl` for weather and `xdg-open` for its web view;
+- `curl` for weather;
+- `renCal` to open the full calendar on a clock right-click and Python 3 for
+  reading its local Caldir events into the calendar popup;
 - `xbps-install`, `sudo`, and `xterm` for Void update actions;
 - `dunstctl`/`notify-send`, `flameshot`, `brightnessctl`, `powerprofilesctl`,
   `redshift`, `xset`, `loginctl`, and `betterlockscreen` for their corresponding
@@ -64,6 +66,12 @@ per-user install, or in `$SKARWM_STATE_DIR` when it is set:
 - `weather-location` — city, postal code, or other wttr.in location;
 - `weather-units` — `c` or `f`;
 - `pomodoro` — persisted timer end time and duration.
+
+The calendar reads renCal's configured Caldir path automatically. Set
+`CALDIR_DIR` only when you want to override that location.
+Left-click the clock for the month calendar and upcoming events. Clicking an
+event or a highlighted day opens that event in renCal; right-clicking the clock
+opens renCal directly.
 
 Put `.png`, `.jpg`, `.jpeg`, or `.webp` images in
 `~/.config/skarwm/wallpaper/`.
