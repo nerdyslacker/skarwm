@@ -339,6 +339,30 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
     case .Layout_Tabbed:     b.action = .Layout_Tabbed
     case .Layout_Stacked:    b.action = .Layout_Stacked
     case .Layout_Toggle:     b.action = .Layout_Toggle
+    case .Scratchpad_Toggle: b.action = .Scratchpad_Toggle
+    case .Scratchpad_Toggle_Float: b.action = .Scratchpad_Toggle_Float
+    case .Scratchpad_Remove: b.action = .Scratchpad_Remove
+    case .Scratchpad_Target_AppId, .Scratchpad_Target_Class,
+         .Scratchpad_Target_Instance, .Scratchpad_Target_Title:
+        field := c.Scratchpad_Match_Field.Class
+        #partial switch cmd.action {
+        case .Scratchpad_Target_AppId: field = .AppId
+        case .Scratchpad_Target_Class: field = .Class
+        case .Scratchpad_Target_Instance: field = .Instance
+        case .Scratchpad_Target_Title: field = .Title
+        case: return
+        }
+        old_focus := g_wm.m.Focused
+        count, changed := c.Scratchpad_Toggle_Target(g_wm.m, field, cmd.text, cmd.flag)
+        if count == 0 && cmd.spawn != "" {
+            spawn_sh(cmd.spawn)
+        } else if changed {
+            raise_focused()
+            reflow()
+            ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, g_wm.m.Focused)
+            ipc_broadcast_focus_change(old_focus, g_wm.m.Focused)
+        }
+        return
     case .Show_Bindings:     b.action = .Show_Bindings
     case .Focus_Output_Next: b.action = .Focus_Output_Next
     case .Focus_Output_Prev: b.action = .Focus_Output_Prev

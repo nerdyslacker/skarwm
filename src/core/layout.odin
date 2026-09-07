@@ -302,4 +302,12 @@ Arrange_All :: proc(m: ^Manager) {
             d.Border = 0
         }
     }
+    // Scratchpads are workspace-less while hidden, so no output layout pass
+    // above sees them. Keep them mapped but safely outside the root geometry.
+    for cl in m.Clients {
+        if cl.Stashed {
+            cl.Geom = Rect { X = HIDE_X, Y = 0, W = max(cl.Geom.W, i32(1)), H = max(cl.Geom.H, i32(1)) }
+            cl.Border = m.Cfg.BorderWidth
+        }
+    }
 }

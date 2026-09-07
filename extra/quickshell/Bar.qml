@@ -39,7 +39,7 @@ PanelWindow {
             readonly property real gapR: rightCluster.x - 24
             width: Math.max(0, Math.min(implicitWidth, gapR - gapL))
             x: Math.max(gapL, Math.min((parent.width - width) / 2, gapR - width))
-            visible: width > 40
+            visible: hasScratchpads || width > 40
         }
 
         Row {

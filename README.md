@@ -12,7 +12,7 @@ notifications, and compositing to external programs.
 Implemented features include dynamic workspaces, two-columns-per-view layout,
 viewport scrolling, stacked and tabbed columns, RandR multi-monitor support,
 independent workspaces per monitor, cross-monitor window movement,
-floating/fullscreen windows, atomic rc reloads, window rules, EWMH/ICCCM
+floating/fullscreen windows, native scratchpads, atomic rc reloads, window rules, EWMH/ICCCM
 interoperability, dock struts, and a nonblocking Unix-socket IPC interface.
 
 > **Note:** skarwm was developed with the assistance of AI as a project for
@@ -266,6 +266,9 @@ Default interaction highlights:
   horizontal columns;
 - `Super+/`: show or hide an overlay containing every currently configured
   skarwm keybinding;
+- `Super+grave`: assign/toggle scratchpad register 1;
+- `Super+Shift+grave`: assign/toggle floating scratchpad register 2;
+- `Super+Control+grave`: remove scratchpad register 1;
 - `Super+Shift+Return`: run the `Super+Return` command as a new tab when a
   tabbed column is focused;
 - `Super`+wheel up/down: scroll the window strip left/right by one column;
@@ -296,6 +299,38 @@ defines the shifted combination explicitly, that explicit binding takes
 precedence. The placement request expires after ten seconds and applies only
 to the next top-level window, so a failed launcher cannot capture unrelated
 windows indefinitely.
+
+### Scratchpads
+
+skarwm has native, session-only scratchpad registers. No helper daemon or
+visible `stash` workspace is needed: hidden windows stay managed but are
+removed from the tiled layout and parked off-screen. A first toggle assigns the
+focused window; later toggles hide it or summon it onto the currently focused
+workspace and monitor:
+
+```text
+call : mod + grave : scratchpad_toggle 1
+call : mod + Shift + grave : scratchpad_toggle_float 2
+call : mod + Control + grave : scratchpad_remove 1
+```
+
+The example configurations include those bindings. Registers disappear when
+skarwm exits, and closing a registered application clears its registrations.
+The IPC also supports exact-match static groups by X11 app ID (`WM_CLASS`),
+class, instance, or title:
+
+```sh
+skarwm-msg scratchpad target appid kitty
+skarwm-msg scratchpad target title "Music Player"
+skarwm-msg scratchpad target-float class Pavucontrol
+skarwm-msg scratchpad target appid kitty --spawn kitty
+```
+
+When any matching window is hidden, a target command summons all matches;
+otherwise it hides all matches. An optional `--spawn COMMAND` starts the app
+when no window matches. `get-windows` exposes `scratchpad` and
+`scratchpad_register` state. See [docs/IPC.md](docs/IPC.md) for the full command
+reference.
 
 RandR 1.5 monitor objects are discovered at startup and rescanned after screen,
 CRTC, output, and resource changes. Each monitor keeps its own current

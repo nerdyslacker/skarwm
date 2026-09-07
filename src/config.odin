@@ -29,7 +29,7 @@ package main
 //     are accepted and ignored; an unknown setting logs one warning.
 //   - directives:
 //       bind       : <combo> : "<command>"
-//       call       : <combo> : <action>
+//       call       : <combo> : <action> [integer argument]
 //       workspace  : <combo> : view <N>      (switch to N)
 //       workspace  : <combo> : tag <N>       (move focused window to N)
 //       rule       : <class|instance|title> : <pattern> : <effects…>
@@ -318,6 +318,21 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: Binding, err: strin
     case "layout_stacked",
          "stacked":          base.action = .Layout_Stacked;    return base, ""
     case "toggle_tabbed":    base.action = .Layout_Toggle;     return base, ""
+    case "scratchpad_toggle", "scratchpad":
+        if rb.argk != .Num || rb.argi < 0 {
+            return {}, fmt.aprintf("bind(%q): scratchpad register must be >= 0", rb.combo)
+        }
+        base.action = .Scratchpad_Toggle; base.arg = rb.argi; return base, ""
+    case "scratchpad_toggle_float":
+        if rb.argk != .Num || rb.argi < 0 {
+            return {}, fmt.aprintf("bind(%q): scratchpad register must be >= 0", rb.combo)
+        }
+        base.action = .Scratchpad_Toggle_Float; base.arg = rb.argi; return base, ""
+    case "scratchpad_remove":
+        if rb.argk != .Num || rb.argi < 0 {
+            return {}, fmt.aprintf("bind(%q): scratchpad register must be >= 0", rb.combo)
+        }
+        base.action = .Scratchpad_Remove; base.arg = rb.argi; return base, ""
     case "show_bindings",
          "bindings_help":    base.action = .Show_Bindings;     return base, ""
     case "close_window",
@@ -547,12 +562,24 @@ parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]st
             rb.args = strings.clone(cmd)
         case "call":
             act := quoted_trim(tail)
-            if strings.contains(act, " ") {
-                append(errs, fmt.aprintf("call(%q): action must be a single token, got %q", combo, tail))
+            toks := split_ws(act)
+            defer delete(toks)
+            if len(toks) < 1 || len(toks) > 2 {
+                append(errs, fmt.aprintf("call(%q): expected an action and optional number, got %q", combo, tail))
                 free_bind(&rb)
                 return false
             }
-            rb.action = strings.clone(act)
+            rb.action = strings.clone(toks[0])
+            if len(toks) == 2 {
+                n, ok := parse_i32_value(toks[1])
+                if !ok || n < 0 {
+                    append(errs, fmt.aprintf("call(%q): bad numeric argument %q", combo, toks[1]))
+                    free_bind(&rb)
+                    return false
+                }
+                rb.argk = .Num
+                rb.argi = int(n)
+            }
         case "workspace":
             // tail = "view N" | "tag N"
             toks := split_ws(tail)
@@ -846,6 +873,9 @@ cfg_apply_default :: proc() {
     add_bind_def(sc, "Mod4+f", "togglefullscreen", "")
     add_bind_def(sc, "Mod4+t", "toggle_tabbed", "")
     add_bind_def(sc, "Mod4+slash", "show_bindings", "")
+    add_bind_def(sc, "Mod4+grave", "scratchpad_toggle", "", 1)
+    add_bind_def(sc, "Mod4+Shift+grave", "scratchpad_toggle_float", "", 2)
+    add_bind_def(sc, "Mod4+Control+grave", "scratchpad_remove", "", 1)
     add_bind_def(sc, "Mod4+Shift+q", "close_window", "")
     add_bind_def(sc, "Mod4+Shift+r", "reload_config", "")
 

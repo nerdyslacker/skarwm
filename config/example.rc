@@ -46,6 +46,7 @@ autostart : "xsetroot -solid '#202020'"
 # Action tokens: focusleft/right/up/down moveleft/right/up/down ws_up ws_down
 # ws_next ws_prev togglefloating togglefullscreen layout_tabbed layout_stacked
 # toggle_tabbed show_bindings focus_output_next/prev move_to_output_next/prev
+# scratchpad_toggle N scratchpad_toggle_float N scratchpad_remove N
 # close_window reload_config quit.
 
 call : mod + h : focusleft
@@ -68,6 +69,13 @@ call : mod + slash : show_bindings
 # Toggling tabs off splits them back into separate horizontal columns.
 call : mod + Shift + q : close_window
 call : mod + Shift + r : reload_config
+
+# Numbered scratchpads are session-only. The first toggle assigns the focused
+# window without moving it; later toggles hide it or summon it onto the active
+# workspace/monitor. The floating variant also makes it a floating window.
+call : mod + grave : scratchpad_toggle 1
+call : mod + Shift + grave : scratchpad_toggle_float 2
+call : mod + Control + grave : scratchpad_remove 1
 
 call : mod + n : ws_next
 call : mod + p : ws_prev

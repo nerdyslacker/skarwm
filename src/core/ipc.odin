@@ -60,6 +60,9 @@ Ipc_Action :: enum {
     Move_To_Workspace, Move_To_Workspace_Next, Move_To_Workspace_Prev,
     Toggle_Floating, Toggle_Fullscreen,
     Layout_Tabbed, Layout_Stacked, Layout_Toggle,
+    Scratchpad_Toggle, Scratchpad_Toggle_Float, Scratchpad_Remove,
+    Scratchpad_Target_AppId, Scratchpad_Target_Class,
+    Scratchpad_Target_Instance, Scratchpad_Target_Title,
     Show_Bindings,
     Focus_Output_Next, Focus_Output_Prev,
     Move_To_Output_Next, Move_To_Output_Prev,
@@ -69,6 +72,9 @@ Ipc_Action :: enum {
 Ipc_Command :: struct {
     action: Ipc_Action,
     arg:    int,
+    text:   string, // non-owning view into the request payload during dispatch
+    spawn:  string, // optional non-owning command for an unmatched target
+    flag:   bool,   // optional command modifier (currently target as floating)
 }
 
 // A decoded request frame. payload is an owned copy (delete it after use, and
@@ -392,6 +398,32 @@ ipc_window_entry :: proc(sb: ^strings.Builder, m: ^Manager, cl: ^Client) {
     json_bool(sb, cl.Floating)
     strings.write_string(sb, `,"fullscreen":`)
     json_bool(sb, cl.Fullscreen)
+    strings.write_string(sb, `,"scratchpad":`)
+    json_bool(sb, cl.Stashed)
+    strings.write_string(sb, `,"scratchpad_register":`)
+    if number, registered := Scratchpad_Register_Of(m, cl); registered {
+        strings.write_int(sb, number)
+    } else {
+        strings.write_string(sb, "null")
+    }
+    strings.write_string(sb, `,"scratchpad_registers":[`)
+    registers := make([dynamic]int, 0, 2)
+    for number, registered in m.Scratchpad_Registers {
+        if registered != cl { continue }
+        insert := len(registers)
+        append(&registers, number)
+        for insert > 0 && registers[insert - 1] > number {
+            registers[insert] = registers[insert - 1]
+            insert -= 1
+        }
+        registers[insert] = number
+    }
+    for number, i in registers {
+        if i > 0 { strings.write_string(sb, ",") }
+        strings.write_int(sb, number)
+    }
+    delete(registers)
+    strings.write_string(sb, "]")
     strings.write_string(sb, `,"urgent":`)
     json_bool(sb, cl.Urgent)
     ci, col, row := column_of(cl.Ws, cl)
@@ -550,6 +582,8 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
     // tokenize on whitespace
     tokens: [dynamic]string
     defer delete(tokens)
+    starts: [dynamic]int
+    defer delete(starts)
     p := 0
     for p < n {
         for p < n && is_json_ws(data[p]) { p += 1 }
@@ -557,6 +591,7 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
         start := p
         for p < n && !is_json_ws(data[p]) { p += 1 }
         append(&tokens, string(data[start:p]))
+        append(&starts, start)
     }
 
     if len(tokens) == 2 {
@@ -609,6 +644,61 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
         case "tabbed":           return Ipc_Command{action = .Layout_Tabbed}, "", true
         case "stacked", "stacking": return Ipc_Command{action = .Layout_Stacked}, "", true
         case "toggle":           return Ipc_Command{action = .Layout_Toggle}, "", true
+        }
+    }
+
+    if len(tokens) == 3 && tokens[0] == "scratchpad" {
+        register := 0
+        valid := true
+        for ch in tokens[2] {
+            if ch < '0' || ch > '9' { valid = false; break }
+            register = register * 10 + int(ch - '0')
+            if register > IPC_MAX_WORKSPACE_ID { valid = false; break }
+        }
+        if valid {
+            switch tokens[1] {
+            case "toggle": return Ipc_Command{action = .Scratchpad_Toggle, arg = register}, "", true
+            case "toggle-float": return Ipc_Command{action = .Scratchpad_Toggle_Float, arg = register}, "", true
+            case "remove", "delete": return Ipc_Command{action = .Scratchpad_Remove, arg = register}, "", true
+            }
+        }
+    }
+
+    // Metadata targets use exact matching. The value is the untouched request
+    // tail, so titles containing spaces do not require special IPC quoting.
+    if len(tokens) >= 4 && tokens[0] == "scratchpad" &&
+       (tokens[1] == "target" || tokens[1] == "target-float") {
+        action: Ipc_Action
+        switch tokens[2] {
+        case "appid":    action = .Scratchpad_Target_AppId
+        case "class":    action = .Scratchpad_Target_Class
+        case "instance": action = .Scratchpad_Target_Instance
+        case "title":    action = .Scratchpad_Target_Title
+        }
+        if action != .Invalid {
+            end := n
+            for end > starts[3] && is_json_ws(data[end - 1]) { end -= 1 }
+            spawn := ""
+            value_end := end
+            for i in 4 ..< len(tokens) {
+                if tokens[i] != "--spawn" { continue }
+                if i + 1 >= len(tokens) {
+                    return {}, strings.clone("scratchpad target: --spawn needs a command"), false
+                }
+                value_end = starts[i]
+                for value_end > starts[3] && is_json_ws(data[value_end - 1]) { value_end -= 1 }
+                spawn = string(data[starts[i + 1]:end])
+                break
+            }
+            if value_end <= starts[3] {
+                return {}, strings.clone("scratchpad target: empty match value"), false
+            }
+            return Ipc_Command{
+                action = action,
+                text = string(data[starts[3]:value_end]),
+                spawn = spawn,
+                flag = tokens[1] == "target-float",
+            }, "", true
         }
     }
 

@@ -16,6 +16,8 @@ usage :: proc() {
     fmt.eprintln("events:  subscribe [workspace] [window] [output]")
     fmt.eprintln("actions: focus DIR | move DIR | workspace N|next|prev | move workspace N")
     fmt.eprintln("         layout tabbed|stacked|toggle | toggle-tabbed | show-bindings")
+    fmt.eprintln("         scratchpad toggle|toggle-float|remove N")
+    fmt.eprintln("         scratchpad target|target-float FIELD VALUE [--spawn COMMAND]")
     fmt.eprintln("         focus output next|prev | move output next|prev")
     fmt.eprintln("         close | reload | quit | toggle-floating | toggle-fullscreen")
 }

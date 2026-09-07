@@ -7,7 +7,8 @@ skarwm through its IPC client.
 
 The bar includes:
 
-- application launcher, workspace tags, and focused-window title;
+- application launcher, workspace tags, focused-window title, and a
+  scratchpad-register popup that appears beside the title when needed;
 - media, weather, CPU/RAM/disk/battery metrics, volume, and network state;
 - Void Linux update count, system tray, notifications, clock and calendar;
 - microphone mute, Caps Lock, screenshots, power controls, and a quick-command
@@ -72,6 +73,10 @@ The calendar reads renCal's configured Caldir path automatically. Set
 Left-click the clock for the month calendar and upcoming events. Clicking an
 event or a highlighted day opens that event in renCal; right-clicking the clock
 opens renCal directly.
+
+When skarwm has one or more numbered scratchpad registrations, a terminal icon
+appears beside the focused-window title. Click it to see the registered windows
+and their hidden/workspace state; clicking a row toggles that scratchpad.
 
 Put `.png`, `.jpg`, `.jpeg`, or `.webp` images in
 `~/.config/skarwm/wallpaper/`.
