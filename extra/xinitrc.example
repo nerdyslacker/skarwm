@@ -1,6 +1,5 @@
 #!/bin/sh
 
-# Optional session programs can instead be declared with `autostart` in
-# ~/.config/skarwm/config.rc.
-exec skarwm
-
+# skarwm-session resolves SKARWM_CONFIG, SKARWM_EXTRA_DIR, and writable state
+# before starting the WM. Session programs can be declared with `autostart`.
+exec skarwm-session

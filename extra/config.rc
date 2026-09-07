@@ -39,13 +39,13 @@ bind : mod + Return : "kitty"
 # puts its next window in that tab group. An explicit shifted binding overrides
 # this generated behavior.
 
-# autostart: run once at startup (not re-run on reload). These paths match the
-# per-user tree installed by `make install-extra`.
+# autostart: run once at startup (not re-run on reload). SKARWM_EXTRA_DIR can
+# point at either a per-user tree or packaged files under /usr/share.
 autostart : "lxqt-policykit-agent"
-autostart : "feh --bg-fill ~/.config/skarwm/wallpaper/default.jpeg"
-autostart : "dunst -config ~/.config/skarwm/dunst/dunstrc"
-autostart : "picom --config ~/.config/skarwm/picom/picom.conf -b"
-autostart : "qs -p ~/.config/skarwm/quickshell"
+autostart : "feh --bg-fill ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/wallpaper/default.jpeg"
+autostart : "dunst -config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/dunst/dunstrc"
+autostart : "picom --config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/picom/picom.conf -b"
+autostart : "qs -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell"
 autostart : "xss-lock -- betterlockscreen -l"
 autostart : "udiskie --smart-tray"
 
@@ -53,6 +53,7 @@ autostart : "udiskie --smart-tray"
 # Action tokens: focusleft/right/up/down moveleft/right/up/down ws_up ws_down
 # ws_next ws_prev togglefloating togglefullscreen layout_tabbed layout_stacked
 # toggle_tabbed show_bindings focus_output_next/prev move_to_output_next/prev
+# scratchpad_toggle N scratchpad_toggle_float N scratchpad_remove N
 # close_window reload_config quit.
 
 call : mod + h : focusleft
@@ -75,6 +76,12 @@ call : mod + slash : show_bindings
 # Toggling tabs off splits them back into separate horizontal columns.
 call : mod + Shift + q : close_window
 call : mod + Shift + r : reload_config
+
+# The first toggle assigns the focused window to a session-only register;
+# later toggles hide it or summon it on the active workspace and monitor.
+call : mod + grave : scratchpad_toggle 1
+call : mod + Shift + grave : scratchpad_toggle_float 2
+call : mod + Control + grave : scratchpad_remove 1
 
 call : mod + n : ws_next
 call : mod + p : ws_prev

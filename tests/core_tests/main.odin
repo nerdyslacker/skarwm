@@ -53,6 +53,7 @@ main :: proc() {
     test_two_columns_fit()
     test_arrange_hidden()
     test_move_to_ws()
+    test_scratchpads()
     test_dock_model()
     test_dock_geometry_and_struts()
     test_dock_sticky()
@@ -699,6 +700,52 @@ test_move_to_ws :: proc() {
     ok(ws2.Focus == a, "ws2 focus is a")
 }
 
+test_scratchpads :: proc() {
+    m := ipc_mk_man()
+    defer c.Destroy_Manager(m)
+    ws1 := c.Current_WS(m)
+    a := add_tiled(m, 70)
+    b := add_tiled(m, 71)
+
+    ok(c.Scratchpad_Toggle_Register(m, 1), "first toggle assigns focused window")
+    reg, registered := c.Scratchpad_Register_Of(m, b)
+    ok(registered && reg == 1, "focused client is stored in register")
+    ok(!b.Stashed && b.Ws == ws1, "registering does not immediately hide the client")
+
+    ok(c.Scratchpad_Toggle_Register(m, 1), "second toggle stashes register")
+    ok(b.Stashed && b.Ws == nil, "stashed client is detached from workspace")
+    eq(len(ws1.Cols), 1, "stashed client no longer consumes a tile")
+    eq(m.Focused, a, "stashing chooses workspace fallback focus")
+    c.Arrange_All(m)
+    eq(b.Geom.X, c.HIDE_X, "stashed client is parked off-screen")
+
+    c.Switch_WS_Id(m, 2)
+    ok(c.Scratchpad_Toggle_Register(m, 1), "hidden register summons on active workspace")
+    ok(!b.Stashed && b.Ws == c.Current_WS(m), "summoned client follows active workspace")
+    eq(m.Focused, b, "summoned client receives focus")
+
+    ok(c.Scratchpad_Toggle_Register(m, 2, true), "floating register can be assigned")
+    ok(b.Floating, "toggle-float changes assigned client to floating")
+    scratchpad_json := c.ipc_windows_payload(m)
+    ok(strings.contains(string(scratchpad_json), `"scratchpad_registers":[1,2]`),
+        "window IPC lists every register in numeric order")
+    delete(scratchpad_json)
+    ok(c.Scratchpad_Remove_Register(m, 1), "remove forgets register")
+    _, registered = c.Scratchpad_Register_Of(m, b)
+    ok(registered, "another register for the same client remains")
+
+    b.Class = strings.clone("Term")
+    count, changed := c.Scratchpad_Toggle_Target(m, .Class, "Term")
+    ok(count == 1 && changed && b.Stashed, "metadata target stashes exact matches")
+    count, changed = c.Scratchpad_Toggle_Target(m, .AppId, "Term")
+    ok(count == 1 && changed && !b.Stashed, "appid target summons class/instance match")
+
+    c.Unmanage_Client(m, b)
+    _, registered = c.Scratchpad_Register_Of(m, b)
+    ok(!registered, "unmanage clears every register pointing at the client")
+    c.Free_Client(b)
+}
+
 // ----------------------------------------------------------------------------
 // docks (output-level panels) — model invariants
 // ----------------------------------------------------------------------------
@@ -1072,7 +1119,7 @@ test_ipc_windows_payload :: proc() {
     defer delete(pl)
     eq(string(pl), `{"version":1,"windows":[{"id":42,"title":"A \"quoted\" title",` +
         `"class":"XTerm","instance":"xterm","workspace":1,"output":"eDP-1","focused":true,` +
-        `"floating":false,"fullscreen":false,"urgent":false,"column":0,` +
+        `"floating":false,"fullscreen":false,"scratchpad":false,"scratchpad_register":null,"scratchpad_registers":[],"urgent":false,"column":0,` +
         `"column_layout":"stacked","tab_index":0,"tab_count":1,"tab_active":false,"dock":false,` +
         `"rect":{"x":10,"y":20,"width":800,"height":600}}]}`,
         "GET_WINDOWS exposes metadata, state and geometry")
@@ -1185,6 +1232,21 @@ test_ipc_parse_command :: proc() {
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`show-bindings`))
     ok(fine && cmd.action == .Show_Bindings, "show-bindings parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad toggle 7`))
+    ok(fine && cmd.action == .Scratchpad_Toggle && cmd.arg == 7, "scratchpad register toggle parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad toggle-float 2`))
+    ok(fine && cmd.action == .Scratchpad_Toggle_Float && cmd.arg == 2, "floating scratchpad toggle parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad remove 2`))
+    ok(fine && cmd.action == .Scratchpad_Remove && cmd.arg == 2, "scratchpad remove parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad target title Music Player`))
+    ok(fine && cmd.action == .Scratchpad_Target_Title && cmd.text == "Music Player", "scratchpad title target preserves spaces")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad target title Music Player --spawn kitty --class music`))
+    ok(fine && cmd.text == "Music Player" && cmd.spawn == "kitty --class music", "scratchpad target preserves match and spawn command")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`focus output next`))
     ok(fine && cmd.action == .Focus_Output_Next, "focus output next parsed")

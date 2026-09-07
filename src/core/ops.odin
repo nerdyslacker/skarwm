@@ -430,6 +430,144 @@ remove_floater :: proc(ws: ^Workspace, cl: ^Client) {
     }
 }
 
+// detach_from_workspace removes a client from layout membership without
+// unregistering or freeing it. It is shared by scratchpad stash/summon paths.
+detach_from_workspace :: proc(m: ^Manager, cl: ^Client) -> ^Workspace {
+    if cl == nil || cl.Ws == nil { return nil }
+    ws := cl.Ws
+    if cl.Floating {
+        remove_floater(ws, cl)
+    } else {
+        ci, col, row := column_of(ws, cl)
+        if col != nil {
+            if col.Focus == cl { col.Focus = in_column_focus_after_removal(col, row) }
+            ordered_remove(&col.Wins, row)
+            if len(col.Wins) == 0 { detach_column_empty(ws, ci) }
+        }
+    }
+    if ws.Focus == cl { ws.Focus = fallback_focus_for_ws(ws) }
+    cl.Ws = nil
+    if m.Focused == cl { Sync_Focus(m) }
+    return ws
+}
+
+// Stash_Client hides a normal client without unmanaging it. Floating state and
+// geometry are preserved so a summoned scratchpad returns in the same mode.
+Stash_Client :: proc(m: ^Manager, cl: ^Client) -> bool {
+    if cl == nil || cl.Dock || cl.Stashed || cl.Ws == nil { return false }
+    cl.Fullscreen = false
+    detach_from_workspace(m, cl)
+    cl.Stashed = true
+    return true
+}
+
+// Summon_Client moves a managed client to the active output's current
+// workspace and focuses it. It also handles registered windows that are still
+// visible on a different workspace or monitor.
+Summon_Client :: proc(m: ^Manager, cl: ^Client, as_float: bool = false) -> bool {
+    ws := Current_WS(m)
+    o := Active_Output(m)
+    if cl == nil || cl.Dock || ws == nil || o == nil { return false }
+    if cl.Ws == ws && !cl.Stashed {
+        if as_float { Set_Floating(m, cl, true) }
+        Focus_Client(m, cl)
+        return true
+    }
+    if cl.Ws != nil { detach_from_workspace(m, cl) }
+    cl.Stashed = false
+    cl.Out = o
+    cl.Fullscreen = false
+    if as_float { cl.Floating = true }
+    if cl.Floating {
+        if rect_empty(cl.FloatingRect) {
+            p := compute_params(m.Cfg, o.Geom, 0, o.Reserved)
+            cl.FloatingRect = default_float_rect(p, o.Geom)
+        }
+        append(&ws.Floaters, cl)
+        cl.Ws = ws
+        ws.Focus = cl
+        m.Focused = cl
+    } else {
+        attach_new_window(m, ws, cl)
+    }
+    return true
+}
+
+// Scratchpad_Toggle_Register assigns an unused register to the focused window.
+// Later calls hide it when it is on the active workspace, or summon it from a
+// stash/other workspace. Registers deliberately live only for this WM session.
+Scratchpad_Toggle_Register :: proc(m: ^Manager, number: int, as_float: bool = false) -> bool {
+    if number < 0 { return false }
+    cl, found := m.Scratchpad_Registers[number]
+    if !found || cl == nil {
+        cl = m.Focused
+        if cl == nil || cl.Dock { return false }
+        m.Scratchpad_Registers[number] = cl
+        if as_float { Set_Floating(m, cl, true) }
+        return true
+    }
+    if cl.Stashed || cl.Ws != Current_WS(m) {
+        return Summon_Client(m, cl, as_float)
+    }
+    return Stash_Client(m, cl)
+}
+
+// Scratchpad_Remove_Register forgets a register and restores its client to the
+// active workspace when it was hidden.
+Scratchpad_Remove_Register :: proc(m: ^Manager, number: int) -> bool {
+    cl, found := m.Scratchpad_Registers[number]
+    if !found { return false }
+    delete_key(&m.Scratchpad_Registers, number)
+    if cl != nil && (cl.Stashed || cl.Ws != Current_WS(m)) {
+        return Summon_Client(m, cl)
+    }
+    return true
+}
+
+Scratchpad_Register_Of :: proc(m: ^Manager, cl: ^Client) -> (int, bool) {
+    if cl == nil { return 0, false }
+    for number, registered in m.Scratchpad_Registers {
+        if registered == cl { return number, true }
+    }
+    return 0, false
+}
+
+Scratchpad_Match_Field :: enum { AppId, Class, Instance, Title }
+
+scratchpad_matches :: proc(cl: ^Client, field: Scratchpad_Match_Field, value: string) -> bool {
+    if cl == nil || cl.Dock { return false }
+    #partial switch field {
+    case .AppId:    return cl.Class == value || cl.Instance == value
+    case .Class:    return cl.Class == value
+    case .Instance: return cl.Instance == value
+    case .Title:    return cl.Title == value
+    }
+    return false
+}
+
+// Scratchpad_Toggle_Target toggles every exact metadata match as a group. If
+// any match is stashed, all are summoned; otherwise all are stashed.
+Scratchpad_Toggle_Target :: proc(m: ^Manager, field: Scratchpad_Match_Field, value: string, as_float: bool = false) -> (count: int, changed: bool) {
+    summon := false
+    for cl in m.Clients {
+        if scratchpad_matches(cl, field, value) {
+            count += 1
+            summon = summon || cl.Stashed
+        }
+    }
+    if count == 0 { return 0, false }
+    for cl in m.Clients {
+        if !scratchpad_matches(cl, field, value) { continue }
+        if summon {
+            changed = Summon_Client(m, cl, as_float) || changed
+        } else {
+            if as_float && cl.Ws != nil { Set_Floating(m, cl, true) }
+            changed = Stash_Client(m, cl) || changed
+        }
+    }
+    return
+}
+
 // ----------------------------------------------------------------------------
 // Floating / fullscreen
 // ----------------------------------------------------------------------------
@@ -602,6 +740,9 @@ Unmanage_Client :: proc(m: ^Manager, cl: ^Client) -> ^Client {
         }
     }
     delete_key(&m.ByXid, cl.Xid)
+    for number, registered in m.Scratchpad_Registers {
+        if registered == cl { delete_key(&m.Scratchpad_Registers, number) }
+    }
 
     cur := Current_WS(m)
     if cur == nil {

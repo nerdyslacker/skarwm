@@ -10,19 +10,11 @@ Singleton {
 
     property var workspaces: []
     property var windows: []
+    property var registeredScratchpads: []
     property int tagCount: 12
     property string title: ""
     property string activeWinId: ""
     readonly property string msgPath: "skarwm-msg"
-
-    function openLauncher() {
-        Quickshell.execDetached(["rofi", "-show", "drun", "-modi", "drun",
-            "-show-icons", "-theme", Theme.configDir + "/rofi/config.rasi"])
-    }
-
-    function openPowerMenu() {
-        Quickshell.execDetached([Theme.configDir + "/scripts/power"])
-    }
 
     function workspaceAt(index) {
         const id = index + 1
@@ -75,9 +67,29 @@ Singleton {
             if (!value || !Array.isArray(value.windows)) return
             windows = value.windows
             let focused = null
+            const scratchpads = []
             for (const win of windows) {
                 if (win.focused && !win.dock) { focused = win; break }
             }
+            for (const win of windows) {
+                const registers = Array.isArray(win.scratchpad_registers)
+                    ? win.scratchpad_registers
+                    : win.scratchpad_register === null || win.scratchpad_register === undefined
+                        ? [] : [win.scratchpad_register]
+                for (const register of registers) {
+                    scratchpads.push({
+                        register: Number(register),
+                        id: win.id,
+                        title: win.title || win.class || win.instance || "Untitled window",
+                        className: win.class || win.instance || "",
+                        hidden: win.scratchpad === true,
+                        workspace: win.workspace,
+                        output: win.output
+                    })
+                }
+            }
+            scratchpads.sort((a, b) => a.register - b.register)
+            registeredScratchpads = scratchpads
             activeWinId = focused ? "0x" + Number(focused.id).toString(16) : ""
             title = focused ? focused.title : ""
         } catch (e) {
@@ -124,5 +136,8 @@ Singleton {
     }
     function cycleTag(direction) {
         Quickshell.execDetached([msgPath, "workspace", direction > 0 ? "next" : "prev"])
+    }
+    function toggleScratchpad(register) {
+        Quickshell.execDetached([msgPath, "scratchpad", "toggle", String(register)])
     }
 }

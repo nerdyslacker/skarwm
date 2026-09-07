@@ -481,6 +481,7 @@ Action_Kind :: enum u8 {
     Toggle_Floating,
     Toggle_Fullscreen,
     Layout_Tabbed, Layout_Stacked, Layout_Toggle,
+    Scratchpad_Toggle, Scratchpad_Toggle_Float, Scratchpad_Remove,
     Show_Bindings,
     Close,
     Reload, // re-run the configuration loader
@@ -554,6 +555,18 @@ dispatch_action :: proc(b: ^Binding) {
         }
     case .Layout_Toggle:
         if c.Toggle_Column_Layout(m) {
+            reflow()
+            ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
+        }
+    case .Scratchpad_Toggle, .Scratchpad_Toggle_Float:
+        if c.Scratchpad_Toggle_Register(m, b.arg, b.action == .Scratchpad_Toggle_Float) {
+            raise_focused()
+            reflow()
+            ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
+        }
+    case .Scratchpad_Remove:
+        if c.Scratchpad_Remove_Register(m, b.arg) {
+            raise_focused()
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }

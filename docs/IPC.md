@@ -22,6 +22,11 @@ skarwm-msg toggle-fullscreen
 skarwm-msg layout tabbed|stacked|toggle
 skarwm-msg toggle-tabbed
 skarwm-msg show-bindings
+skarwm-msg scratchpad toggle N
+skarwm-msg scratchpad toggle-float N
+skarwm-msg scratchpad remove N
+skarwm-msg scratchpad target appid|class|instance|title VALUE [--spawn COMMAND]
+skarwm-msg scratchpad target-float appid|class|instance|title VALUE [--spawn COMMAND]
 skarwm-msg focus output next|prev
 skarwm-msg move output next|prev
 skarwm-msg close
@@ -31,6 +36,18 @@ skarwm-msg quit
 
 Commands return the i3-style JSON array `[{"success":true}]`. Invalid commands
 return a nonzero exit status and an error object.
+
+The first numbered `toggle` assigns the focused window to that session-only
+register. Further toggles hide it when it is on the active workspace, or summon
+and focus it on the active workspace/monitor from anywhere else. `toggle-float`
+also makes it floating. `remove` forgets the register and summons a hidden
+window before doing so.
+
+Metadata targets toggle every exact match as a group. `appid` matches either
+X11 `WM_CLASS` value (instance or class); the other fields select one value
+explicitly. If any match is hidden, all matches are summoned; otherwise all are
+hidden. `target-float` makes matches floating before hiding or summoning them.
+When no window matches, the optional command after `--spawn` is launched.
 
 ## Queries
 
@@ -47,8 +64,11 @@ empty workspace without fetching the window list. `get-windows` is skarwm
 extension type 100 and returns metadata, workspace membership, state, and the
 last arranged geometry for every managed client. Tiled clients also include
 `column`, `column_layout`, `tab_index`, `tab_count`, and `tab_active`;
-non-tiled clients use null/zero values. Type 101 reports protocol version
-information.
+non-tiled clients use null/zero values. The `scratchpad` boolean identifies a
+hidden client, `scratchpad_register` is one session register or null, and
+`scratchpad_registers` contains every register pointing at that client. The
+singular field is retained for simple consumers. Type 101 reports protocol
+version information.
 
 ## Events
 

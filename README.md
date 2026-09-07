@@ -12,7 +12,7 @@ notifications, and compositing to external programs.
 Implemented features include dynamic workspaces, two-columns-per-view layout,
 viewport scrolling, stacked and tabbed columns, RandR multi-monitor support,
 independent workspaces per monitor, cross-monitor window movement,
-floating/fullscreen windows, atomic rc reloads, window rules, EWMH/ICCCM
+floating/fullscreen windows, native scratchpads, atomic rc reloads, window rules, EWMH/ICCCM
 interoperability, dock struts, and a nonblocking Unix-socket IPC interface.
 
 > **Note:** skarwm was developed with the assistance of AI as a project for
@@ -27,9 +27,13 @@ Building requires:
 - libxcb and its RandR extension runtime/development files;
 - GNU Make and a normal C toolchain/linker.
 
-On Void Linux:
+Odin is available for Void through the Lazy Linux repository. Add the
+repository once, refresh its index, and install the build dependencies:
 
 ```sh
+printf '%s\n' 'repository=https://github.com/lazylinuxos/lazy-repo/releases/latest/download' \
+  | sudo tee /etc/xbps.d/99-repository-lazy.conf
+sudo xbps-install -S
 sudo xbps-install -S odin libxcb-devel make gcc
 ```
 
@@ -56,8 +60,11 @@ configuration under `extra/` uses:
 
 - Quickshell and a JetBrainsMono Nerd Font for the bar;
 - Picom for compositing and Dunst for notifications;
-- Rofi for application launching and Feh for wallpaper handling;
+- the native searchable Quickshell application launcher and Feh for wallpaper
+  handling (Rofi is only used by the optional weather settings helper);
 - Kitty as the configured terminal;
+- renCal for the full calendar interface and Python 3 for loading its local
+  events into the calendar popup;
 - `lxqt-policykit-agent` for graphical privilege prompts;
 - `xss-lock` and Betterlockscreen for screen locking;
 - Udiskie for removable-drive automounting and its tray item.
@@ -69,13 +76,17 @@ tools, BlueZ's `bluetoothctl`, `pactl`, `pavucontrol`, `curl`, `xdg-open`,
 `xinput` and `xdotool` provide the bar popup outside-click fallback. Missing
 optional tools only disable their corresponding widget action.
 
+renCal is available from the same Lazy Linux repository. The calendar widget
+continues to work without it, but omits its event list and keeps right-click
+equivalent to the normal clock click.
+
 On Void, install the available packages with XBPS; Betterlockscreen and a Nerd
 Font may need to be installed separately depending on the enabled repositories:
 
 ```sh
 sudo xbps-install -S quickshell picom dunst rofi feh kitty xss-lock \
   betterlockscreen udiskie lxqt-policykit NetworkManager bluez pavucontrol \
-  curl flameshot brightnessctl xterm xinput xdotool
+  curl flameshot brightnessctl python3 renCal xterm xinput xdotool
 ```
 
 ## Build
@@ -166,8 +177,25 @@ Quickshell bar and network panel, Picom, Dunst, Kitty, Polybar, Rofi, wallpaper,
 weather, helper scripts, and bar configuration into `~/.config/skarwm`.
 Existing files with the same names are replaced, so back up a customized
 configuration first. An alternative target directory can be selected with
-`SKARWM_CONFIG_DIR=/path`—the autostart paths in `config.rc` must also be
-adjusted when it is not `~/.config/skarwm`.
+`SKARWM_CONFIG_DIR=/path`.
+
+Packaged desktop files can instead be used directly without copying them into
+the home directory. `skarwm-session` automatically selects
+`/usr/share/skarwm/extra` when it exists. The same behavior can be configured
+explicitly:
+
+```sh
+export SKARWM_CONFIG=/usr/share/skarwm/extra/config.rc
+export SKARWM_EXTRA_DIR=/usr/share/skarwm/extra
+export SKARWM_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/skarwm"
+exec skarwm-session
+```
+
+`SKARWM_CONFIG` selects the WM rc file, `SKARWM_EXTRA_DIR` is the root used by
+the bundled autostarts, QML, and helper scripts, and `SKARWM_STATE_DIR` holds
+writable bar settings such as weather and Pomodoro state. The state directory
+defaults to the extra directory for a per-user install and to the XDG state
+directory when the extras come from `/usr/share`.
 
 The full rc starts:
 
@@ -219,9 +247,9 @@ Logging defaults to `INFO`. Set `SKARWM_LOG=debug`, `info`, `warn`, `error`, or
 
 ## Configuration
 
-The search order is `$XDG_CONFIG_HOME/skarwm/config.rc`, then
-`~/.config/skarwm/config.rc`; `skarwm -c FILE` overrides discovery. Reload is
-atomic: a malformed replacement is reported and the previous configuration
+The search order is `skarwm -c FILE`, `$SKARWM_CONFIG`,
+`$XDG_CONFIG_HOME/skarwm/config.rc`, then `~/.config/skarwm/config.rc`. Reload
+is atomic: a malformed replacement is reported and the previous configuration
 stays active. The fully commented [`config/example.rc`](config/example.rc)
 documents settings, key actions, workspace bindings, rules, and autostart.
 
@@ -238,6 +266,9 @@ Default interaction highlights:
   horizontal columns;
 - `Super+/`: show or hide an overlay containing every currently configured
   skarwm keybinding;
+- `Super+grave`: assign/toggle scratchpad register 1;
+- `Super+Shift+grave`: assign/toggle floating scratchpad register 2;
+- `Super+Control+grave`: remove scratchpad register 1;
 - `Super+Shift+Return`: run the `Super+Return` command as a new tab when a
   tabbed column is focused;
 - `Super`+wheel up/down: scroll the window strip left/right by one column;
@@ -268,6 +299,38 @@ defines the shifted combination explicitly, that explicit binding takes
 precedence. The placement request expires after ten seconds and applies only
 to the next top-level window, so a failed launcher cannot capture unrelated
 windows indefinitely.
+
+### Scratchpads
+
+skarwm has native, session-only scratchpad registers. No helper daemon or
+visible `stash` workspace is needed: hidden windows stay managed but are
+removed from the tiled layout and parked off-screen. A first toggle assigns the
+focused window; later toggles hide it or summon it onto the currently focused
+workspace and monitor:
+
+```text
+call : mod + grave : scratchpad_toggle 1
+call : mod + Shift + grave : scratchpad_toggle_float 2
+call : mod + Control + grave : scratchpad_remove 1
+```
+
+The example configurations include those bindings. Registers disappear when
+skarwm exits, and closing a registered application clears its registrations.
+The IPC also supports exact-match static groups by X11 app ID (`WM_CLASS`),
+class, instance, or title:
+
+```sh
+skarwm-msg scratchpad target appid kitty
+skarwm-msg scratchpad target title "Music Player"
+skarwm-msg scratchpad target-float class Pavucontrol
+skarwm-msg scratchpad target appid kitty --spawn kitty
+```
+
+When any matching window is hidden, a target command summons all matches;
+otherwise it hides all matches. An optional `--spawn COMMAND` starts the app
+when no window matches. `get-windows` exposes `scratchpad` and
+`scratchpad_register` state. See [docs/IPC.md](docs/IPC.md) for the full command
+reference.
 
 RandR 1.5 monitor objects are discovered at startup and rescanned after screen,
 CRTC, output, and resource changes. Each monitor keeps its own current

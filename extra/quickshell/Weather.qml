@@ -27,7 +27,7 @@ BarModule {
                                : Qt.locale().measurementSystem !== Locale.MetricSystem
 
     FileView {
-        path: Theme.configDir + "/weather-units"
+        path: Theme.stateDir + "/weather-units"
         watchChanges: true
         onFileChanged: reload()
         onLoaded: root.unitsOverride = text().trim().toLowerCase()
@@ -37,7 +37,7 @@ BarModule {
     // pin/unpin location → refetch right away instead of waiting 30 min
     // (deleting the file lands in loadFailed, so cover both paths)
     FileView {
-        path: Theme.configDir + "/weather-location"
+        path: Theme.stateDir + "/weather-location"
         watchChanges: true
         onFileChanged: {
             reload()
@@ -71,7 +71,7 @@ BarModule {
 
     onClicked: mouse => {
         if (mouse.button === Qt.RightButton)
-            Quickshell.execDetached(["xdg-open", "https://wttr.in"])
+            Quickshell.execDetached([Theme.configDir + "/scripts/weather"])
         else
             forecast.visible = !forecast.visible
     }
@@ -85,7 +85,7 @@ BarModule {
     Process {
         id: fetch
         command: ["sh", "-c",
-            "LOC=$(tr -d '\\n' < \"" + Theme.configDir + "/weather-location\" 2>/dev/null | tr ' ' '+'); " +
+            "LOC=$(tr -d '\\n' < \"" + Theme.stateDir + "/weather-location\" 2>/dev/null | tr ' ' '+'); " +
             "curl -sf -m 10 \"https://wttr.in/${LOC}?format=j1\""]
         running: true
         stdout: SplitParser {

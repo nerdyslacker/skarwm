@@ -765,6 +765,32 @@ else
   fail "ipc: workspace subscription ($(cat "$IPC_LOG" 2>/dev/null))"
 fi
 build/skarwm-msg workspace 1 >/dev/null 2>&1 || true
+
+# Numbered scratchpad: first call registers, second hides, third summons.
+build/skarwm-msg scratchpad toggle 1 >/dev/null 2>&1
+if build/skarwm-msg get-windows | grep -q '"scratchpad_register":1'; then
+  pass "ipc: scratchpad assigns the focused window to a register"
+else
+  fail "ipc: scratchpad register assignment"
+fi
+build/skarwm-msg scratchpad toggle 1 >/dev/null 2>&1
+if wait_hidden_x "$xt" && build/skarwm-msg get-windows | grep -q '"scratchpad":true'; then
+  pass "ipc: scratchpad hides without unmanaging the window"
+else
+  fail "ipc: scratchpad hide"
+fi
+build/skarwm-msg scratchpad toggle 1 >/dev/null 2>&1
+if wait_geom "$xt" "1260x780+10+10"; then
+  pass "ipc: scratchpad summons onto the active workspace"
+else
+  fail "ipc: scratchpad summon ($(geom_of "$xt"))"
+fi
+build/skarwm-msg scratchpad remove 1 >/dev/null 2>&1
+if build/skarwm-msg get-windows | grep -q '"scratchpad_register":null'; then
+  pass "ipc: scratchpad register removal"
+else
+  fail "ipc: scratchpad register removal"
+fi
 rm -f "$IPC_LOG"
 
 # ------------------------------------------------------------------------------

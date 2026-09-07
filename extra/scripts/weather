@@ -5,12 +5,15 @@
 # row: "location · …" resets to automatic (by IP), "units · …" opens the
 # °F/°C/auto picker. State is two plain live-watched files, so changes
 # apply instantly and `echo`/`rm` on the files work identically:
-#   ~/.config/skarwm/weather-location   (absent = auto by IP)
-#   ~/.config/skarwm/weather-units      "f" or "c" (absent = locale auto)
+#   $SKARWM_STATE_DIR/weather-location  (absent = auto by IP)
+#   $SKARWM_STATE_DIR/weather-units     "f" or "c" (absent = locale auto)
+# SKARWM_STATE_DIR defaults to the config root for per-user installations.
 
 CONFIG_DIR="$(dirname "$(dirname "$(readlink -f "$0")")")"
-LOC_FILE="$CONFIG_DIR/weather-location"
-UNITS_FILE="$CONFIG_DIR/weather-units"
+CONFIG_DIR=${SKARWM_EXTRA_DIR:-$CONFIG_DIR}
+STATE_DIR="${SKARWM_STATE_DIR:-$CONFIG_DIR}"
+LOC_FILE="$STATE_DIR/weather-location"
+UNITS_FILE="$STATE_DIR/weather-units"
 ROFI_THEME="$CONFIG_DIR/rofi/config.rasi"
 
 cur_loc=$(cat "$LOC_FILE" 2>/dev/null)

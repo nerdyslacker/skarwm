@@ -4,11 +4,14 @@ package core
 // plain u32. Membership is structural:
 //
 //   Manager
-//     └─ Outputs[]      Output            (one today; arch supports more)
+//     └─ Outputs[]      Output
 //          └─ Ws[]      Workspace         (dynamic, sorted by id, kept when empty)
 //               ├─ Cols[] Column
 //               │    └─ Wins[] Client     (vertical stack order: top → bottom)
 //               └─ Floaters[] Client      (windows not occupying a column slot)
+//
+// Hidden scratchpads remain in Manager.Clients/ByXid but are temporarily
+// detached from the output workspace containers shown above.
 //
 // All Workspace/Column/Client pointers are heap-stable (created with new() and
 // freed explicitly) so they may be cached in fields and containers freely.
@@ -39,8 +42,8 @@ Client :: struct {
     Instance: string, // WM_CLASS[0]
     Class:    string, // WM_CLASS[1]
 
-    Ws: ^Workspace, // owning workspace (stable)
-    Out: ^Output,   // owning output; also set for output-level docks
+    Ws: ^Workspace, // owning workspace (stable); nil for docks/scratchpads
+    Out: ^Output,   // owning/last output; also set for docks and scratchpads
 
     // Current display rectangle, computed by Arrange_All(); the X layer pushes
     // it to the server. (Named Geom, not Rect, so the field does not shadow the
@@ -60,6 +63,9 @@ Client :: struct {
     // has Ws == nil and lives in Output.Docks: never tiled, never focused,
     // never hidden on a workspace switch, kept above fullscreen windows.
     Dock: bool,
+    // Stashed scratchpads remain managed by X but are detached from every
+    // workspace and parked off-screen until summoned.
+    Stashed: bool,
     // Strut is the per-side screen-edge reservation (px) this client claims
     // via _NET_WM_STRUT[_PARTIAL]; the X layer fills it and Output.Reserved
     // unions it with the other docks.
@@ -117,6 +123,9 @@ Manager :: struct {
     Active:  int, // index of the focused output
     Clients: [dynamic]^Client, // every managed client, for bulk reconcile
     ByXid:   map[u32]^Client,
+    // Session-only numbered scratchpad registers. A registered client may be
+    // visible or stashed; closing it clears the corresponding entry.
+    Scratchpad_Registers: map[int]^Client,
     Focused: ^Client, // the client holding X input focus (mirror of active ws)
     Cfg:     Config,
 }
@@ -178,15 +187,18 @@ New_Manager :: proc() -> ^Manager {
     m.Outputs = make([dynamic]^Output, 0, 1)
     m.Clients = make([dynamic]^Client, 0, 32)
     m.ByXid = make(map[u32]^Client)
+    m.Scratchpad_Registers = make(map[int]^Client)
     return m
 }
 
 Destroy_Manager :: proc(m: ^Manager) {
-    // Every client lives in exactly one container; bulk-free via Clients list.
+    // The registry owns every client, including detached scratchpads.
     for cl in m.Clients do Free_Client(cl)
     delete(m.Clients)
     clear(&m.ByXid)
     delete(m.ByXid)
+    clear(&m.Scratchpad_Registers)
+    delete(m.Scratchpad_Registers)
     for o in m.Outputs do free_output(o)
     delete(m.Outputs)
     free(m)
@@ -360,6 +372,11 @@ Reconcile_Outputs :: proc(m: ^Manager, specs: []Output_Spec) -> bool {
 
     for old_o, oi in old {
         if used[oi] { continue }
+        // Hidden scratchpads are not members of old_o's workspaces, but keep
+        // an output pointer for metadata/restore purposes.
+        for cl in m.Clients {
+            if cl.Stashed && cl.Out == old_o { cl.Out = target }
+        }
         for ws in old_o.Ws {
             dst := Ensure_WS_On_Output(target, ws.Id)
             for col in ws.Cols {
