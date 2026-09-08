@@ -25,8 +25,8 @@ PanelWindow {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 4
 
-            Launcher {}
-            Tags {}
+            Launcher { visible: BarVisibility.enabled("launcher") }
+            Tags { visible: BarVisibility.enabled("tags") }
         }
 
         // Title lives in the gap between the clusters: screen-centered when
@@ -39,7 +39,8 @@ PanelWindow {
             readonly property real gapR: rightCluster.x - 24
             width: Math.max(0, Math.min(implicitWidth, gapR - gapL))
             x: Math.max(gapL, Math.min((parent.width - width) / 2, gapR - width))
-            visible: hasScratchpads || width > 40
+            visible: BarVisibility.enabled("title")
+                && (hasScratchpads || width > 40)
         }
 
         Row {
@@ -51,18 +52,19 @@ PanelWindow {
 
             Media {}
             Weather {}
-            Metrics {}
+            Metrics { visible: BarVisibility.enabled("metrics") }
             Battery {}
-            Brightness {}
-            Volume {}
-            Network {}
-            KeyboardLayout {}
-            Clipboard {}
+            Brightness { visible: BarVisibility.enabled("brightness") }
+            Volume { visible: BarVisibility.enabled("volume") }
+            MicMute {}
+            Network { visible: BarVisibility.enabled("network") }
+            KeyboardLayout { visible: BarVisibility.enabled("keyboard") }
+            Clipboard { visible: BarVisibility.enabled("clipboard") }
             Tray {}
             Bell {}
-            Clock {}
+            Clock { visible: BarVisibility.enabled("clock") }
             CapsLock {}
-            Screenshot {}
+            Screenshot { visible: BarVisibility.enabled("screenshot") }
             Commands {}
         }
     }

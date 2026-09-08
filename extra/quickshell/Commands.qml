@@ -31,8 +31,13 @@ BarModule {
     readonly property bool pomoRunning: pomoEndMs > 0
 
     onClicked: mouse => {
-        if (mouse.button !== Qt.LeftButton)
+        if (mouse.button === Qt.RightButton) {
+            menu.visible = false
+            barSettings.visible = !barSettings.visible
             return
+        }
+        if (mouse.button !== Qt.LeftButton) return
+        barSettings.visible = false
         pomoDone = false
         menu.visible = !menu.visible
     }
@@ -264,6 +269,11 @@ BarModule {
 
     NotifyPopup {
         id: notifHistory
+        anchorItem: root
+    }
+
+    BarSettingsPopup {
+        id: barSettings
         anchorItem: root
     }
 

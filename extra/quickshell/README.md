@@ -79,6 +79,7 @@ per-user install, or in `$SKARWM_STATE_DIR` when it is set:
 - `keyboard-layout.json` — layouts, aligned variants, and XKB options saved by
   the keyboard settings popup;
 - `tags.json` — visible tag count and number/dot display preference.
+- `bar-widgets.json` — enabled/disabled state for individual bar widgets.
 
 The keyboard module shows the active layout. Left-click it to select any
 configured layout; right-click it to search the system XKB language catalogue
@@ -117,7 +118,10 @@ controls for additional external displays.
 
 The rightmost command menu shows the current account name and avatar (from
 `~/.face` or AccountsService), followed by DND, pomodoro, and the session power
-buttons. Microphone mute is controlled from the audio popup's input section.
+buttons. Right-click the command module to choose which other widgets are
+visible on the bar. Microphone mute is controlled from the audio popup's input
+section; a compact warning appears beside Audio while the microphone is muted,
+and clicking it unmutes the input.
 
 The calendar reads renCal's configured Caldir path automatically. Set
 `CALDIR_DIR` only when you want to override that location.

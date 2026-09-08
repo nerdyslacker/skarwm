@@ -5,6 +5,7 @@ singleton KeyboardState KeyboardState.qml
 singleton ClipboardState ClipboardState.qml
 singleton TagConfig TagConfig.qml
 singleton LauncherState LauncherState.qml
+singleton BarVisibility BarVisibility.qml
 Bar Bar.qml
 BarModule BarModule.qml
 Tags Tags.qml
@@ -25,6 +26,7 @@ BatteryPopup BatteryPopup.qml
 Brightness Brightness.qml
 BrightnessPopup BrightnessPopup.qml
 Volume Volume.qml
+MicMute MicMute.qml
 AudioPopup AudioPopup.qml
 AudioSlider AudioSlider.qml
 AudioDeviceSelector AudioDeviceSelector.qml
@@ -43,6 +45,7 @@ CalendarPopup CalendarPopup.qml
 CapsLock CapsLock.qml
 Screenshot Screenshot.qml
 Commands Commands.qml
+BarSettingsPopup BarSettingsPopup.qml
 NotifyPopup NotifyPopup.qml
 Popout Popout.qml
 TweakSlider TweakSlider.qml

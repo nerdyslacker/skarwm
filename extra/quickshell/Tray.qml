@@ -8,7 +8,7 @@ import Quickshell.Services.SystemTray
 Rectangle {
     id: root
 
-    visible: SystemTray.items.values.length > 0
+    visible: BarVisibility.enabled("tray") && SystemTray.items.values.length > 0
     implicitWidth: trayRow.implicitWidth + Math.round(14 * Theme.barScale)
     implicitHeight: Theme.moduleHeight
     radius: 0

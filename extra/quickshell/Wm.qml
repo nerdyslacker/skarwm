@@ -17,7 +17,7 @@ Singleton {
     property int tagCount: 1
     property string title: ""
     property string activeWinId: ""
-    readonly property string msgPath: "./build/skarwm-msg"
+    readonly property string msgPath: "skarwm-msg"
 
     function workspaceAt(index) {
         const id = index + 1

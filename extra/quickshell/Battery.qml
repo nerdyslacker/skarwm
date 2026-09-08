@@ -5,7 +5,7 @@ import QtQuick
 BarModule {
     id: root
 
-    visible: Sys.hasBattery
+    visible: BarVisibility.enabled("battery") && Sys.hasBattery
     icon: Sys.batteryCharging ? "󰂄"
         : Sys.battery < 15 ? "󰁺"
         : Sys.battery < 40 ? "󰁼"
