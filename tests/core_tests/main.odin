@@ -640,9 +640,18 @@ test_multi_output_scrolling :: proc() {
     eq(c.Output_At_Point(m, 3000, 540), right, "point outside outputs falls back to active output")
 
     c.Focus_Output(m, left)
-    for id in u32(100) ..= u32(102) { add_tiled(m, id) }
+    left_first := add_tiled(m, 100)
+    add_tiled(m, 101)
+    left_third := add_tiled(m, 102)
     c.Focus_Output(m, right)
-    for id in u32(200) ..= u32(202) { add_tiled(m, id) }
+    right_first := add_tiled(m, 200)
+    add_tiled(m, 201)
+    right_third := add_tiled(m, 202)
+
+    c.Arrange_All(m)
+    eq(left_third.Geom.X, left.Geom.X + c.HIDE_X, "left overflow column cannot spill onto right output")
+    eq(right_third.Geom.X, right.Geom.X + c.HIDE_X, "right overflow column is parked off-screen")
+    ok(right_first.Geom.X >= right.Geom.X, "visible right column stays on its own output")
 
     eq(left.Current.ViewportX, 0, "left viewport starts independently at zero")
     eq(right.Current.ViewportX, 0, "right viewport starts independently at zero")
@@ -650,6 +659,10 @@ test_multi_output_scrolling :: proc() {
     ok(left.Current.ViewportX > 0, "left output viewport advances")
     eq(right.Current.ViewportX, 0, "right output viewport remains unchanged")
     eq(c.Active_Output(m), right, "pointer scrolling does not steal active output")
+    c.Arrange_All(m)
+    eq(left_first.Geom.X, left.Geom.X + c.HIDE_X, "scrolled-away left column cannot appear on another output")
+    ok(left_third.Geom.X >= left.Geom.X && left_third.Geom.X < left.Geom.X + left.Geom.W,
+       "newly visible left column stays within its output")
 }
 
 // ----------------------------------------------------------------------------
@@ -722,6 +735,9 @@ test_scrolling :: proc() {
     c.Ensure_Active_Focus_Visible(m)
     c.Arrange_All(m)
     eq(d.Geom.X, 966, "right column drawn at work_x + strip_x - viewport + border")
+    eq(a.Geom.X, c.HIDE_X, "scrolled-off column is parked instead of leaking beyond the output")
+    _, first_bar_visible := c.Tab_Bar_Rect(m, c.Active_Output(m), ws, 0)
+    ok(!first_bar_visible, "scrolled-off column does not expose a tab decoration")
 }
 
 // two columns fit on screen exactly, so the viewport never pans

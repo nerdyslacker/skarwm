@@ -93,9 +93,14 @@ Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) ->
     }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
     if p.ColW <= 0 || p.WorkH <= 1 { return {}, false }
+    x := p.WorkX - ws.ViewportX + col_left_px(p, col_index)
+    // Top-level X windows cannot be clipped to an individual RandR output.
+    // Do not create a decoration for a column parked outside its own output,
+    // otherwise that decoration can appear on an adjacent monitor.
+    if x < p.WorkX || x + p.ColW > p.WorkX + p.WorkW { return {}, false }
     h := min(TAB_BAR_HEIGHT, p.WorkH - 1)
     return Rect {
-        X = p.WorkX - ws.ViewportX + col_left_px(p, col_index),
+        X = x,
         Y = p.WorkY,
         W = p.ColW,
         H = h,
@@ -289,11 +294,24 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
     // 2) tiled columns
     if n_cols > 0 && p.ColW > 0 && p.WorkH > 0 {
         base_x := p.WorkX - ws.ViewportX
+        hide := Rect { X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H }
         for ci in 0 ..< n_cols {
             col := ws.Cols[ci]
             nw := len(col.Wins)
             if nw == 0 { continue }
             col_left := base_x + col_left_px(p, ci)
+
+            // RandR outputs share one root window, so a column outside this
+            // output would otherwise remain visible on a neighbouring one.
+            // Viewport movement is column-aligned; park every off-page column
+            // until it belongs to the visible page again.
+            if col_left < p.WorkX || col_left + p.ColW > p.WorkX + p.WorkW {
+                for cl in col.Wins {
+                    cl.Geom = hide
+                    cl.Border = p.Border
+                }
+                continue
+            }
 
             if col.Layout == .Tabbed {
                 active := col.Focus
@@ -303,7 +321,6 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
                 }
                 tab_h := min(TAB_BAR_HEIGHT, max(i32(0), p.WorkH - 1))
                 tile := Rect { X = col_left, Y = p.WorkY + tab_h, W = p.ColW, H = p.WorkH - tab_h }
-                hide := Rect { X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H }
                 for cl in col.Wins {
                     cl.Border = p.Border
                     if cl == active {

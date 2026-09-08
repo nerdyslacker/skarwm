@@ -242,7 +242,7 @@ betterlockscreen -u ~/.config/skarwm/wallpaper/default.jpeg
 Then start skarwm normally from a display manager or `startx`.
 
 <div align="center">
-<a href="https://github.com/nerdyslacker/skarwm"><img src="assets/skarwm_screenshot.png" /></a>
+<img src="assets/skarwm_screenshot.jpg" />
 </div>
 
 ## First run with startx
