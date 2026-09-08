@@ -68,6 +68,9 @@ per-user install, or in `$SKARWM_STATE_DIR` when it is set:
 - `weather-units` — `c` or `f`;
 - `pomodoro` — persisted timer end time and duration.
 
+Left-click the weather module for the forecast. Right-click it for the native
+location and unit settings popup; Save updates the watched state files above.
+
 The calendar reads renCal's configured Caldir path automatically. Set
 `CALDIR_DIR` only when you want to override that location.
 Left-click the clock for the month calendar and upcoming events. Clicking an

@@ -13,6 +13,7 @@ Media Media.qml
 MediaPopup MediaPopup.qml
 Weather Weather.qml
 WeatherPopup WeatherPopup.qml
+WeatherSettings WeatherSettings.qml
 Metrics Metrics.qml
 Volume Volume.qml
 Network Network.qml

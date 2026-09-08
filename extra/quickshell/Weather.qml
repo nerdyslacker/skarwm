@@ -1,5 +1,4 @@
 import QtQuick
-import Quickshell
 import Quickshell.Io
 
 // Weather: condition glyph + temperature from wttr.in (no API key),
@@ -70,14 +69,22 @@ BarModule {
     label: temp + "°"
 
     onClicked: mouse => {
-        if (mouse.button === Qt.RightButton)
-            Quickshell.execDetached([Theme.configDir + "/scripts/weather"])
-        else
+        if (mouse.button === Qt.RightButton) {
+            forecast.visible = false
+            settings.openSettings()
+        } else {
+            settings.visible = false
             forecast.visible = !forecast.visible
+        }
     }
 
     WeatherPopup {
         id: forecast
+        anchorItem: root
+    }
+
+    WeatherSettings {
+        id: settings
         anchorItem: root
     }
 

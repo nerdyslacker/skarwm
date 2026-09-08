@@ -60,8 +60,8 @@ configuration under `extra/` uses:
 
 - Quickshell and a JetBrainsMono Nerd Font for the bar;
 - Picom for compositing and Dunst for notifications;
-- the native searchable Quickshell application launcher and Feh for wallpaper
-  handling (Rofi is only used by the optional weather settings helper);
+- native searchable Quickshell application and weather-settings popups, plus
+  Feh for wallpaper handling;
 - Kitty as the configured terminal;
 - renCal for the full calendar interface and Python 3 for loading its local
   events into the calendar popup;
@@ -84,7 +84,7 @@ On Void, install the available packages with XBPS; Betterlockscreen and a Nerd
 Font may need to be installed separately depending on the enabled repositories:
 
 ```sh
-sudo xbps-install -S quickshell picom dunst rofi feh kitty xss-lock \
+sudo xbps-install -S quickshell picom dunst feh kitty xss-lock \
   betterlockscreen udiskie lxqt-policykit NetworkManager bluez pavucontrol \
   curl flameshot brightnessctl python3 renCal xterm xinput xdotool
 ```
