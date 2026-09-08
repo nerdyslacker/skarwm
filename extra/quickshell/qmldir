@@ -18,6 +18,9 @@ WeatherPopup WeatherPopup.qml
 WeatherSettings WeatherSettings.qml
 Metrics Metrics.qml
 Volume Volume.qml
+AudioPopup AudioPopup.qml
+AudioSlider AudioSlider.qml
+AudioDeviceSelector AudioDeviceSelector.qml
 Network Network.qml
 KeyboardLayout KeyboardLayout.qml
 KeyboardLayoutPicker KeyboardLayoutPicker.qml

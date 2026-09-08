@@ -1,17 +1,19 @@
 import QtQuick
-import Quickshell
 import Quickshell.Services.Pipewire
 
-// Default sink volume. Scroll to adjust, click to mute, right click for
-// Clicking opens pavucontrol.
+// Default sink volume. Scroll to adjust, left click to mute, and right click
+// to choose an output device or adjust application volumes.
 BarModule {
     id: root
 
+    readonly property var sink: Pipewire.preferredDefaultAudioSink
+        ?? Pipewire.defaultAudioSink
+
     PwObjectTracker {
-        objects: [Pipewire.defaultAudioSink]
+        objects: [root.sink]
     }
 
-    readonly property var audio: Pipewire.defaultAudioSink?.audio ?? null
+    readonly property var audio: sink?.audio ?? null
     readonly property bool muted: audio?.muted ?? false
     readonly property int volume: audio ? Math.round(audio.volume * 100) : 0
 
@@ -32,7 +34,7 @@ BarModule {
 
     onClicked: mouse => {
         if (mouse.button === Qt.RightButton)
-            Quickshell.execDetached(["pavucontrol"])
+            popup.visible = !popup.visible
         else if (audio)
             audio.muted = !audio.muted
     }
@@ -41,5 +43,10 @@ BarModule {
             audio.muted = false
             audio.volume = Math.max(0, Math.min(1, audio.volume + dir * 0.02))
         }
+    }
+
+    AudioPopup {
+        id: popup
+        anchorItem: root
     }
 }

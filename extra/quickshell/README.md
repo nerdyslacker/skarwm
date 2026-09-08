@@ -9,7 +9,9 @@ The bar includes:
 
 - application launcher, workspace tags, focused-window title, and a
   scratchpad-register popup that appears beside the title when needed;
-- media, weather, CPU/RAM/disk/battery metrics, volume, and network state;
+- media, weather, CPU/RAM/disk/battery metrics, volume, and network state; the
+  volume popup selects output/input devices, controls their global levels, and
+  controls each playback stream;
 - Void Linux update count, keyboard-layout switching, clipboard history,
   system tray, notifications, clock and calendar;
 - microphone mute, Caps Lock, screenshots, power controls, and a quick-command

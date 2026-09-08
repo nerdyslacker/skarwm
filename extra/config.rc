@@ -46,7 +46,9 @@ bind : mod + Shift + v : "qs ipc -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/qu
 # autostart: run once at startup (not re-run on reload). SKARWM_EXTRA_DIR can
 # point at either a per-user tree or packaged files under /usr/share.
 autostart : "lxqt-policykit-agent"
-autostart : "feh --bg-fill ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/wallpaper/default.jpeg"
+# Restore the last Feh selection; seed it with the bundled wallpaper on the
+# first session, when Feh has not created ~/.fehbg yet.
+autostart : "if [ -f ~/.fehbg ]; then sh ~/.fehbg; else feh --bg-fill ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/wallpaper/hadrut_srcery.jpeg; fi"
 autostart : "dunst -config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/dunst/dunstrc"
 autostart : "picom --config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/picom/picom.conf -b"
 autostart : "${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/scripts/clipboard-history daemon"
