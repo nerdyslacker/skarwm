@@ -36,10 +36,24 @@ PopupWindow {
     onVisibleChanged: {
         if (visible && anchorItem) {
             const p = anchorItem.mapToGlobal(0, 0)
-            const sw = Quickshell.screens.length ? Quickshell.screens[0].width : 1920
-            const desired = alignRight ? sw - cardWidth - 8
-                : Math.min(Math.max(p.x + anchorItem.width / 2 - cardWidth / 2, 8),
-                           sw - cardWidth - 8)
+            let target = null
+            for (const candidate of Quickshell.screens) {
+                if (p.x >= candidate.x && p.x < candidate.x + candidate.width
+                        && p.y >= candidate.y && p.y < candidate.y + candidate.height) {
+                    target = candidate
+                    break
+                }
+            }
+            if (!target && Quickshell.screens.length)
+                target = Quickshell.screens[0]
+
+            const screenX = target ? target.x : 0
+            const screenWidth = target ? target.width : 1920
+            const leftEdge = screenX + 8
+            const rightEdge = screenX + screenWidth - cardWidth - 8
+            const desired = alignRight ? rightEdge
+                : Math.min(Math.max(p.x + anchorItem.width / 2 - cardWidth / 2,
+                                    leftEdge), rightEdge)
             uOffsetX = desired - p.x
             inner.forceActiveFocus()
             enterAnim.restart()
