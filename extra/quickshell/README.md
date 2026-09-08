@@ -12,7 +12,9 @@ The bar includes:
 - media, weather, CPU/RAM/disk metrics, battery controls, per-display
   brightness, volume, and network state; the
   volume popup selects output/input devices, controls their global levels, and
-  controls each playback stream;
+  controls each playback stream, while clicking the metrics module opens a
+  detailed system monitor with load, temperature, memory/swap/storage totals,
+  and the top processes by CPU use;
 - Void Linux update count, keyboard-layout switching, clipboard history,
   system tray, notifications, clock and calendar;
 - Caps Lock, screenshots, and a user/session command panel with DND, pomodoro,

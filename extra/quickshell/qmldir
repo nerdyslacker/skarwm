@@ -21,6 +21,7 @@ Weather Weather.qml
 WeatherPopup WeatherPopup.qml
 WeatherSettings WeatherSettings.qml
 Metrics Metrics.qml
+MetricsPopup MetricsPopup.qml
 Battery Battery.qml
 BatteryPopup BatteryPopup.qml
 Brightness Brightness.qml
