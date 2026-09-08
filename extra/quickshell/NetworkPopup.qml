@@ -1,27 +1,29 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
-import Quickshell
+import QtQuick.Controls as Controls
 import Quickshell.Io
 
 // Network — a small connectivity front-end (nmcli + bluetoothctl
-// underneath) in its own quickshell instance. Device status + wifi radio
+// underneath) in a popup anchored to the bar. Device status + wifi radio
 // toggle up top, bluetooth power + paired devices (click to connect/
 // disconnect; "pair new" scans and pairs PIN-less devices — anything
 // needing a PIN is blueman's job), scannable wifi list below: click a
 // network to connect (inline password field for new secured networks),
 // click the active one to disconnect. The bluetooth section only renders
 // when an adapter exists.
-ShellRoot {
-    FloatingWindow {
+Popout {
         id: win
 
-        title: "Network"
-        implicitWidth: 430
-        implicitHeight: 640
-        color: Theme.bg
+        cardWidth: 430
+        cardHeight: 640
 
-        // closing the window (super+q etc.) must end the process too, or the
-        // bar's toggle script sees a headless instance and gets out of sync
-        onVisibleChanged: if (!visible) Qt.quit()
+        onVisibleChanged: {
+            if (visible)
+                refresh(false)
+            else
+                pwFor = ""
+        }
 
         property var devices: []    // {dev, type, state, conn}
         property bool wifiOn: false
@@ -43,8 +45,6 @@ ShellRoot {
         property var btDevices: []  // {mac, name, connected}
         property var btFound: []    // {mac, name} — unpaired, from a scan
         property bool btScanning: false
-
-        Component.onCompleted: refresh(false)
 
         function refresh(rescan) {
             devProc.running = true
@@ -94,7 +94,7 @@ ShellRoot {
             stderr: SplitParser {
                 onRead: line => { if (line.trim() !== "") win._err.push(line.trim()) }
             }
-            onExited: (code, st) => {
+            onExited: code => {
                 win.busy = false
                 win.status = code === 0 ? "done"
                     : (win._err.length ? win._err[win._err.length - 1] : "failed")
@@ -211,7 +211,7 @@ ShellRoot {
 
         Timer {
             interval: 1000
-            running: true
+            running: win.visible
             repeat: true
             onTriggered: speedProc.running = true
         }
@@ -365,10 +365,9 @@ ShellRoot {
 
         Column {
             anchors.fill: parent
-            anchors.margins: 16
             spacing: 8
 
-            // Escape: cancel an open password prompt first, quit otherwise.
+            // Escape: cancel an open password prompt first, close otherwise.
             // Keys on the content root, not a Shortcut (those never fire in
             // this window) — unhandled keys bubble up here from the focused
             // password field, and this holds focus the rest of the time.
@@ -377,7 +376,7 @@ ShellRoot {
                 if (win.pwFor !== "")
                     win.pwFor = ""
                 else
-                    Qt.quit()
+                    win.visible = false
             }
 
             // header
@@ -643,91 +642,128 @@ ShellRoot {
                 }
             }
 
-            Repeater {
-                model: win.btPresent && win.btOn ? win.btDevices : []
+            Flickable {
+                id: btListView
+                visible: win.btPresent && win.btOn && btList.implicitHeight > 0
+                width: parent.width
+                height: Math.min(btList.implicitHeight, 150)
+                contentWidth: width
+                contentHeight: btList.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
 
-                Rectangle {
-                    id: btRow
-                    required property var modelData
+                Column {
+                    id: btList
                     width: parent.width
-                    height: 30
-                    radius: 0
-                    color: btRow.modelData.connected ? Qt.alpha(Theme.accent, 0.25)
-                         : btMa.containsMouse ? Qt.alpha(Theme.fg, 0.1)
-                         : "transparent"
+                    spacing: 2
 
-                    Behavior on color { ColorAnimation { duration: 120 } }
+                    Repeater {
+                        model: win.btDevices
 
-                    Text {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 10
-                        anchors.right: btState.left
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "󰂯  " + btRow.modelData.name
-                        color: btRow.modelData.connected ? Theme.accent : Theme.fg
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 12
-                        font.bold: btRow.modelData.connected
-                        elide: Text.ElideRight
+                        Rectangle {
+                            id: btRow
+                            required property var modelData
+                            width: parent.width
+                            height: 30
+                            radius: 0
+                            color: btRow.modelData.connected ? Qt.alpha(Theme.accent, 0.25)
+                                 : btMa.containsMouse ? Qt.alpha(Theme.fg, 0.1)
+                                 : "transparent"
+
+                            Behavior on color { ColorAnimation { duration: 120 } }
+
+                            Text {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 10
+                                anchors.right: btState.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "󰂯  " + btRow.modelData.name
+                                color: btRow.modelData.connected ? Theme.accent : Theme.fg
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                                font.bold: btRow.modelData.connected
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                id: btState
+                                anchors.right: parent.right
+                                anchors.rightMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: btRow.modelData.connected ? "connected" : "paired"
+                                color: btRow.modelData.connected ? Theme.green : Theme.disabled
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 11
+                            }
+                            MouseArea {
+                                id: btMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: win.btToggleDevice(btRow.modelData)
+                            }
+                        }
                     }
-                    Text {
-                        id: btState
-                        anchors.right: parent.right
-                        anchors.rightMargin: 10
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: btRow.modelData.connected ? "connected" : "paired"
-                        color: btRow.modelData.connected ? Theme.green : Theme.disabled
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 11
-                    }
-                    MouseArea {
-                        id: btMa
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: win.btToggleDevice(btRow.modelData)
+
+                    Repeater {
+                        model: win.btFound
+
+                        Rectangle {
+                            id: btNewRow
+                            required property var modelData
+                            width: parent.width
+                            height: 30
+                            radius: 0
+                            color: btNewMa.containsMouse ? Qt.alpha(Theme.fg, 0.1) : "transparent"
+
+                            Behavior on color { ColorAnimation { duration: 120 } }
+
+                            Text {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 10
+                                anchors.right: btNewTag.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "󰂱  " + btNewRow.modelData.name
+                                color: Qt.alpha(Theme.fg, 0.7)
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                id: btNewTag
+                                anchors.right: parent.right
+                                anchors.rightMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: "pair"
+                                color: Theme.disabled
+                                font.family: Theme.fontFamily
+                                font.pixelSize: 11
+                            }
+                            MouseArea {
+                                id: btNewMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: win.btPairNew(btNewRow.modelData)
+                            }
+                        }
                     }
                 }
-            }
 
-            Repeater {
-                model: win.btPresent && win.btOn ? win.btFound : []
-
-                Rectangle {
-                    id: btNewRow
-                    required property var modelData
-                    width: parent.width
-                    height: 30
-                    radius: 0
-                    color: btNewMa.containsMouse ? Qt.alpha(Theme.fg, 0.1) : "transparent"
-
-                    Behavior on color { ColorAnimation { duration: 120 } }
-
-                    Text {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 10
-                        anchors.right: btNewTag.left
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "󰂱  " + btNewRow.modelData.name
-                        color: Qt.alpha(Theme.fg, 0.7)
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 12
-                        elide: Text.ElideRight
+                Controls.ScrollBar.vertical: Controls.ScrollBar {
+                    id: btScroll
+                    width: 8
+                    policy: btListView.contentHeight > btListView.height + 0.5
+                        ? Controls.ScrollBar.AlwaysOn
+                        : Controls.ScrollBar.AlwaysOff
+                    interactive: true
+                    background: Rectangle {
+                        color: Theme.gray2
+                        border.width: 1
+                        border.color: Theme.gray5
                     }
-                    Text {
-                        id: btNewTag
-                        anchors.right: parent.right
-                        anchors.rightMargin: 10
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "pair"
-                        color: Theme.disabled
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 11
-                    }
-                    MouseArea {
-                        id: btNewMa
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: win.btPairNew(btNewRow.modelData)
+                    contentItem: Rectangle {
+                        implicitWidth: 6
+                        implicitHeight: 28
+                        color: btScroll.pressed ? Theme.brightOrange
+                             : btScroll.hovered ? Theme.orange : Theme.gray6
                     }
                 }
             }
@@ -747,10 +783,12 @@ ShellRoot {
             }
 
             Flickable {
+                id: wifiListView
                 width: parent.width
-                height: win.implicitHeight - y - 60
+                height: Math.max(0, win.implicitHeight - y - 60)
                 contentHeight: netCol.implicitHeight
                 clip: true
+                boundsBehavior: Flickable.StopAtBounds
 
                 Column {
                     id: netCol
@@ -883,6 +921,26 @@ ShellRoot {
                         }
                     }
                 }
+
+                Controls.ScrollBar.vertical: Controls.ScrollBar {
+                    id: wifiScroll
+                    width: 8
+                    policy: wifiListView.contentHeight > wifiListView.height + 0.5
+                        ? Controls.ScrollBar.AlwaysOn
+                        : Controls.ScrollBar.AlwaysOff
+                    interactive: true
+                    background: Rectangle {
+                        color: Theme.gray2
+                        border.width: 1
+                        border.color: Theme.gray5
+                    }
+                    contentItem: Rectangle {
+                        implicitWidth: 6
+                        implicitHeight: 28
+                        color: wifiScroll.pressed ? Theme.brightOrange
+                             : wifiScroll.hovered ? Theme.orange : Theme.gray6
+                    }
+                }
             }
 
             // status line
@@ -897,5 +955,4 @@ ShellRoot {
                 elide: Text.ElideRight
             }
         }
-    }
 }

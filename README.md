@@ -73,7 +73,7 @@ configuration under `extra/` uses:
 - `xss-lock` and Betterlockscreen for screen locking;
 - Udiskie for removable-drive automounting and its tray item.
 
-The bar and its companion network panel can additionally use NetworkManager
+The bar and its network popup can additionally use NetworkManager
 tools, BlueZ's `bluetoothctl`, `pactl`, `pavucontrol`, `curl`, `xdg-open`,
 `flameshot`, `brightnessctl`, `powerprofilesctl`, `redshift`, `xset`,
 `notify-send`, `xterm`, and the Void `xbps-install` tool. On Quickshell 0.3.0,
@@ -182,7 +182,7 @@ make install-extra
 ```
 
 `make extra` is a shorter alias. This copies `extra/config.rc` and the Srcery
-Quickshell bar and network panel, Picom, Dunst, Kitty, Polybar, Rofi, wallpaper,
+Quickshell bar and network popup, Picom, Dunst, Kitty, Polybar, Rofi, wallpaper,
 weather, helper scripts, and bar configuration into `~/.config/skarwm`.
 Existing files with the same names are replaced, so back up a customized
 configuration first. An alternative target directory can be selected with

@@ -1,8 +1,8 @@
 import QtQuick
 import Quickshell.Services.Pipewire
 
-// Default sink volume. Scroll to adjust, left click to mute, and right click
-// to choose an output device or adjust application volumes.
+// Default sink volume. Scroll to adjust, left click for the mixer popup, and
+// right click to mute.
 BarModule {
     id: root
 
@@ -33,10 +33,10 @@ BarModule {
     label: flash ? (muted ? "--" : volume + "%") : ""
 
     onClicked: mouse => {
-        if (mouse.button === Qt.RightButton)
-            popup.visible = !popup.visible
-        else if (audio)
+        if (mouse.button === Qt.RightButton && audio)
             audio.muted = !audio.muted
+        else if (mouse.button === Qt.LeftButton)
+            popup.visible = !popup.visible
     }
     onScrolled: dir => {
         if (audio) {

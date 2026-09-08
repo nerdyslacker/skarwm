@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Pipewire
@@ -257,82 +258,120 @@ Popout {
                 font.pixelSize: Theme.fontSize
             }
 
-            Repeater {
-                model: root.playbackStreams
+            Flickable {
+                id: applicationListView
+                visible: root.playbackStreams.length > 0
+                width: parent.width
+                height: Math.min(applicationList.implicitHeight, 240)
+                contentWidth: width
+                contentHeight: applicationList.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
 
-                Rectangle {
-                    id: streamRow
-                    required property var modelData
-                    readonly property var streamAudio: modelData.audio
+                Column {
+                    id: applicationList
+                    width: parent.width
+                    spacing: 8
 
-                    width: content.width
-                    height: 54
-                    color: Theme.gray2
-                    border.width: 1
-                    border.color: Theme.gray5
+                    Repeater {
+                        model: root.playbackStreams
 
-                    Text {
-                        id: muteButton
-                        anchors.left: parent.left
-                        anchors.leftMargin: 9
-                        anchors.top: parent.top
-                        anchors.topMargin: 7
-                        width: 19
-                        text: streamRow.streamAudio?.muted ? "󰝟" : "󰕾"
-                        color: streamRow.streamAudio?.muted
-                            ? Theme.brightBlack : Theme.green
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.iconSize
+                        Rectangle {
+                            id: streamRow
+                            required property var modelData
+                            readonly property var streamAudio: modelData.audio
 
-                        MouseArea {
-                            anchors.fill: parent
-                            anchors.margins: -4
-                            onClicked: {
-                                if (streamRow.streamAudio)
-                                    streamRow.streamAudio.muted = !streamRow.streamAudio.muted
+                            width: applicationList.width
+                            height: 54
+                            color: Theme.gray2
+                            border.width: 1
+                            border.color: Theme.gray5
+
+                            Text {
+                                id: muteButton
+                                anchors.left: parent.left
+                                anchors.leftMargin: 9
+                                anchors.top: parent.top
+                                anchors.topMargin: 7
+                                width: 19
+                                text: streamRow.streamAudio?.muted ? "󰝟" : "󰕾"
+                                color: streamRow.streamAudio?.muted
+                                    ? Theme.brightBlack : Theme.green
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.iconSize
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    anchors.margins: -4
+                                    onClicked: {
+                                        if (streamRow.streamAudio)
+                                            streamRow.streamAudio.muted = !streamRow.streamAudio.muted
+                                    }
+                                }
+                            }
+
+                            Text {
+                                anchors.left: muteButton.right
+                                anchors.leftMargin: 7
+                                anchors.right: parent.right
+                                anchors.rightMargin: 9
+                                anchors.top: parent.top
+                                anchors.topMargin: 6
+                                text: root.applicationName(streamRow.modelData)
+                                elide: Text.ElideRight
+                                color: Theme.fg
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize
+                            }
+
+                            Text {
+                                anchors.left: muteButton.right
+                                anchors.leftMargin: 7
+                                anchors.right: parent.right
+                                anchors.rightMargin: 9
+                                anchors.top: parent.top
+                                anchors.topMargin: 21
+                                visible: text !== ""
+                                text: root.mediaName(streamRow.modelData)
+                                elide: Text.ElideRight
+                                color: Theme.brightBlack
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSize - 2
+                            }
+
+                            AudioSlider {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 9
+                                anchors.right: parent.right
+                                anchors.rightMargin: 9
+                                anchors.bottom: parent.bottom
+                                anchors.bottomMargin: 1
+                                audio: streamRow.streamAudio
+                                accent: streamRow.streamAudio?.muted
+                                    ? Theme.brightBlack : Theme.green
                             }
                         }
                     }
+                }
 
-                    Text {
-                        anchors.left: muteButton.right
-                        anchors.leftMargin: 7
-                        anchors.right: parent.right
-                        anchors.rightMargin: 9
-                        anchors.top: parent.top
-                        anchors.topMargin: 6
-                        text: root.applicationName(streamRow.modelData)
-                        elide: Text.ElideRight
-                        color: Theme.fg
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize
+                Controls.ScrollBar.vertical: Controls.ScrollBar {
+                    id: applicationScroll
+                    width: 8
+                    policy: applicationListView.contentHeight
+                            > applicationListView.height + 0.5
+                        ? Controls.ScrollBar.AlwaysOn
+                        : Controls.ScrollBar.AlwaysOff
+                    interactive: true
+                    background: Rectangle {
+                        color: Theme.gray2
+                        border.width: 1
+                        border.color: Theme.gray5
                     }
-
-                    Text {
-                        anchors.left: muteButton.right
-                        anchors.leftMargin: 7
-                        anchors.right: parent.right
-                        anchors.rightMargin: 9
-                        anchors.top: parent.top
-                        anchors.topMargin: 21
-                        visible: text !== ""
-                        text: root.mediaName(streamRow.modelData)
-                        elide: Text.ElideRight
-                        color: Theme.brightBlack
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize - 2
-                    }
-
-                    AudioSlider {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 9
-                        anchors.right: parent.right
-                        anchors.rightMargin: 9
-                        anchors.bottom: parent.bottom
-                        anchors.bottomMargin: 1
-                        audio: streamRow.streamAudio
-                        accent: streamRow.streamAudio?.muted
-                            ? Theme.brightBlack : Theme.green
+                    contentItem: Rectangle {
+                        implicitWidth: 6
+                        implicitHeight: 28
+                        color: applicationScroll.pressed ? Theme.brightOrange
+                             : applicationScroll.hovered ? Theme.orange : Theme.gray6
                     }
                 }
             }

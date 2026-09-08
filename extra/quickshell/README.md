@@ -30,7 +30,7 @@ Individual modules use these optional programs when available:
 - `feh` for wallpaper selection; the application launcher is built into
   Quickshell and reads the system's `.desktop` entries directly;
 - `nmcli` and `nm-connection-editor` for network state and settings, plus
-  `bluetoothctl` for the optional Bluetooth section;
+  `bluetoothctl` for the network popup's optional Bluetooth section;
 - PipeWire/PulseAudio-compatible `pactl` and `pavucontrol` for audio;
 - an MPRIS-compatible media player for media controls;
 - `curl` for weather;

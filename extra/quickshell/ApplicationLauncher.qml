@@ -49,8 +49,12 @@ Popout {
         if (visible) {
             search.text = ""
             appList.currentIndex = applications.length > 0 ? 0 : -1
+            appList.positionViewAtBeginning()
             focusAttempts = 0
-            Qt.callLater(() => root.focusSearch())
+            Qt.callLater(() => {
+                appList.positionViewAtBeginning()
+                root.focusSearch()
+            })
             focusRetry.start()
         }
     }
@@ -118,7 +122,10 @@ Popout {
                         font: search.font
                     }
 
-                    onTextChanged: appList.currentIndex = root.applications.length > 0 ? 0 : -1
+                    onTextChanged: {
+                        appList.currentIndex = root.applications.length > 0 ? 0 : -1
+                        appList.positionViewAtBeginning()
+                    }
                     Keys.onPressed: event => {
                         if (event.key === Qt.Key_Down) {
                             appList.currentIndex = Math.min(appList.count - 1,

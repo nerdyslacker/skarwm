@@ -22,6 +22,7 @@ AudioPopup AudioPopup.qml
 AudioSlider AudioSlider.qml
 AudioDeviceSelector AudioDeviceSelector.qml
 Network Network.qml
+NetworkPopup NetworkPopup.qml
 KeyboardLayout KeyboardLayout.qml
 KeyboardLayoutPicker KeyboardLayoutPicker.qml
 KeyboardLayoutSettings KeyboardLayoutSettings.qml
