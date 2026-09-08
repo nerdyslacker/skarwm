@@ -62,6 +62,8 @@ configuration under `extra/` uses:
 - Picom for compositing and Dunst for notifications;
 - native searchable Quickshell application and weather-settings popups, plus
   Feh for wallpaper handling;
+- `setxkbmap` and `xkb-switch` for the keyboard-layout indicator, picker, and
+  configuration popup;
 - Kitty as the configured terminal;
 - renCal for the full calendar interface and Python 3 for loading its local
   events into the calendar popup;
@@ -86,7 +88,8 @@ Font may need to be installed separately depending on the enabled repositories:
 ```sh
 sudo xbps-install -S quickshell picom dunst feh kitty xss-lock \
   betterlockscreen udiskie lxqt-policykit NetworkManager bluez pavucontrol \
-  curl flameshot brightnessctl python3 renCal xterm xinput xdotool
+  curl flameshot brightnessctl python3 renCal xterm xinput xdotool \
+  xkb-switch setxkbmap
 ```
 
 ## Build
@@ -193,9 +196,14 @@ exec skarwm-session
 
 `SKARWM_CONFIG` selects the WM rc file, `SKARWM_EXTRA_DIR` is the root used by
 the bundled autostarts, QML, and helper scripts, and `SKARWM_STATE_DIR` holds
-writable bar settings such as weather and Pomodoro state. The state directory
-defaults to the extra directory for a per-user install and to the XDG state
-directory when the extras come from `/usr/share`.
+writable bar settings such as weather, Pomodoro, and keyboard-layout state. The
+state directory defaults to the extra directory for a per-user install and to
+the XDG state directory when the extras come from `/usr/share`.
+
+The keyboard module imports the layouts already configured in XKB. Left-click
+it to select a layout; right-click it to search XKB's installed language
+catalogue, choose layouts, set aligned variants, and select the group-switch
+shortcut. Those choices are reapplied when the bar starts.
 
 The full rc starts:
 

@@ -54,6 +54,7 @@ PanelWindow {
             Metrics {}
             Volume {}
             Network {}
+            KeyboardLayout {}
             Tray {}
             Bell {}
             Clock {}

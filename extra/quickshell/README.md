@@ -10,7 +10,8 @@ The bar includes:
 - application launcher, workspace tags, focused-window title, and a
   scratchpad-register popup that appears beside the title when needed;
 - media, weather, CPU/RAM/disk/battery metrics, volume, and network state;
-- Void Linux update count, system tray, notifications, clock and calendar;
+- Void Linux update count, keyboard-layout switching, system tray,
+  notifications, clock and calendar;
 - microphone mute, Caps Lock, screenshots, power controls, and a quick-command
   panel.
 
@@ -38,7 +39,9 @@ Individual modules use these optional programs when available:
   `redshift`, `xset`, `loginctl`, and `betterlockscreen` for their corresponding
   optional controls;
 - `xinput` and `xdotool` for outside-click popup dismissal on Quickshell 0.3.0
-  (newer releases handle this through `PopupWindow.grabFocus`).
+  (newer releases handle this through `PopupWindow.grabFocus`);
+- `setxkbmap` to read and apply keyboard layouts and `xkb-switch` to report and
+  select the active XKB group.
 
 Missing optional tools only affect their corresponding module or action.
 
@@ -66,7 +69,23 @@ per-user install, or in `$SKARWM_STATE_DIR` when it is set:
 - `bar-scale` — module scale, clamped to 0.7–2.0;
 - `weather-location` — city, postal code, or other wttr.in location;
 - `weather-units` — `c` or `f`;
-- `pomodoro` — persisted timer end time and duration.
+- `pomodoro` — persisted timer end time and duration;
+- `keyboard-layout.json` — layouts, aligned variants, and XKB options saved by
+  the keyboard settings popup.
+
+The keyboard module shows the active layout. Left-click it to select any
+configured layout; right-click it to search the system XKB language catalogue
+and select layouts in order. Variants remain aligned to those selections, and
+the same popup configures the group-switch shortcut. For example, selecting
+English (US), Armenian, and Russian, setting variants
+`,phonetic,phonetic`, and choosing `Alt+Shift` applies the equivalent of:
+
+```sh
+setxkbmap -layout us,am,ru -variant ,phonetic,phonetic \
+  -option grp:alt_shift_toggle
+```
+
+Other existing XKB options are preserved when the group shortcut changes.
 
 Left-click the weather module for the forecast. Right-click it for the native
 location and unit settings popup; Save updates the watched state files above.

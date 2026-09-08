@@ -1,6 +1,7 @@
 singleton Theme Theme.qml
 singleton Wm Wm.qml
 singleton Sys Sys.qml
+singleton KeyboardState KeyboardState.qml
 Bar Bar.qml
 BarModule BarModule.qml
 Tags Tags.qml
@@ -17,6 +18,9 @@ WeatherSettings WeatherSettings.qml
 Metrics Metrics.qml
 Volume Volume.qml
 Network Network.qml
+KeyboardLayout KeyboardLayout.qml
+KeyboardLayoutPicker KeyboardLayoutPicker.qml
+KeyboardLayoutSettings KeyboardLayoutSettings.qml
 Updates Updates.qml
 Tray Tray.qml
 Bell Bell.qml
