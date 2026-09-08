@@ -77,7 +77,8 @@ per-user install, or in `$SKARWM_STATE_DIR` when it is set:
 - `weather-units` — `c` or `f`;
 - `pomodoro` — persisted timer end time and duration;
 - `keyboard-layout.json` — layouts, aligned variants, and XKB options saved by
-  the keyboard settings popup.
+  the keyboard settings popup;
+- `tags.json` — visible tag count and number/dot display preference.
 
 The keyboard module shows the active layout. Left-click it to select any
 configured layout; right-click it to search the system XKB language catalogue
@@ -92,6 +93,10 @@ setxkbmap -layout us,am,ru -variant ,phonetic,phonetic \
 ```
 
 Other existing XKB options are preserved when the group shortcut changes.
+
+Right-click any workspace tag to set the minimum number of visible tags and
+choose between numbered tags and dot indicators. A currently active workspace
+above the configured count remains visible.
 
 The clipboard module reads clipmenu's daemon-backed text history. Left-click
 its bar module to open the searchable history below the bar; `Super+V` opens
@@ -129,6 +134,7 @@ Put `.png`, `.jpg`, `.jpeg`, or `.webp` images in
 Left-click the launcher icon, type to filter applications, use the arrow keys to
 select a result, and press Enter to launch it. The launcher can also be toggled
 with `qs -p /path/to/quickshell ipc call launcher toggle`.
+`Super+A` opens it centered on skarwm's currently focused monitor.
 Right-click the launcher icon to open the thumbnail picker, or middle-click it
 to apply a random image. Wallpaper changes do not alter the fixed Srcery
 palette.

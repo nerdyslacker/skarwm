@@ -3,9 +3,12 @@ singleton Wm Wm.qml
 singleton Sys Sys.qml
 singleton KeyboardState KeyboardState.qml
 singleton ClipboardState ClipboardState.qml
+singleton TagConfig TagConfig.qml
+singleton LauncherState LauncherState.qml
 Bar Bar.qml
 BarModule BarModule.qml
 Tags Tags.qml
+TagSettingsPopup TagSettingsPopup.qml
 Title Title.qml
 ScratchpadsPopup ScratchpadsPopup.qml
 Launcher Launcher.qml

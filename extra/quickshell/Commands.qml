@@ -54,9 +54,9 @@ BarModule {
             "notify-send -a skarwm -r $notification_id -t 2000 " +
             "-i system-run 'Reloading desktop' " +
             "'skarwm reloaded; restarting Quickshell…'; " +
-            "sleep 0.25; qs kill -p \"$shell_path\" >/dev/null 2>&1 || true; " +
+            "sleep 0.25; qs kill -n -p \"$shell_path\" >/dev/null 2>&1 || true; " +
             "sleep 0.4; " +
-            "if qs -d -p \"$shell_path\" >/dev/null 2>&1; then " +
+            "if qs --no-duplicate -d -p \"$shell_path\" >/dev/null 2>&1; then " +
             "sleep 0.8; notify-send -a skarwm -r $notification_id -t 2500 " +
             "-i dialog-information 'Desktop reloaded' " +
             "'skarwm and Quickshell restarted successfully.'; " +

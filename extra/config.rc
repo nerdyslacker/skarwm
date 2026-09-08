@@ -34,10 +34,11 @@ focus_follows_mouse : true
 
 # bind: run a shell command. Combo = modifier tokens + one key.
 bind : mod + Return : "kitty"
-bind : mod + v : "qs ipc -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell call clipboard toggle"
+bind : mod + a : "qs ipc -n -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell call launcher toggleCentered"
+bind : mod + v : "qs ipc -n -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell call clipboard toggle"
 # Keep the generated Shift variant from arming tab placement for this
 # non-window IPC command.
-bind : mod + Shift + v : "qs ipc -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell call clipboard toggle"
+bind : mod + Shift + v : "qs ipc -n -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell call clipboard toggle"
 # Every spawn binding automatically gets an otherwise-unbound Shift variant.
 # While a tabbed column is focused, mod+Shift+Return runs the same command and
 # puts its next window in that tab group. An explicit shifted binding overrides
@@ -52,7 +53,7 @@ autostart : "if [ -f ~/.fehbg ]; then sh ~/.fehbg; else feh --bg-fill ${SKARWM_E
 autostart : "dunst -config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/dunst/dunstrc"
 autostart : "picom --config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/picom/picom.conf -b"
 autostart : "${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/scripts/clipboard-history daemon"
-autostart : "qs -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell"
+autostart : "qs --no-duplicate -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell"
 autostart : "xss-lock -- betterlockscreen -l"
 autostart : "udiskie --smart-tray"
 

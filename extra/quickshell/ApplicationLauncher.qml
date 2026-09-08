@@ -27,7 +27,29 @@ Popout {
     }
 
     function toggle() {
-        visible = !visible
+        if (visible)
+            visible = false
+        else
+            showAtAnchor()
+    }
+
+    function toggleCentered() {
+        if (visible) {
+            visible = false
+            return
+        }
+        if (!focusedOutputQuery.running)
+            focusedOutputQuery.running = true
+    }
+
+    function anchorBelongsTo(rect) {
+        if (!anchorItem || !rect)
+            return false
+        const anchorPosition = anchorItem.mapToGlobal(0, 0)
+        return anchorPosition.x >= rect.x
+            && anchorPosition.x < rect.x + rect.width
+            && anchorPosition.y >= rect.y
+            && anchorPosition.y < rect.y + rect.height
     }
 
     function focusSearch() {
@@ -72,10 +94,29 @@ Popout {
         }
     }
 
-    IpcHandler {
-        target: "launcher"
-        function toggle(): void { root.toggle() }
-        function show(): void { root.visible = true }
+    Connections {
+        target: LauncherState
+        function onCenteredRequested() { root.toggleCentered() }
+    }
+
+    Process {
+        id: focusedOutputQuery
+        command: [Wm.msgPath, "get-outputs"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    const outputs = JSON.parse(text)
+                    const focused = outputs.find(output => output.focused === true)
+                    if (focused && root.anchorBelongsTo(focused.rect)) {
+                        const rect = focused.rect
+                        root.showCenteredInRect(
+                            rect.x, rect.y, rect.width, rect.height)
+                    }
+                } catch (error) {
+                    console.warn("application launcher output query:", error)
+                }
+            }
+        }
     }
 
     Column {

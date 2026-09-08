@@ -118,11 +118,13 @@ make xephyr
 
 This builds skarwm, opens a 1280×800 Xephyr window on display `:2`, and runs
 skarwm with `extra/config.rc` inside it. `SKARWM_EXTRA_DIR` points at the
-checkout's `extra/` tree, while writable state—including the isolated clipmenu
-store—uses a temporary directory. Click inside the nested display and use the
-full desktop bindings; for example, `Super+V` opens clipboard history. Close
-the Xephyr window or press Ctrl-C in the launching terminal to stop both
-processes.
+checkout's `extra/` tree. Writable test state—including keyboard layouts and
+tag settings—is kept across runs in
+`${XDG_STATE_HOME:-$HOME/.local/state}/skarwm/xephyr`. Set
+`SKARWM_XEPHYR_STATE_DIR` to use another location. Click inside the nested
+display and use the full desktop bindings; for example, `Super+V` opens
+clipboard history. Close the Xephyr window or press Ctrl-C in the launching
+terminal to stop both processes.
 
 For multi-monitor testing:
 
