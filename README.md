@@ -334,9 +334,11 @@ reference.
 
 RandR 1.5 monitor objects are discovered at startup and rescanned after screen,
 CRTC, output, and resource changes. Each monitor keeps its own current
-workspace. Monitor focus and movement wrap in RandR discovery order. If a
-monitor disappears, its workspaces and windows migrate to a surviving monitor.
-Servers without RandR 1.5 fall back to one screen-sized output.
+workspace and viewport position. New windows open on the monitor containing
+the pointer, and `Super`+wheel scrolls only the monitor under the pointer.
+Monitor focus and movement wrap in RandR discovery order. If a monitor
+disappears, its workspaces and windows migrate to a surviving monitor. Servers
+without RandR 1.5 fall back to one screen-sized output.
 
 All keyboard bindings can be replaced in the rc file. Mouse drag and wheel
 scrolling use the configured `mod_key`; explicit `mousebind` directives remain

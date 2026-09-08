@@ -48,6 +48,7 @@ main :: proc() {
     test_fullscreen()
     test_tabbed_layout()
     test_multi_output()
+    test_multi_output_scrolling()
     test_layout_geometry()
     test_scrolling()
     test_two_columns_fit()
@@ -553,6 +554,34 @@ test_multi_output :: proc() {
     event := c.ipc_output_event_payload("disconnected", "HDMI-1")
     defer delete(event)
     eq(string(event), `{"change":"disconnected","output":"HDMI-1"}`, "output IPC event payload")
+}
+
+test_multi_output_scrolling :: proc() {
+    m := c.New_Manager()
+    defer c.Destroy_Manager(m)
+    specs := []c.Output_Spec {
+        {Name = "LEFT", Geom = c.Rect{X = -1280, Y = 0, W = 1280, H = 1024}},
+        {Name = "RIGHT", Geom = c.Rect{X = 0, Y = 0, W = 1920, H = 1080}, Primary = true},
+    }
+    c.Reconcile_Outputs(m, specs)
+    left := m.Outputs[0]
+    right := m.Outputs[1]
+
+    eq(c.Output_At_Point(m, -640, 512), left, "negative root coordinate selects left output")
+    eq(c.Output_At_Point(m, 960, 540), right, "root coordinate selects right output")
+    eq(c.Output_At_Point(m, 3000, 540), right, "point outside outputs falls back to active output")
+
+    c.Focus_Output(m, left)
+    for id in u32(100) ..= u32(102) { add_tiled(m, id) }
+    c.Focus_Output(m, right)
+    for id in u32(200) ..= u32(202) { add_tiled(m, id) }
+
+    eq(left.Current.ViewportX, 0, "left viewport starts independently at zero")
+    eq(right.Current.ViewportX, 0, "right viewport starts independently at zero")
+    ok(c.Scroll_Output_Viewport(m, left, 1), "wheel can scroll non-active left output")
+    ok(left.Current.ViewportX > 0, "left output viewport advances")
+    eq(right.Current.ViewportX, 0, "right output viewport remains unchanged")
+    eq(c.Active_Output(m), right, "pointer scrolling does not steal active output")
 }
 
 // ----------------------------------------------------------------------------

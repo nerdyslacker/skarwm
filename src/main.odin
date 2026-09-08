@@ -281,7 +281,7 @@ handle_event :: proc(ev: ^Event) {
         ok, override_redir, _, class := window_info(e.window)
         if !ok || override_redir { return }
         if class == WINDOW_CLASS_INPUT_ONLY { return }
-        manage(e.window, false)
+        manage(e.window, false, output_at_pointer())
 
     case u8(EVENT_UNMAP_NOTIFY):
         // client withdrew/iconified itself; drop it (re-managed on next MapRequest)

@@ -298,6 +298,21 @@ Query_Tree_Reply :: struct {
     pad:           [12]u8,
 }
 
+Query_Pointer_Reply :: struct {
+    response_type: u8,
+    same_screen:   u8,
+    sequence:      u16,
+    length:        u32,
+    root:          u32,
+    child:         u32,
+    root_x:        i16,
+    root_y:        i16,
+    win_x:         i16,
+    win_y:         i16,
+    mask:          u16,
+    pad0:          [2]u8,
+}
+
 Query_Extension_Reply :: struct {
     response_type: u8,
     pad0: u8,
@@ -364,6 +379,7 @@ Event_Header :: struct {
 #assert(size_of(Get_Geometry_Reply) == 24)
 #assert(size_of(Get_Window_Attributes_Reply) == 44)
 #assert(size_of(Query_Tree_Reply) == 32)
+#assert(size_of(Query_Pointer_Reply) == 28)
 #assert(size_of(Query_Extension_Reply) == 12)
 #assert(size_of(Get_Atom_Name_Reply) == 32)
 #assert(size_of(Get_Keyboard_Mapping_Reply) == 32)
@@ -624,6 +640,9 @@ foreign xcb {
 
     xcb_query_tree       :: proc(c: ^Connection, window: u32) -> Cookie ---
     xcb_query_tree_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Query_Tree_Reply ---
+
+    xcb_query_pointer       :: proc(c: ^Connection, window: u32) -> Cookie ---
+    xcb_query_pointer_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Query_Pointer_Reply ---
 
     xcb_query_extension :: proc(c: ^Connection, name_len: u16, name: cstring) -> Cookie ---
     xcb_query_extension_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Query_Extension_Reply ---

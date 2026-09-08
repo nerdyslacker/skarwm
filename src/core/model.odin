@@ -286,6 +286,18 @@ Output_At_Rect :: proc(m: ^Manager, r: Rect) -> ^Output {
     return best
 }
 
+// Output_At_Point returns the output containing a root-coordinate point.
+// Gaps outside every RandR monitor fall back to the active output.
+Output_At_Point :: proc(m: ^Manager, x, y: i32) -> ^Output {
+    for o in m.Outputs {
+        if x >= o.Geom.X && x < o.Geom.X + o.Geom.W &&
+           y >= o.Geom.Y && y < o.Geom.Y + o.Geom.H {
+            return o
+        }
+    }
+    return Active_Output(m)
+}
+
 Current_WS :: proc(m: ^Manager) -> ^Workspace {
     o := Active_Output(m)
     if o == nil { return nil }
