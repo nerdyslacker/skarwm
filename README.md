@@ -60,8 +60,12 @@ configuration under `extra/` uses:
 
 - Quickshell and a JetBrainsMono Nerd Font for the bar;
 - Picom for compositing and Dunst for notifications;
-- the native searchable Quickshell application launcher and Feh for wallpaper
-  handling (Rofi is only used by the optional weather settings helper);
+- native searchable Quickshell application and weather-settings popups, plus
+  Feh for wallpaper handling;
+- `setxkbmap` and `xkb-switch` for the keyboard-layout indicator, picker, and
+  configuration popup;
+- Clipmenu (`clipmenud`, `clipmenu`, and `clipdel`) for text clipboard history,
+  plus Xdotool for popup placement and pasting;
 - Kitty as the configured terminal;
 - renCal for the full calendar interface and Python 3 for loading its local
   events into the calendar popup;
@@ -84,9 +88,10 @@ On Void, install the available packages with XBPS; Betterlockscreen and a Nerd
 Font may need to be installed separately depending on the enabled repositories:
 
 ```sh
-sudo xbps-install -S quickshell picom dunst rofi feh kitty xss-lock \
+sudo xbps-install -S quickshell picom dunst feh kitty xss-lock \
   betterlockscreen udiskie lxqt-policykit NetworkManager bluez pavucontrol \
-  curl flameshot brightnessctl python3 renCal xterm xinput xdotool
+  curl flameshot brightnessctl python3 renCal xterm xinput xdotool clipmenu \
+  xkb-switch setxkbmap
 ```
 
 ## Build
@@ -112,9 +117,12 @@ make xephyr
 ```
 
 This builds skarwm, opens a 1280×800 Xephyr window on display `:2`, and runs
-skarwm inside it. Click inside the nested display and use the normal bindings;
-for example, `Super+Return` opens the configured terminal. Close the Xephyr
-window or press Ctrl-C in the launching terminal to stop both processes.
+skarwm with `extra/config.rc` inside it. `SKARWM_EXTRA_DIR` points at the
+checkout's `extra/` tree, while writable state—including the isolated clipmenu
+store—uses a temporary directory. Click inside the nested display and use the
+full desktop bindings; for example, `Super+V` opens clipboard history. Close
+the Xephyr window or press Ctrl-C in the launching terminal to stop both
+processes.
 
 For multi-monitor testing:
 
@@ -144,7 +152,8 @@ If display `:2` is already occupied, select another one:
 make xephyr XEPHYR_DISPLAY=:3
 ```
 
-To pass skarwm arguments directly, invoke the launcher itself:
+To override the default config or pass other skarwm arguments directly, invoke
+the launcher itself:
 
 ```sh
 scripts/xephyr.sh single -c config/example.rc
@@ -193,15 +202,32 @@ exec skarwm-session
 
 `SKARWM_CONFIG` selects the WM rc file, `SKARWM_EXTRA_DIR` is the root used by
 the bundled autostarts, QML, and helper scripts, and `SKARWM_STATE_DIR` holds
-writable bar settings such as weather and Pomodoro state. The state directory
-defaults to the extra directory for a per-user install and to the XDG state
-directory when the extras come from `/usr/share`.
+writable bar settings such as weather, Pomodoro, and keyboard-layout state. The
+state directory defaults to the extra directory for a per-user install and to
+the XDG state directory when the extras come from `/usr/share`.
+
+The keyboard module imports the layouts already configured in XKB. Left-click
+it to select a layout; right-click it to search XKB's installed language
+catalogue, choose layouts, set aligned variants, and select the group-switch
+shortcut. Those choices are reapplied when the bar starts.
+
+`clipmenud` records up to 100 text clipboard entries in a skarwm-specific
+store. It is launched with `CM_SELECTIONS=clipboard`, so highlighting text
+through X11's PRIMARY selection does not add popup history; an explicit copy
+does. The private store also prevents another default `clipmenud` user service
+from mixing PRIMARY entries into this popup. Click the clipboard bar icon to
+open history beneath the bar, or use `Super+V` to open the same searchable
+popup beside the pointer. Click an entry—or select it with the arrow keys and
+Enter—to paste it into the window that was focused before the popup opened.
+Clear removes the stored history. Images and pinned entries are not supported
+by this clipmenu-backed popup.
 
 The full rc starts:
 
 - `lxqt-policykit-agent`;
 - the bundled default wallpaper through Feh;
 - Dunst, Picom, and Quickshell with the installed configurations;
+- `clipmenud`, restricted to the CLIPBOARD selection;
 - `xss-lock`, which invokes Betterlockscreen;
 - Udiskie with its smart tray integration.
 
@@ -274,7 +300,16 @@ Default interaction highlights:
 - `Super`+wheel up/down: scroll the window strip left/right by one column;
 - `Super+,/.`: focus the previous/next monitor;
 - `Super+Shift+,/.`: send the focused window to the previous/next monitor;
-- click: focus; `Super`+left-drag/right-drag: move/resize a floating window.
+- click: focus; `Super`+left-drag moves a floating window or drops a tiled
+  window into another column; both operations work across monitors;
+  `Super`+right-drag resizes a floating window.
+
+While a tiled window is dragged, exactly four outlined choices appear on each
+monitor, regardless of its window count. Top and bottom insert the window at
+that end of the monitor's focused column. Left and right create a horizontal
+column at the corresponding workspace edge. The zones fill the work area: a
+full-width top band, a middle row split left/right, and a full-width bottom
+band. On an empty monitor, any choice creates its first column.
 
 Tabbed mode applies only to the focused column, so the rest of the workspace
 continues tiling normally. Choose the members by moving windows into that
@@ -334,9 +369,11 @@ reference.
 
 RandR 1.5 monitor objects are discovered at startup and rescanned after screen,
 CRTC, output, and resource changes. Each monitor keeps its own current
-workspace. Monitor focus and movement wrap in RandR discovery order. If a
-monitor disappears, its workspaces and windows migrate to a surviving monitor.
-Servers without RandR 1.5 fall back to one screen-sized output.
+workspace and viewport position. New windows open on the monitor containing
+the pointer, and `Super`+wheel scrolls only the monitor under the pointer.
+Monitor focus and movement wrap in RandR discovery order. If a monitor
+disappears, its workspaces and windows migrate to a surviving monitor. Servers
+without RandR 1.5 fall back to one screen-sized output.
 
 All keyboard bindings can be replaced in the rc file. Mouse drag and wheel
 scrolling use the configured `mod_key`; explicit `mousebind` directives remain

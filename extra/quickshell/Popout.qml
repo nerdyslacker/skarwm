@@ -17,6 +17,11 @@ PopupWindow {
     readonly property real cardPadding: 14
     // right-edge panel mode (control center) instead of centered-under-anchor
     property bool alignRight: false
+    // Optional point positioning for keyboard-invoked menus. Coordinates are
+    // global X11 coordinates and are clamped to their containing screen.
+    property bool positionAtPoint: false
+    property real pointX: 0
+    property real pointY: 0
 
     default property alias content: inner.data
 
@@ -26,21 +31,62 @@ PopupWindow {
 
     anchor.item: anchorItem
     anchor.rect.x: uOffsetX
-    anchor.rect.y: (anchorItem?.height ?? 0) + 12
+    anchor.rect.y: uOffsetY
     implicitWidth: cardWidth
     implicitHeight: cardHeight
 
     // Window offset from the anchor item, clamped to the screen.
     property real uOffsetX: 0
+    property real uOffsetY: (anchorItem?.height ?? 0) + 12
+
+    function showAtAnchor() {
+        positionAtPoint = false
+        visible = true
+    }
+
+    function showAtGlobalPoint(x, y) {
+        positionAtPoint = true
+        pointX = x
+        pointY = y
+        visible = true
+    }
 
     onVisibleChanged: {
         if (visible && anchorItem) {
             const p = anchorItem.mapToGlobal(0, 0)
-            const sw = Quickshell.screens.length ? Quickshell.screens[0].width : 1920
-            const desired = alignRight ? sw - cardWidth - 8
-                : Math.min(Math.max(p.x + anchorItem.width / 2 - cardWidth / 2, 8),
-                           sw - cardWidth - 8)
-            uOffsetX = desired - p.x
+            let target = null
+            const locateX = positionAtPoint ? pointX : p.x
+            const locateY = positionAtPoint ? pointY : p.y
+            for (const candidate of Quickshell.screens) {
+                if (locateX >= candidate.x && locateX < candidate.x + candidate.width
+                        && locateY >= candidate.y && locateY < candidate.y + candidate.height) {
+                    target = candidate
+                    break
+                }
+            }
+            if (!target && Quickshell.screens.length)
+                target = Quickshell.screens[0]
+
+            const screenX = target ? target.x : 0
+            const screenY = target ? target.y : 0
+            const screenWidth = target ? target.width : 1920
+            const screenHeight = target ? target.height : 1080
+            const leftEdge = screenX + 8
+            const rightEdge = screenX + screenWidth - cardWidth - 8
+            const desiredX = positionAtPoint
+                ? Math.min(Math.max(pointX + 12, leftEdge), rightEdge)
+                : alignRight ? rightEdge
+                : Math.min(Math.max(p.x + anchorItem.width / 2 - cardWidth / 2,
+                                    leftEdge), rightEdge)
+            uOffsetX = desiredX - p.x
+            if (positionAtPoint) {
+                const topEdge = screenY + 8
+                const bottomEdge = screenY + screenHeight - cardHeight - 8
+                const desiredY = Math.min(Math.max(pointY + 12, topEdge), bottomEdge)
+                uOffsetY = desiredY - p.y
+            } else {
+                uOffsetY = anchorItem.height + 12
+            }
             inner.forceActiveFocus()
             enterAnim.restart()
         }

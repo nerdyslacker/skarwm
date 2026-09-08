@@ -63,6 +63,7 @@ geom_of() { xtops | awk -v id="$1" '$1==id{print $2; exit}'; }
 # (negative X) still count as tiled.
 count_tiled() { xtops | awk '$2 ~ /^(1260|624)x/{n++} END{print n+0}'; }
 first_tiled_id() { xtops | awk '$2 ~ /^(1260|624)x/{print $1; exit}'; }
+unnamed_children() { xwininfo -root -tree 2>/dev/null | grep -c '(has no name)' || true; }
 
 # geosplit <WxH+X+Y> sets $gw $gh $gx $gy
 geosplit() {
@@ -139,6 +140,30 @@ key super+Return
 if wait_tiled_n 2; then pass "spawn second terminal -> 2 columns"; else fail "spawn second terminal"; fi
 # fill-up-to-2: both columns fit on screen together and the viewport never pans
 if wait_for two_side_by_side; then pass "two columns tile side-by-side on screen (no scroll)"; else fail "two side-by-side"; fi
+
+# ---- 2b. tiled Super+drag shows four zones and drops vertically --------------
+before_overlay=$(unnamed_children)
+xdotool mousemove 950 400 keydown Super_L mousedown 1 >/dev/null 2>&1
+sleep 0.3
+xdotool mousemove 640 100 >/dev/null 2>&1
+sleep 0.3
+during_overlay=$(unnamed_children)
+if [ $((during_overlay - before_overlay)) -eq 16 ]; then pass "tiled drag shows exactly four drop-zone outlines"; else fail "fixed four-way drop-zone overlay"; fi
+xdotool mouseup 1 keyup Super_L >/dev/null 2>&1
+if wait_for stack_of_two; then pass "tiled drag top zone stacks vertically"; else fail "tiled drag vertical drop"; fi
+sleep 0.3
+after_overlay=$(unnamed_children)
+if [ "$after_overlay" -le "$before_overlay" ]; then pass "drop-zone overlays close after drop"; else fail "drop-zone overlay cleanup"; fi
+
+# Toggle to tabbed and back to split the test stack into two horizontal columns,
+# restoring the fixture expected by the keyboard movement checks below.
+key super+t
+key super+t
+if wait_for two_side_by_side; then pass "tiled drag fixture restores horizontal columns"; else fail "restore after tiled drag"; fi
+# The drag ended over the left tile. Focus the right tile again, then park the
+# pointer in the bottom gap so focus-follows-mouse cannot perturb key tests.
+xdotool mousemove 950 400 >/dev/null 2>&1; sleep 0.3
+xdotool mousemove 640 795 >/dev/null 2>&1; sleep 0.3
 
 # ---- 3. move the focused (right) window left -> a vertical two-stack ----------
 key super+shift+h

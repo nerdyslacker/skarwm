@@ -81,6 +81,7 @@ wm_startup :: proc() -> bool {
     g_wm.rules = make([dynamic]Raw_Rule, 0, 4)
     g_wm.ran_startups = make([dynamic]string, 0, 4)
     g_wm.tabs = make([dynamic]Tab_Decoration, 0, 8)
+    g_wm.drop_windows = make([dynamic]u32, 0, 32)
     g_wm.lock = MOD_MASK_LOCK
 
     // Claim the screen. If a WM already has a SubstructureRedirect grab on the
@@ -118,6 +119,8 @@ wm_startup :: proc() -> bool {
 }
 
 cleanup_all :: proc() {
+    drop_overlay_hide()
+    if g_wm.drop_windows != nil { delete(g_wm.drop_windows) }
     help_hide()
     tabs_shutdown()
     release_bindings(&g_wm.bindings)
@@ -281,7 +284,7 @@ handle_event :: proc(ev: ^Event) {
         ok, override_redir, _, class := window_info(e.window)
         if !ok || override_redir { return }
         if class == WINDOW_CLASS_INPUT_ONLY { return }
-        manage(e.window, false)
+        manage(e.window, false, output_at_pointer())
 
     case u8(EVENT_UNMAP_NOTIFY):
         // client withdrew/iconified itself; drop it (re-managed on next MapRequest)

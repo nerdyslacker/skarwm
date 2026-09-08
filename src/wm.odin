@@ -38,8 +38,11 @@ Wm :: struct {
     running:  bool,
     mouse_client: ^c.Client,
     mouse_resize: bool,
+    mouse_tiled_drag: bool,
     mouse_root_x, mouse_root_y: i16,
     mouse_start: c.Rect,
+    drop_windows: [dynamic]u32,
+    drop_target: c.Drop_Target,
     tabs: [dynamic]Tab_Decoration,
     tab_gc, tab_font: u32,
     help_window: u32,
@@ -159,7 +162,7 @@ raise_docks :: proc() {
 
 // manage reads window metadata and adds the window to the model, maps it and
 // focuses it. `float_override` forces floating (used for dialog-style windows).
-manage :: proc(xid: u32, float_override: bool) {
+manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil) {
     m := g_wm.m
     if _, ok := m.ByXid[xid]; ok {
         return // already managed
@@ -199,6 +202,15 @@ manage :: proc(xid: u32, float_override: bool) {
     }
 
     adopt_pre_fullscreen(cl) // inherit _NET_WM_STATE_FULLSCREEN set before mapping
+
+    // A MapRequest has no coordinates of its own. Its caller queries the root
+    // pointer and supplies the output so normal clients open where the pointer
+    // is. Docks retain their geometry-based placement path above.
+    old_ws := c.Current_WS(m)
+    if requested_output != nil && c.Focus_Output(m, requested_output) {
+        ipc_broadcast_output_event("focus", requested_output.Name)
+        ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, requested_output.Current, old_ws)
+    }
 
     ws := c.Current_WS(m)
     if ws == nil {
@@ -746,6 +758,23 @@ send_client_message :: proc(win, msg_type, data0, time: u32) {
 // pointer/enter (focus-follows-mouse)
 // ---------------------------------------------------------------------------
 
+// output_at_pointer resolves the current root pointer position to a RandR
+// output. MapRequest carries no coordinates, so new-window placement needs
+// this small synchronous query.
+output_at_pointer :: proc() -> ^c.Output {
+    cookie := xcb_query_pointer(g_wm.conn, g_wm.root)
+    e: ^Error
+    reply := xcb_query_pointer_reply(g_wm.conn, cookie, &e)
+    if e != nil {
+        free_libc(e)
+        return c.Active_Output(g_wm.m)
+    }
+    if reply == nil { return c.Active_Output(g_wm.m) }
+    defer free_libc(reply)
+    if reply.same_screen == 0 { return c.Active_Output(g_wm.m) }
+    return c.Output_At_Point(g_wm.m, i32(reply.root_x), i32(reply.root_y))
+}
+
 on_enter :: proc(ev: ^Enter_Notify_Event) {
     if !g_wm.m.Cfg.FocusFollowsMouse { return }
     if ev.mode != NOTIFY_MODE_NORMAL { return } // ignore grabs / synthetic
@@ -805,7 +834,8 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
     if g_wm.primary_mod != 0 && clean == g_wm.primary_mod && (ev.detail == 4 || ev.detail == 5) {
         dir := -1
         if ev.detail == 5 { dir = 1 }
-        if c.Scroll_Viewport(g_wm.m, dir) { reflow_preserve_viewport() }
+        output := c.Output_At_Point(g_wm.m, i32(ev.root_x), i32(ev.root_y))
+        if c.Scroll_Output_Viewport(g_wm.m, output, dir) { reflow_preserve_viewport() }
         return
     }
 
@@ -820,13 +850,17 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
         render_focus()
         ipc_broadcast_focus_change(old, cl)
     }
-    drag := g_wm.primary_mod != 0 && clean & g_wm.primary_mod == g_wm.primary_mod && cl.Floating
-    if drag && (ev.detail == 1 || ev.detail == 3) {
+    modified := g_wm.primary_mod != 0 && clean & g_wm.primary_mod == g_wm.primary_mod
+    floating_drag := modified && cl.Floating && (ev.detail == 1 || ev.detail == 3)
+    tiled_drag := modified && !cl.Floating && ev.detail == 1
+    if floating_drag || tiled_drag {
         g_wm.mouse_client = cl
-        g_wm.mouse_resize = ev.detail == 3
+        g_wm.mouse_resize = floating_drag && ev.detail == 3
+        g_wm.mouse_tiled_drag = tiled_drag
         g_wm.mouse_root_x = ev.root_x
         g_wm.mouse_root_y = ev.root_y
         g_wm.mouse_start = cl.FloatingRect
+        if tiled_drag { drop_overlay_update(i32(ev.root_x), i32(ev.root_y)) }
         xcb_allow_events(g_wm.conn, ALLOW_ASYNC_POINTER, ev.time)
     } else {
         xcb_allow_events(g_wm.conn, ALLOW_REPLAY_POINTER, ev.time)
@@ -837,6 +871,19 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
 on_motion :: proc(ev: ^Motion_Notify_Event) {
     cl := g_wm.mouse_client
     if cl == nil { return }
+    if g_wm.mouse_tiled_drag {
+        drop_overlay_update(i32(ev.root_x), i32(ev.root_y))
+        return
+    }
+    if !g_wm.mouse_resize {
+        old_ws := cl.Ws
+        output := c.Output_At_Point(g_wm.m, i32(ev.root_x), i32(ev.root_y))
+        if c.Move_Floating_To_Output(g_wm.m, cl, output) {
+            ipc_broadcast_output_event("focus", output.Name)
+            ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, output.Current, old_ws)
+            ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
+        }
+    }
     dx := i32(ev.root_x - g_wm.mouse_root_x)
     dy := i32(ev.root_y - g_wm.mouse_root_y)
     r := g_wm.mouse_start
@@ -852,8 +899,27 @@ on_motion :: proc(ev: ^Motion_Notify_Event) {
 }
 
 on_button_release :: proc(ev: ^Button_Press_Event) {
+    cl := g_wm.mouse_client
+    if cl != nil && g_wm.mouse_tiled_drag {
+        old_output := cl.Out
+        old_ws := cl.Ws
+        target := c.Drop_Target_At_Point(g_wm.m, i32(ev.root_x), i32(ev.root_y), cl)
+        drop_overlay_hide()
+        if c.Move_Client_To_Drop(g_wm.m, cl, target) {
+            if target.Out != old_output {
+                ipc_broadcast_output_event("focus", target.Out.Name)
+                ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, target.Ws, old_ws)
+            }
+            reflow()
+            raise_focused()
+            ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
+        }
+    } else if g_wm.mouse_tiled_drag {
+        drop_overlay_hide()
+    }
     g_wm.mouse_client = nil
     g_wm.mouse_resize = false
+    g_wm.mouse_tiled_drag = false
 }
 
 NOTIFY_MODE_NORMAL :: u8(0)

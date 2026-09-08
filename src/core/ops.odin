@@ -29,6 +29,18 @@ Activate_WS :: proc(m: ^Manager, ws: ^Workspace) {
     m.Focused = ws.Focus
 }
 
+// Focus_Output selects a specific connected output and restores that output's
+// independently remembered workspace focus.
+Focus_Output :: proc(m: ^Manager, o: ^Output) -> bool {
+    idx := Output_Index(m, o)
+    if idx < 0 { return false }
+    if o.Current == nil { o.Current = Ensure_WS_On_Output(o, 1) }
+    changed := m.Active != idx
+    m.Active = idx
+    m.Focused = o.Current.Focus
+    return changed
+}
+
 // Focus_Output_Rel selects the next/previous output in discovery order,
 // wrapping at both ends. Each output retains its independent current workspace.
 Focus_Output_Rel :: proc(m: ^Manager, dir: int) -> bool {
@@ -37,11 +49,7 @@ Focus_Output_Rel :: proc(m: ^Manager, dir: int) -> bool {
     idx := m.Active + (dir / abs(dir))
     if idx < 0 { idx = n - 1 }
     if idx >= n { idx = 0 }
-    m.Active = idx
-    o := m.Outputs[idx]
-    if o.Current == nil { o.Current = Ensure_WS_On_Output(o, 1) }
-    m.Focused = o.Current.Focus
-    return true
+    return Focus_Output(m, m.Outputs[idx])
 }
 
 // Switch_WS_Id activates the workspace with the given 1-based id, creating it
@@ -349,6 +357,116 @@ move_window_to_column :: proc(ws: ^Workspace, cl: ^Client, col: ^Column, ci: int
     append(&target.Wins, cl)
     target.Focus = cl
     ws.Focus = cl
+    return true
+}
+
+// Move_Client_To_Column implements pointer drag-and-drop for tiled windows.
+// The destination may belong to another visible workspace/output. The moved
+// client becomes the destination column's focus (and active tab when tabbed),
+// and keyboard focus follows it to the destination output.
+Move_Client_To_Column :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output, dst: ^Workspace, target: ^Column) -> bool {
+    row := 0
+    if target != nil { row = len(target.Wins) }
+    return Move_Client_To_Drop(m, cl, Drop_Target{
+        Kind = .Into_Column, Out = dst_o, Ws = dst, Col = target, Row_Index = row,
+    })
+}
+
+// Move_Client_To_Drop applies a four-way tiled drop target. Top/bottom zones
+// insert at the corresponding end of the focused vertical stack; left/right
+// zones create a new horizontal column at the workspace edge.
+Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool {
+    if drop.Kind == .Into_Column {
+        if m == nil || cl == nil || cl.Ws == nil || cl.Floating || cl.Fullscreen ||
+           drop.Out == nil || drop.Ws == nil || drop.Col == nil ||
+           drop.Out.Current != drop.Ws {
+            return false
+        }
+        dst_index := Output_Index(m, drop.Out)
+        if dst_index < 0 || drop.Row_Index < 0 || drop.Row_Index > len(drop.Col.Wins) { return false }
+        target_found := false
+        for candidate in drop.Ws.Cols {
+            if candidate == drop.Col { target_found = true; break }
+        }
+        if !target_found { return false }
+
+        src := cl.Ws
+        ci, source, row := column_of(src, cl)
+        if source == nil { return false }
+        insert_at := drop.Row_Index
+        if source == drop.Col {
+            if len(source.Wins) == 1 { return false }
+            ordered_remove(&source.Wins, row)
+            if row < insert_at { insert_at -= 1 }
+        } else {
+            if source.Focus == cl { source.Focus = in_column_focus_after_removal(source, row) }
+            ordered_remove(&source.Wins, row)
+            if len(source.Wins) == 0 { detach_column_empty(src, ci) }
+            if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
+        }
+        array_insert_at(&drop.Col.Wins, insert_at, cl)
+        drop.Col.Focus = cl
+        drop.Ws.Focus = cl
+        cl.Ws = drop.Ws
+        cl.Out = drop.Out
+        m.Active = dst_index
+        m.Focused = cl
+        return true
+    }
+    if m == nil || cl == nil || cl.Ws == nil || cl.Floating || cl.Fullscreen ||
+       drop.Kind != .New_Column || drop.Out == nil || drop.Ws == nil ||
+       drop.Out.Current != drop.Ws {
+        return false
+    }
+    dst_index := Output_Index(m, drop.Out)
+    if dst_index < 0 || drop.Insert_Index < 0 || drop.Insert_Index > len(drop.Ws.Cols) { return false }
+
+    src := cl.Ws
+    ci, source, row := column_of(src, cl)
+    if source == nil { return false }
+    insert_at := drop.Insert_Index
+    source_removed := len(source.Wins) == 1
+
+    if source.Focus == cl { source.Focus = in_column_focus_after_removal(source, row) }
+    ordered_remove(&source.Wins, row)
+    if source_removed {
+        detach_column_empty(src, ci)
+        if src == drop.Ws && ci < insert_at { insert_at -= 1 }
+    }
+    if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
+
+    fresh := new_column()
+    append(&fresh.Wins, cl)
+    fresh.Focus = cl
+    array_insert_at(&drop.Ws.Cols, insert_at, fresh)
+    drop.Ws.Focus = cl
+    cl.Ws = drop.Ws
+    cl.Out = drop.Out
+    m.Active = dst_index
+    m.Focused = cl
+    return true
+}
+
+// Move_Floating_To_Output transfers a floating client to another output's
+// visible workspace without changing its root-coordinate drag rectangle.
+Move_Floating_To_Output :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output) -> bool {
+    if m == nil || cl == nil || cl.Ws == nil || !cl.Floating || cl.Fullscreen ||
+       dst_o == nil || dst_o == cl.Out || dst_o.Current == nil {
+        return false
+    }
+    dst_index := Output_Index(m, dst_o)
+    if dst_index < 0 { return false }
+    src := cl.Ws
+    remove_floater(src, cl)
+    if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
+
+    dst := dst_o.Current
+    append(&dst.Floaters, cl)
+    dst.Focus = cl
+    cl.Ws = dst
+    cl.Out = dst_o
+    m.Active = dst_index
+    m.Focused = cl
     return true
 }
 
@@ -667,15 +785,16 @@ Toggle_Column_Layout :: proc(m: ^Manager) -> bool {
     return true
 }
 
-// Scroll_Viewport pans the active workspace one column step. A positive
+// Scroll_Output_Viewport pans an output's visible workspace one column step.
+// A positive
 // direction reveals content to the right (windows move left); a negative
 // direction reveals content to the left (windows move right). Focus is not
 // changed and the viewport is clamped to the strip edges.
-Scroll_Viewport :: proc(m: ^Manager, dir: int) -> bool {
+Scroll_Output_Viewport :: proc(m: ^Manager, o: ^Output, dir: int) -> bool {
     if dir == 0 { return false }
-    ws := Current_WS(m)
-    o := Active_Output(m)
-    if ws == nil || o == nil || len(ws.Cols) == 0 { return false }
+    if o == nil { return false }
+    ws := o.Current
+    if ws == nil || len(ws.Cols) == 0 { return false }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
     _, step := strip_geometry(p, len(ws.Cols))
     if step <= 0 { return false }
@@ -684,6 +803,12 @@ Scroll_Viewport :: proc(m: ^Manager, dir: int) -> bool {
     if next == ws.ViewportX { return false }
     ws.ViewportX = next
     return true
+}
+
+// Scroll_Viewport retains the action API for keyboard/IPC callers by targeting
+// the active output. Pointer wheel handling selects its output explicitly.
+Scroll_Viewport :: proc(m: ^Manager, dir: int) -> bool {
+    return Scroll_Output_Viewport(m, Active_Output(m), dir)
 }
 
 // ----------------------------------------------------------------------------

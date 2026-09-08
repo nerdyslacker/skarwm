@@ -71,24 +71,38 @@ else
   fail "primary monitor selection"
 fi
 
+# Keep the primary/active output on LEFT but place the pointer on RIGHT. The
+# new client must follow the pointer rather than the previously active output.
+xdotool mousemove 960 400 >/dev/null 2>&1
 xdotool key --clearmodifiers super+Return >/dev/null 2>&1
 wid=
+x=
 for _ in $(seq 1 45); do
   wid=$(xdotool search --onlyvisible --class XTerm 2>/dev/null | head -1)
-  [ -z "$wid" ] || break
-  sleep 0.3
-done
-if [ -n "$wid" ]; then pass "spawns a client on the active monitor"; else fail "spawn on active monitor"; fi
-
-if [ -n "$wid" ]; then ./build/skarwm-msg move output next >/dev/null; fi
-x=
-for _ in $(seq 1 30); do
-  if [ -n "$wid" ]; then x=$(xwininfo -id "$wid" 2>/dev/null | awk '/Absolute upper-left X/{print $4}'); fi
+  if [ -n "$wid" ]; then
+    x=$(xwininfo -id "$wid" 2>/dev/null | awk '/Absolute upper-left X/{print $4}')
+  fi
   if [ -n "$x" ] && [ "$x" -ge 640 ]; then break; fi
   sleep 0.3
 done
-if [ -n "$x" ] && [ "$x" -ge 640 ]; then pass "moves a window to the next monitor"; else fail "move window to next monitor"; fi
+if [ -n "$x" ] && [ "$x" -ge 640 ]; then
+  pass "spawns a client on the monitor under the pointer"
+else
+  fail "spawn on pointer monitor"
+fi
 
+if [ -n "$wid" ]; then ./build/skarwm-msg move output previous >/dev/null; fi
+x=
+for _ in $(seq 1 30); do
+  if [ -n "$wid" ]; then x=$(xwininfo -id "$wid" 2>/dev/null | awk '/Absolute upper-left X/{print $4}'); fi
+  if [ -n "$x" ] && [ "$x" -lt 640 ]; then break; fi
+  sleep 0.3
+done
+if [ -n "$x" ] && [ "$x" -lt 640 ]; then pass "moves a window to the previous monitor"; else fail "move window to previous monitor"; fi
+
+# Moving a window leaves the source output active. Return focus to LEFT before
+# checking that both outputs retain independent current workspaces.
+./build/skarwm-msg focus output previous >/dev/null
 ./build/skarwm-msg focus output next >/dev/null
 ./build/skarwm-msg workspace 2 >/dev/null
 ./build/skarwm-msg focus output prev >/dev/null

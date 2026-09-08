@@ -1,0 +1,75 @@
+#!/bin/sh
+
+# Adapter between clipmenu's dmenu-compatible launcher protocol and the
+# Quickshell clipboard popup. This works with both the shell-based v6 tools and
+# the compiled v7 tools without depending on either version's private store.
+
+set -eu
+
+# Use skarwm's dedicated clipmenu store unless the caller (notably the Xephyr
+# launcher or tests) provided an explicit one. This prevents a separately
+# managed default clipmenud from mixing PRIMARY entries into the popup.
+if [ -z "${CM_DIR:-}" ]; then
+    extra_dir=${SKARWM_EXTRA_DIR:-"$HOME/.config/skarwm"}
+    state_dir=${SKARWM_STATE_DIR:-"$extra_dir"}
+    CM_DIR=$state_dir/clipmenu
+    export CM_DIR
+fi
+mkdir -p -- "$CM_DIR"
+
+launcher_mode=${SKARWM_CLIPMENU_LAUNCHER_MODE:-}
+if [ "$launcher_mode" = capture ]; then
+    : "${SKARWM_CLIPMENU_CAPTURE_FILE:?}"
+    while IFS= read -r line; do
+        printf '%s\n' "$line"
+    done > "$SKARWM_CLIPMENU_CAPTURE_FILE"
+    exit 0
+fi
+
+if [ "$launcher_mode" = select ]; then
+    : "${SKARWM_CLIPMENU_ROW:?}"
+    awk -v wanted="$SKARWM_CLIPMENU_ROW" '
+        NR == wanted + 1 { print; exit }
+    '
+    exit 0
+fi
+
+action=${1:-}
+
+case "$action" in
+    daemon)
+        export CM_SELECTIONS=clipboard CM_MAX_CLIPS=100
+        exec clipmenud
+        ;;
+    list)
+        capture_file=$(mktemp "${TMPDIR:-/tmp}/skarwm-clipmenu.XXXXXX")
+        trap 'rm -f -- "$capture_file"' EXIT HUP INT TERM
+        if SKARWM_CLIPMENU_LAUNCHER_MODE=capture \
+                SKARWM_CLIPMENU_CAPTURE_FILE="$capture_file" \
+                CM_LAUNCHER="$0" CM_LAUNCHER_PASS_DMENU_ARGS=0 \
+                CM_HISTLENGTH=100 clipmenu; then
+            :
+        else
+            status=$?
+            # An empty launcher response is clipmenu's normal cancellation
+            # status; capture mode intentionally returns no selection.
+            [ "$status" -eq 1 ] || exit "$status"
+        fi
+        sed -n '1,100p' "$capture_file"
+        ;;
+    select)
+        row=${2:-}
+        case "$row" in *[!0-9]*|'') exit 2 ;; esac
+        SKARWM_CLIPMENU_LAUNCHER_MODE=select \
+            SKARWM_CLIPMENU_ROW="$row" \
+            CM_LAUNCHER="$0" CM_LAUNCHER_PASS_DMENU_ARGS=0 \
+            CM_HISTLENGTH=100 clipmenu
+        ;;
+    clear)
+        exec clipdel -d '.*'
+        ;;
+    *)
+        printf 'usage: %s {daemon|list|select ROW|clear}\n' "$0" >&2
+        exit 2
+        ;;
+esac

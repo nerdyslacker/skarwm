@@ -43,11 +43,13 @@ main :: proc() {
     test_add_and_focus()
     test_focus_direction()
     test_move_dir()
+    test_pointer_column_move()
     test_unmanage()
     test_floating()
     test_fullscreen()
     test_tabbed_layout()
     test_multi_output()
+    test_multi_output_scrolling()
     test_layout_geometry()
     test_scrolling()
     test_two_columns_fit()
@@ -305,6 +307,73 @@ test_move_dir :: proc() {
     ok(!c.Move_Dir(m, .Left), "left at first column no-op")
 }
 
+test_pointer_column_move :: proc() {
+    m := c.New_Manager()
+    defer c.Destroy_Manager(m)
+    specs := []c.Output_Spec {
+        {Name = "LEFT", Geom = c.Rect{X = 0, Y = 0, W = 1280, H = 800}, Primary = true},
+        {Name = "RIGHT", Geom = c.Rect{X = 1280, Y = 0, W = 1280, H = 800}},
+        {Name = "EMPTY", Geom = c.Rect{X = 2560, Y = 0, W = 1280, H = 800}},
+    }
+    c.Reconcile_Outputs(m, specs)
+    left := m.Outputs[0]
+    right := m.Outputs[1]
+    empty := m.Outputs[2]
+    moving := add_tiled(m, 100)
+    left_neighbor := add_tiled(m, 101)
+    c.Focus_Output(m, right)
+    target := add_tiled(m, 200)
+    right_neighbor := add_tiled(m, 201)
+    c.Focus_Client(m, target)
+    c.Arrange_All(m)
+
+    vertical := c.Drop_Target_At_Point(m, right.Geom.X + right.Geom.W / 2, right.Geom.Y + 10)
+    eq(vertical.Kind, c.Drop_Kind.Into_Column, "top chooser selects vertical drop")
+    eq(vertical.Out, right, "drop hit resolves destination output")
+    eq(vertical.Ws, right.Current, "drop hit resolves visible destination workspace")
+    ok(vertical.Col != nil, "drop hit resolves destination column")
+
+    c.Focus_Client(m, moving)
+    ok(c.Move_Client_To_Drop(m, moving, vertical), "tiled client drops vertically on another output")
+    eq(moving.Out, right, "dropped client changes output ownership")
+    eq(moving.Ws, right.Current, "dropped client changes workspace ownership")
+    eq(len(vertical.Col.Wins), 2, "destination column receives dropped client")
+    eq(vertical.Col.Wins[0], moving, "top drop inserts client above destination windows")
+    eq(c.Active_Output(m), right, "focus follows cross-output drop")
+    eq(m.Focused, moving, "dropped client retains focus")
+    eq(len(left.Current.Cols), 1, "empty source column is removed")
+    eq(left.Current.Cols[0].Wins[0], left_neighbor, "source neighbor remains tiled")
+
+    c.Arrange_All(m)
+    bottom := c.Drop_Target_At_Point(m, right.Geom.X + right.Geom.W / 2, right.Geom.Y + right.Geom.H - 10)
+    ok(c.Move_Client_To_Drop(m, moving, bottom), "bottom chooser reorders within the vertical column")
+    eq(vertical.Col.Wins[len(vertical.Col.Wins) - 1], moving, "bottom drop inserts client below destination windows")
+
+    horizontal := c.Drop_Target_At_Point(m, right.Geom.X + 10, right.Geom.Y + right.Geom.H / 2)
+    eq(horizontal.Kind, c.Drop_Kind.New_Column, "left chooser selects horizontal drop")
+    ok(c.Move_Client_To_Drop(m, moving, horizontal), "tiled client creates a horizontal column on the same output")
+    eq(len(right.Current.Cols), 3, "horizontal drop adds a destination column")
+    eq(len(right.Current.Cols[0].Wins), 1, "new horizontal column contains only dropped client")
+    eq(right.Current.Cols[0].Wins[0], moving, "horizontal column inserted at left edge")
+
+    empty_drop := c.Drop_Target_At_Point(m, empty.Geom.X + 10, empty.Geom.Y + empty.Geom.H / 2)
+    eq(empty_drop.Kind, c.Drop_Kind.New_Column, "empty output exposes a first-column target")
+    ok(c.Move_Client_To_Drop(m, moving, empty_drop), "tiled client drops onto an empty output")
+    eq(moving.Out, empty, "empty-output drop changes ownership")
+    eq(len(empty.Current.Cols), 1, "empty output gains its first column")
+    eq(empty.Current.Cols[0].Wins[0], moving, "first column contains dropped client")
+
+    c.Focus_Output(m, left)
+    floater := c.New_Client(300)
+    c.Add_Managed(m, left.Current, floater, true)
+    floater.FloatingRect = c.Rect{X = 1400, Y = 100, W = 500, H = 400}
+    ok(c.Move_Floating_To_Output(m, floater, right), "floating drag crosses to another output")
+    eq(floater.Out, right, "floating drag changes output ownership")
+    eq(floater.Ws, right.Current, "floating drag changes workspace ownership")
+    eq(floater.FloatingRect.X, 1400, "floating drag preserves root-coordinate position")
+    eq(c.Active_Output(m), right, "focus follows cross-output floating drag")
+}
+
 // ----------------------------------------------------------------------------
 // unmanage / destroy
 // ----------------------------------------------------------------------------
@@ -553,6 +622,34 @@ test_multi_output :: proc() {
     event := c.ipc_output_event_payload("disconnected", "HDMI-1")
     defer delete(event)
     eq(string(event), `{"change":"disconnected","output":"HDMI-1"}`, "output IPC event payload")
+}
+
+test_multi_output_scrolling :: proc() {
+    m := c.New_Manager()
+    defer c.Destroy_Manager(m)
+    specs := []c.Output_Spec {
+        {Name = "LEFT", Geom = c.Rect{X = -1280, Y = 0, W = 1280, H = 1024}},
+        {Name = "RIGHT", Geom = c.Rect{X = 0, Y = 0, W = 1920, H = 1080}, Primary = true},
+    }
+    c.Reconcile_Outputs(m, specs)
+    left := m.Outputs[0]
+    right := m.Outputs[1]
+
+    eq(c.Output_At_Point(m, -640, 512), left, "negative root coordinate selects left output")
+    eq(c.Output_At_Point(m, 960, 540), right, "root coordinate selects right output")
+    eq(c.Output_At_Point(m, 3000, 540), right, "point outside outputs falls back to active output")
+
+    c.Focus_Output(m, left)
+    for id in u32(100) ..= u32(102) { add_tiled(m, id) }
+    c.Focus_Output(m, right)
+    for id in u32(200) ..= u32(202) { add_tiled(m, id) }
+
+    eq(left.Current.ViewportX, 0, "left viewport starts independently at zero")
+    eq(right.Current.ViewportX, 0, "right viewport starts independently at zero")
+    ok(c.Scroll_Output_Viewport(m, left, 1), "wheel can scroll non-active left output")
+    ok(left.Current.ViewportX > 0, "left output viewport advances")
+    eq(right.Current.ViewportX, 0, "right output viewport remains unchanged")
+    eq(c.Active_Output(m), right, "pointer scrolling does not steal active output")
 }
 
 // ----------------------------------------------------------------------------

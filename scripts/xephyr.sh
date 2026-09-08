@@ -18,6 +18,30 @@ case "$mode" in
         ;;
 esac
 
+# Interactive Xephyr runs exercise the full desktop configuration by default.
+# An explicit -c/--config supplied after the mode still takes precedence.
+has_config=false
+expect_config_path=false
+config_path=extra/config.rc
+for arg in "$@"; do
+    if [ "$expect_config_path" = true ]; then
+        config_path=$arg
+        has_config=true
+        expect_config_path=false
+        continue
+    fi
+    case "$arg" in
+        -c|--config) expect_config_path=true ;;
+    esac
+done
+if [ "$expect_config_path" = true ]; then
+    printf 'error: -c/--config requires a file path\n' >&2
+    exit 2
+fi
+if [ "$has_config" = false ]; then
+    set -- -c extra/config.rc "$@"
+fi
+
 for tool in Xephyr xwininfo; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         printf 'error: %s is required for Xephyr testing\n' "$tool" >&2
@@ -37,11 +61,15 @@ nested_display=${SKARWM_XEPHYR_DISPLAY:-:2}
 socket_path=${SKARWM_XEPHYR_SOCKET:-${TMPDIR:-/tmp}/skarwm-xephyr-$$.sock}
 log_path=${TMPDIR:-/tmp}/skarwm-xephyr-$$.log
 xephyr_pid=
+state_dir=
 
 cleanup() {
     if [ -n "$xephyr_pid" ] && kill -0 "$xephyr_pid" 2>/dev/null; then
         kill "$xephyr_pid" 2>/dev/null || true
         wait "$xephyr_pid" 2>/dev/null || true
+    fi
+    if [ -n "$state_dir" ]; then
+        rm -rf -- "$state_dir"
     fi
     rm -f "$socket_path" "$log_path"
 }
@@ -93,5 +121,10 @@ fi
 
 printf 'Launching skarwm; close the Xephyr window or press Ctrl-C here to stop.\n'
 printf 'Nested IPC socket: %s\n' "$socket_path"
+printf 'Configuration: %s\n' "$config_path"
+state_dir=$(mktemp -d "${TMPDIR:-/tmp}/skarwm-xephyr-state.XXXXXX")
+extra_dir=$(pwd)/extra
 DISPLAY="$nested_display" SKARWM_SOCKET="$socket_path" \
+    SKARWM_EXTRA_DIR="$extra_dir" SKARWM_STATE_DIR="$state_dir" \
+    KITTY_CONFIG_DIRECTORY="$extra_dir/kitty" \
     ./build/skarwm "$@"
