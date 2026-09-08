@@ -2,6 +2,7 @@ singleton Theme Theme.qml
 singleton Wm Wm.qml
 singleton Sys Sys.qml
 singleton KeyboardState KeyboardState.qml
+singleton ClipboardState ClipboardState.qml
 Bar Bar.qml
 BarModule BarModule.qml
 Tags Tags.qml
@@ -21,6 +22,8 @@ Network Network.qml
 KeyboardLayout KeyboardLayout.qml
 KeyboardLayoutPicker KeyboardLayoutPicker.qml
 KeyboardLayoutSettings KeyboardLayoutSettings.qml
+Clipboard Clipboard.qml
+ClipboardPopup ClipboardPopup.qml
 Updates Updates.qml
 Tray Tray.qml
 Bell Bell.qml

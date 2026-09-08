@@ -64,6 +64,8 @@ configuration under `extra/` uses:
   Feh for wallpaper handling;
 - `setxkbmap` and `xkb-switch` for the keyboard-layout indicator, picker, and
   configuration popup;
+- Clipmenu (`clipmenud`, `clipmenu`, and `clipdel`) for text clipboard history,
+  plus Xdotool for popup placement and pasting;
 - Kitty as the configured terminal;
 - renCal for the full calendar interface and Python 3 for loading its local
   events into the calendar popup;
@@ -88,7 +90,7 @@ Font may need to be installed separately depending on the enabled repositories:
 ```sh
 sudo xbps-install -S quickshell picom dunst feh kitty xss-lock \
   betterlockscreen udiskie lxqt-policykit NetworkManager bluez pavucontrol \
-  curl flameshot brightnessctl python3 renCal xterm xinput xdotool \
+  curl flameshot brightnessctl python3 renCal xterm xinput xdotool clipmenu \
   xkb-switch setxkbmap
 ```
 
@@ -115,9 +117,12 @@ make xephyr
 ```
 
 This builds skarwm, opens a 1280×800 Xephyr window on display `:2`, and runs
-skarwm inside it. Click inside the nested display and use the normal bindings;
-for example, `Super+Return` opens the configured terminal. Close the Xephyr
-window or press Ctrl-C in the launching terminal to stop both processes.
+skarwm with `extra/config.rc` inside it. `SKARWM_EXTRA_DIR` points at the
+checkout's `extra/` tree, while writable state—including the isolated clipmenu
+store—uses a temporary directory. Click inside the nested display and use the
+full desktop bindings; for example, `Super+V` opens clipboard history. Close
+the Xephyr window or press Ctrl-C in the launching terminal to stop both
+processes.
 
 For multi-monitor testing:
 
@@ -147,7 +152,8 @@ If display `:2` is already occupied, select another one:
 make xephyr XEPHYR_DISPLAY=:3
 ```
 
-To pass skarwm arguments directly, invoke the launcher itself:
+To override the default config or pass other skarwm arguments directly, invoke
+the launcher itself:
 
 ```sh
 scripts/xephyr.sh single -c config/example.rc
@@ -205,11 +211,23 @@ it to select a layout; right-click it to search XKB's installed language
 catalogue, choose layouts, set aligned variants, and select the group-switch
 shortcut. Those choices are reapplied when the bar starts.
 
+`clipmenud` records up to 100 text clipboard entries in a skarwm-specific
+store. It is launched with `CM_SELECTIONS=clipboard`, so highlighting text
+through X11's PRIMARY selection does not add popup history; an explicit copy
+does. The private store also prevents another default `clipmenud` user service
+from mixing PRIMARY entries into this popup. Click the clipboard bar icon to
+open history beneath the bar, or use `Super+V` to open the same searchable
+popup beside the pointer. Click an entry—or select it with the arrow keys and
+Enter—to paste it into the window that was focused before the popup opened.
+Clear removes the stored history. Images and pinned entries are not supported
+by this clipmenu-backed popup.
+
 The full rc starts:
 
 - `lxqt-policykit-agent`;
 - the bundled default wallpaper through Feh;
 - Dunst, Picom, and Quickshell with the installed configurations;
+- `clipmenud`, restricted to the CLIPBOARD selection;
 - `xss-lock`, which invokes Betterlockscreen;
 - Udiskie with its smart tray integration.
 

@@ -10,8 +10,8 @@ The bar includes:
 - application launcher, workspace tags, focused-window title, and a
   scratchpad-register popup that appears beside the title when needed;
 - media, weather, CPU/RAM/disk/battery metrics, volume, and network state;
-- Void Linux update count, keyboard-layout switching, system tray,
-  notifications, clock and calendar;
+- Void Linux update count, keyboard-layout switching, clipboard history,
+  system tray, notifications, clock and calendar;
 - microphone mute, Caps Lock, screenshots, power controls, and a quick-command
   panel.
 
@@ -41,7 +41,10 @@ Individual modules use these optional programs when available:
 - `xinput` and `xdotool` for outside-click popup dismissal on Quickshell 0.3.0
   (newer releases handle this through `PopupWindow.grabFocus`);
 - `setxkbmap` to read and apply keyboard layouts and `xkb-switch` to report and
-  select the active XKB group.
+  select the active XKB group;
+- `clipmenud`, `clipmenu`, and `clipdel` for text clipboard history, plus
+  `xdotool` to place the keyboard-invoked popup and paste into the previously
+  focused window.
 
 Missing optional tools only affect their corresponding module or action.
 
@@ -86,6 +89,15 @@ setxkbmap -layout us,am,ru -variant ,phonetic,phonetic \
 ```
 
 Other existing XKB options are preserved when the group shortcut changes.
+
+The clipboard module reads clipmenu's daemon-backed text history. Left-click
+its bar module to open the searchable history below the bar; `Super+V` opens
+the same popup beside the pointer. Click an entry to paste it, or use the arrow
+keys and Enter. The bundled autostart sets `CM_SELECTIONS=clipboard`, which
+records explicit clipboard copies but ignores text that was merely selected
+into X11 PRIMARY. It uses a skarwm-specific store, so a separately managed
+default clipmenud cannot add PRIMARY entries to the popup. Images and pinning
+are not supported by this backend.
 
 Left-click the weather module for the forecast. Right-click it for the native
 location and unit settings popup; Save updates the watched state files above.

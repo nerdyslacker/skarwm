@@ -55,6 +55,7 @@ PanelWindow {
             Volume {}
             Network {}
             KeyboardLayout {}
+            Clipboard {}
             Tray {}
             Bell {}
             Clock {}
