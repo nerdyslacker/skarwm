@@ -352,15 +352,18 @@ ewmh_on_client_message :: proc(ev: ^Client_Message_Event) {
 
     switch msg {
     case atom("_NET_ACTIVE_WINDOW"):
-        cl := m.ByXid[ev.window]
-        if cl == nil {
+        target := ev.window
+        cl := m.ByXid[target]
+        if cl == nil && target == g_wm.root {
             // EWMH 1.2-era senders: target in data.l[0], message to root.
-            legacy := u32(ev.data.data32[0])
-            if ev.window == g_wm.root {
-                cl = m.ByXid[legacy]
-            }
+            target = u32(ev.data.data32[0])
+            cl = m.ByXid[target]
         }
-        if cl != nil { ewmh_activate(cl) }
+        if cl != nil {
+            ewmh_activate(cl)
+        } else {
+            ewmh_activate_popup(target)
+        }
 
     case atom("_NET_WM_STATE"):
         ewmh_state_request(ev)
@@ -389,6 +392,22 @@ ewmh_on_client_message :: proc(ev: ^Client_Message_Event) {
         // WM_CHANGE_STATE (iconify), _NET_MOVERESIZE_WINDOW and friends have no
         // skarwm equivalent; ignoring them is the compatible behaviour.
     }
+}
+
+// Override-redirect popup windows are intentionally outside the managed client
+// model, but interactive launchers still need X keyboard focus. Qt's
+// requestActivate() sends _NET_ACTIVE_WINDOW even for these popups. Honour the
+// request only for an existing, mapped InputOutput override-redirect window;
+// normal unmanaged windows and InputOnly helpers remain ignored.
+ewmh_activate_popup :: proc(xid: u32) {
+    if xid == 0 || xid == g_wm.root { return }
+    ok, override_redirect, map_state, class := window_info(xid)
+    if !ok || !override_redirect || map_state != MAP_STATE_VIEWABLE ||
+       class != WINDOW_CLASS_INPUT_OUTPUT {
+        return
+    }
+    xcb_set_input_focus(g_wm.conn, INPUT_FOCUS_POINTER_ROOT, xid, CURRENT_TIME)
+    xcb_flush(g_wm.conn)
 }
 
 // ewmh_state_request applies a _NET_WM_STATE add/remove/toggle for fullscreen.

@@ -30,6 +30,14 @@ Popout {
         visible = !visible
     }
 
+    function focusSearch() {
+        if (!visible)
+            return
+        if (_backingWindow)
+            _backingWindow.requestActivate()
+        search.forceActiveFocus()
+    }
+
     function launch(app) {
         if (!app)
             return
@@ -41,7 +49,22 @@ Popout {
         if (visible) {
             search.text = ""
             appList.currentIndex = applications.length > 0 ? 0 : -1
-            Qt.callLater(() => search.forceActiveFocus())
+            focusAttempts = 0
+            Qt.callLater(() => root.focusSearch())
+            focusRetry.start()
+        }
+    }
+
+    property int focusAttempts: 0
+    Timer {
+        id: focusRetry
+        interval: 50
+        repeat: true
+        onTriggered: {
+            root.focusAttempts++
+            root.focusSearch()
+            if (root.focusAttempts >= 4)
+                stop()
         }
     }
 
