@@ -75,7 +75,7 @@ configuration under `extra/` uses:
 
 The bar and its network popup can additionally use NetworkManager
 tools, BlueZ's `bluetoothctl`, `pactl`, `pavucontrol`, `curl`, `xdg-open`,
-`flameshot`, `brightnessctl`, `powerprofilesctl`, `redshift`, `xset`,
+`flameshot`, `brightnessctl`, `xrandr`, `powerprofilesctl`, `redshift`, `xset`,
 `notify-send`, `xterm`, and the Void `xbps-install` tool. On Quickshell 0.3.0,
 `xinput` and `xdotool` provide the bar popup outside-click fallback. Missing
 optional tools only disable their corresponding widget action.
@@ -90,7 +90,7 @@ Font may need to be installed separately depending on the enabled repositories:
 ```sh
 sudo xbps-install -S quickshell picom dunst feh kitty xss-lock \
   betterlockscreen udiskie lxqt-policykit NetworkManager bluez pavucontrol \
-  curl flameshot brightnessctl python3 renCal xterm xinput xdotool clipmenu \
+  curl flameshot brightnessctl xrandr python3 renCal xterm xinput xdotool clipmenu \
   xkb-switch setxkbmap
 ```
 

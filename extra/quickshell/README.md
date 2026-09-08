@@ -9,13 +9,14 @@ The bar includes:
 
 - application launcher, workspace tags, focused-window title, and a
   scratchpad-register popup that appears beside the title when needed;
-- media, weather, CPU/RAM/disk/battery metrics, volume, and network state; the
+- media, weather, CPU/RAM/disk metrics, battery controls, per-display
+  brightness, volume, and network state; the
   volume popup selects output/input devices, controls their global levels, and
   controls each playback stream;
 - Void Linux update count, keyboard-layout switching, clipboard history,
   system tray, notifications, clock and calendar;
-- microphone mute, Caps Lock, screenshots, power controls, and a quick-command
-  panel.
+- Caps Lock, screenshots, and a user/session command panel with DND, pomodoro,
+  and power controls.
 
 The panel and all cards are square. The panel has no outer margin and is
 anchored directly to the top, left, and right screen edges. Its EWMH strut is
@@ -37,7 +38,7 @@ Individual modules use these optional programs when available:
 - `renCal` to open the full calendar on a clock right-click and Python 3 for
   reading its local Caldir events into the calendar popup;
 - `xbps-install`, `sudo`, and `xterm` for Void update actions;
-- `dunstctl`/`notify-send`, `flameshot`, `brightnessctl`, `powerprofilesctl`,
+- `dunstctl`/`notify-send`, `flameshot`, `brightnessctl`, `xrandr`, `powerprofilesctl`,
   `redshift`, `xset`, `loginctl`, and `betterlockscreen` for their corresponding
   optional controls;
 - `xinput` and `xdotool` for outside-click popup dismissal on Quickshell 0.3.0
@@ -103,6 +104,15 @@ are not supported by this backend.
 
 Left-click the weather module for the forecast. Right-click it for the native
 location and unit settings popup; Save updates the watched state files above.
+
+The battery is a separate module from CPU/RAM/disk. Left-click it to switch the
+power profile, keep the display awake, or toggle night mode. The neighbouring
+sun icon opens one slider per hardware backlight, plus independent XRandR
+controls for additional external displays.
+
+The rightmost command menu shows the current account name and avatar (from
+`~/.face` or AccountsService), followed by DND, pomodoro, and the session power
+buttons. Microphone mute is controlled from the audio popup's input section.
 
 The calendar reads renCal's configured Caldir path automatically. Set
 `CALDIR_DIR` only when you want to override that location.

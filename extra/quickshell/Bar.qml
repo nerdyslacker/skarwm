@@ -52,6 +52,8 @@ PanelWindow {
             Media {}
             Weather {}
             Metrics {}
+            Battery {}
+            Brightness {}
             Volume {}
             Network {}
             KeyboardLayout {}
@@ -59,7 +61,6 @@ PanelWindow {
             Tray {}
             Bell {}
             Clock {}
-            MicMute {}
             CapsLock {}
             Screenshot {}
             Commands {}

@@ -17,6 +17,10 @@ Weather Weather.qml
 WeatherPopup WeatherPopup.qml
 WeatherSettings WeatherSettings.qml
 Metrics Metrics.qml
+Battery Battery.qml
+BatteryPopup BatteryPopup.qml
+Brightness Brightness.qml
+BrightnessPopup BrightnessPopup.qml
 Volume Volume.qml
 AudioPopup AudioPopup.qml
 AudioSlider AudioSlider.qml
@@ -33,10 +37,8 @@ Tray Tray.qml
 Bell Bell.qml
 Clock Clock.qml
 CalendarPopup CalendarPopup.qml
-MicMute MicMute.qml
 CapsLock CapsLock.qml
 Screenshot Screenshot.qml
-PowerMenu PowerMenu.qml
 Commands Commands.qml
 NotifyPopup NotifyPopup.qml
 Popout Popout.qml

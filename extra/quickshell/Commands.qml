@@ -1,82 +1,27 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Command menu: quick actions that have NO other bar surface — power
-// profile, keep-awake, mic mute, night light, bluetooth power, brightness
-// (laptops), pomodoro, updates, power menu. The rule: the bar shows
-// state, this menu holds actions that would otherwise each need a whole
-// new bar widget. Stateful glanceable things (volume, network, DND,
-// media) keep their own modules and never appear here.
-// Quick-settings layout: toggle pills in a 2-col grid (filled = on,
-// right-click = the full external tool where one exists), sliders under
-// them, then launcher rows. Toggles stay open so the state change is
-// visible; launchers close. A running pomodoro puts its countdown on
-// this pill itself — glanceable without a dedicated module.
+// Main right-side menu: identity, focus controls, session actions, and
+// commands that do not need their own bar surface.
 BarModule {
     id: root
 
-    icon: "󰘳"
+    icon: "󰀄"
     iconColor: pomoDone ? Theme.bg
-             : pomoRunning ? Theme.accent : Qt.alpha(Theme.fg, 0.7)
+        : pomoRunning ? Theme.accent : Qt.alpha(Theme.fg, 0.7)
     label: pomoRunning ? fmtPomo(pomoLeft) : pomoDone ? "0:00" : ""
     labelColor: pomoDone ? Theme.bg : Theme.fg
-    // time's-up alert: the pill itself goes red until acknowledged, so
-    // the signal survives DND (which holds the dunst notification back)
     color: pomoDone ? Theme.red
-         : hovered ? Qt.alpha(Theme.fg, 0.14) : Qt.alpha(Theme.fg, 0.07)
+        : hovered ? Qt.alpha(Theme.fg, 0.14) : Qt.alpha(Theme.fg, 0.07)
     progress: pomoRunning ? pomoLeft / pomoTotal : -1
 
-    onClicked: {
-        pomoDone = false
-        menu.visible = !menu.visible
-    }
+    property string userName: String(Quickshell.env("USER") ?? "user")
+    property string displayName: userName
+    property string avatarPath: ""
 
-    // polled on every open; night light has no query, so it's tracked
-    // locally (only this menu toggles it) — everything else is read back
-    // from the system so a bar restart can't desync the pills
-    property string profile: "balanced"
-    property bool caffeine: false
-    property bool nightLight: false
-    property bool hasBacklight: false
-    property int brightness: 50
-
-    Process {
-        id: stateProc
-        // one printf, one guaranteed line per field — a missing tool
-        // yields an empty line instead of shifting the indices below
-        command: ["sh", "-c",
-            "printf '%s\\n' " +
-            "\"$(powerprofilesctl get 2>/dev/null)\" " +
-            "\"$(brightnessctl -m -c backlight 2>/dev/null | head -n1)\" " +
-            "\"$(xset q | awk '/timeout:/{print $2}')\""]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const lines = text.split("\n")
-                if (root.profileOrder.indexOf(lines[0]) >= 0)
-                    root.profile = lines[0]
-                const bl = (lines[1] ?? "").split(",")
-                root.hasBacklight = bl.length >= 4
-                if (root.hasBacklight)
-                    root.brightness = parseInt(bl[3]) || root.brightness
-                // screensaver timeout 0 = blanking disabled = kept awake
-                if (lines[2] !== undefined && lines[2] !== "")
-                    root.caffeine = lines[2] === "0"
-            }
-        }
-    }
-
-    readonly property var profileOrder: ["performance", "balanced", "power-saver"]
-    readonly property var profileIcons: ({ performance: "󰓅", balanced: "󰾅", "power-saver": "󰾆" })
-
-    function cycleProfile() {
-        const next = profileOrder[(profileOrder.indexOf(profile) + 1) % profileOrder.length]
-        Quickshell.execDetached(["powerprofilesctl", "set", next])
-        profile = next
-    }
-
-    // pomodoro: countdown + drain bar live on the pill. Duration edits
-    // only while idle: right-click cycles presets, scroll nudges ±5 min.
     property int pomoMinutes: 25
     readonly property var pomoPresets: [15, 25, 45, 60]
     readonly property int pomoTotal: pomoMinutes * 60
@@ -85,38 +30,56 @@ BarModule {
     property bool pomoDone: false
     readonly property bool pomoRunning: pomoEndMs > 0
 
-    // end-timestamp + minutes in a plain state file so a running timer
-    // (and the duration preference) survives bar restarts; watched, so
-    // Writing `0 25` to the local pomodoro state file stops it from a shell.
+    onClicked: mouse => {
+        if (mouse.button !== Qt.LeftButton)
+            return
+        pomoDone = false
+        menu.visible = !menu.visible
+    }
+
+    function run(command) {
+        menu.visible = false
+        Quickshell.execDetached(command)
+    }
+
+    function restartDesktop() {
+        menu.visible = false
+        const script =
+            "wm=$1; shell_path=$2; notification_id=991049; " +
+            "if ! \"$wm\" reload >/dev/null 2>&1; then " +
+            "notify-send -a skarwm -r $notification_id -u critical " +
+            "-i dialog-error 'Desktop reload failed' " +
+            "'skarwm rejected the configuration; Quickshell was left running.'; " +
+            "exit 1; fi; " +
+            "notify-send -a skarwm -r $notification_id -t 2000 " +
+            "-i system-run 'Reloading desktop' " +
+            "'skarwm reloaded; restarting Quickshell…'; " +
+            "sleep 0.25; qs kill -p \"$shell_path\" >/dev/null 2>&1 || true; " +
+            "sleep 0.4; " +
+            "if qs -d -p \"$shell_path\" >/dev/null 2>&1; then " +
+            "sleep 0.8; notify-send -a skarwm -r $notification_id -t 2500 " +
+            "-i dialog-information 'Desktop reloaded' " +
+            "'skarwm and Quickshell restarted successfully.'; " +
+            "else notify-send -a skarwm -r $notification_id -u critical " +
+            "-i dialog-error 'Quickshell restart failed' " +
+            "'skarwm reloaded, but Quickshell could not be started.'; fi"
+        Quickshell.execDetached([
+            "sh", "-c", script, "skarwm-reload", Wm.msgPath,
+            Theme.configDir + "/quickshell"
+        ])
+    }
+
     function persistPomo() {
         Quickshell.execDetached(["sh", "-c",
             "printf '%s %s\\n' " + Math.round(pomoEndMs) + " " + pomoMinutes +
             " > '" + Theme.stateDir + "/pomodoro'"])
     }
 
-    FileView {
-        path: Theme.stateDir + "/pomodoro"
-        watchChanges: true
-        onFileChanged: reload()
-        onLoaded: {
-            const parts = text().trim().split(/\s+/)
-            const end = parseFloat(parts[0]) || 0
-            const mins = parseInt(parts[1]) || 0
-            if (mins >= 5 && mins <= 90)
-                root.pomoMinutes = mins
-            if (end > Date.now()) {
-                root.pomoEndMs = end
-                root.pomoLeft = Math.round((end - Date.now()) / 1000)
-            } else if (end === 0) {
-                root.pomoEndMs = 0
-            }
-            // end in the past: expired while the bar was down — stay idle
-        }
+    function fmtPomo(seconds) {
+        return Math.floor(seconds / 60) + ":" +
+            String(seconds % 60).padStart(2, "0")
     }
 
-    function fmtPomo(s) {
-        return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0")
-    }
     function togglePomodoro() {
         pomoDone = false
         if (pomoRunning) {
@@ -127,16 +90,58 @@ BarModule {
         }
         persistPomo()
     }
+
     function cyclePomoPreset() {
-        if (pomoRunning) return
+        if (pomoRunning)
+            return
         pomoMinutes = pomoPresets[(pomoPresets.indexOf(pomoMinutes) + 1)
-                                  % pomoPresets.length]
+            % pomoPresets.length]
         persistPomo()
     }
-    function nudgePomo(dir) {
-        if (pomoRunning) return
-        pomoMinutes = Math.min(90, Math.max(5, pomoMinutes + dir * 5))
+
+    function nudgePomo(direction) {
+        if (pomoRunning)
+            return
+        pomoMinutes = Math.min(90, Math.max(5, pomoMinutes + direction * 5))
         persistPomo()
+    }
+
+    Process {
+        running: true
+        command: ["sh", "-c",
+            "u=$(id -un); entry=$(getent passwd \"$u\"); " +
+            "name=$(printf '%s' \"$entry\" | cut -d: -f5 | cut -d, -f1); " +
+            "home=$(printf '%s' \"$entry\" | cut -d: -f6); " +
+            "avatar=''; for f in \"$home/.face\" \"$home/.face.icon\" " +
+            "\"/var/lib/AccountsService/icons/$u\"; do " +
+            "[ -r \"$f\" ] && avatar=$f && break; done; " +
+            "printf '%s\\n%s\\n%s\\n' \"$u\" \"${name:-$u}\" \"$avatar\""]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const lines = text.split("\n")
+                if ((lines[0] ?? "") !== "") root.userName = lines[0]
+                if ((lines[1] ?? "") !== "") root.displayName = lines[1]
+                root.avatarPath = lines[2] ?? ""
+            }
+        }
+    }
+
+    FileView {
+        path: Theme.stateDir + "/pomodoro"
+        watchChanges: true
+        onFileChanged: reload()
+        onLoaded: {
+            const parts = text().trim().split(/\s+/)
+            const end = parseFloat(parts[0]) || 0
+            const minutes = parseInt(parts[1]) || 0
+            if (minutes >= 5 && minutes <= 90) root.pomoMinutes = minutes
+            if (end > Date.now()) {
+                root.pomoEndMs = end
+                root.pomoLeft = Math.round((end - Date.now()) / 1000)
+            } else if (end === 0) {
+                root.pomoEndMs = 0
+            }
+        }
     }
 
     Timer {
@@ -144,13 +149,12 @@ BarModule {
         repeat: true
         running: root.pomoRunning
         onTriggered: {
-            root.pomoLeft = Math.max(0, Math.round((root.pomoEndMs - Date.now()) / 1000))
+            root.pomoLeft = Math.max(0,
+                Math.round((root.pomoEndMs - Date.now()) / 1000))
             if (root.pomoLeft <= 0) {
                 root.pomoEndMs = 0
                 root.pomoDone = true
                 root.persistPomo()
-                // chime plays regardless of DND — it's an alarm; the
-                // notification lands in dunst history if DND holds it
                 Quickshell.execDetached(["paplay", "--volume=40000",
                     "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga"])
                 Quickshell.execDetached(["notify-send", "-u", "critical",
@@ -159,220 +163,249 @@ BarModule {
         }
     }
 
-    // filled = on; right-click launches modelData.alt (full external tool)
-    component TogglePill: Rectangle {
-        id: pill
+    component MenuButton: Rectangle {
+        id: button
         required property var modelData
-        readonly property bool on: modelData.active === true
+        readonly property bool active: modelData.active === true
+        readonly property color accentColor: modelData.color ?? Theme.cyan
 
-        width: (parent.width - 6) / 2
-        height: 40
-        radius: 0
-        color: on ? Theme.selbg
-             : pillMa.containsMouse ? Qt.alpha(Theme.fg, 0.12)
-             : Qt.alpha(Theme.fg, 0.05)
-
+        width: (parent.width - 7) / 2
+        height: 48
+        color: active ? Qt.alpha(accentColor, 0.26)
+            : pointer.containsMouse ? Qt.alpha(accentColor, 0.18)
+            : Qt.alpha(Theme.fg, 0.05)
+        border.width: 1
+        border.color: active || pointer.containsMouse ? accentColor : Theme.gray5
         Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on border.color { ColorAnimation { duration: 120 } }
 
         Row {
             anchors.centerIn: parent
             spacing: 7
-
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: pill.modelData.icon
-                color: pill.modelData.alert ? Theme.red
-                     : pill.on ? Theme.selfg : Theme.cyan
+                text: button.modelData.icon
+                color: button.accentColor
                 font.family: Theme.fontFamily
-                font.pixelSize: 15
-                Behavior on color { ColorAnimation { duration: 250 } }
+                font.pixelSize: 16
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: pill.modelData.label
-                color: pill.on ? Theme.selfg : Qt.alpha(Theme.fg, 0.9)
+                text: button.modelData.label
+                color: Theme.fg
                 font.family: Theme.fontFamily
-                font.pixelSize: 12
-                font.bold: pill.on
+                font.pixelSize: Theme.fontSize
+                font.bold: button.active
             }
         }
 
+        Rectangle {
+            visible: button.modelData.progress !== undefined
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            height: 2
+            width: Math.max(0, Math.min(1,
+                button.modelData.progress ?? 0)) * parent.width
+            color: button.accentColor
+        }
+
         MouseArea {
-            id: pillMa
+            id: pointer
             anchors.fill: parent
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton
-            onClicked: m => {
-                if (m.button === Qt.RightButton) {
-                    if (pill.modelData.alt) {           // external tool
-                        menu.visible = false
-                        Quickshell.execDetached(pill.modelData.alt)
-                    } else if (pill.modelData.altFn) {  // in-panel action
-                        pill.modelData.altFn()
-                    }
-                } else {
-                    pill.modelData.run()
-                }
+            onClicked: mouse => {
+                if (mouse.button === Qt.RightButton && button.modelData.altFn)
+                    button.modelData.altFn()
+                else if (mouse.button === Qt.LeftButton)
+                    button.modelData.run()
             }
-            onWheel: w => pill.modelData.onScroll?.(w.angleDelta.y > 0 ? 1 : -1)
+            onWheel: wheel => button.modelData.onScroll?.(
+                wheel.angleDelta.y > 0 ? 1 : -1)
         }
     }
 
     component CommandRow: Rectangle {
-        id: rowRect
+        id: command
         required property var modelData
 
         width: parent.width
         height: 34
-        radius: 0
-        color: rowMa.containsMouse ? Qt.alpha(Theme.fg, 0.12) : "transparent"
-
+        color: pointer.containsMouse ? Qt.alpha(Theme.fg, 0.12) : "transparent"
         Behavior on color { ColorAnimation { duration: 120 } }
 
         Row {
-            anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left
             anchors.leftMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
             spacing: 10
-
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: rowRect.modelData.icon
+                text: command.modelData.icon
                 color: Theme.cyan
                 font.family: Theme.fontFamily
                 font.pixelSize: 15
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: rowRect.modelData.label
+                text: command.modelData.label
                 color: Qt.alpha(Theme.fg, 0.9)
                 font.family: Theme.fontFamily
                 font.pixelSize: 13
             }
         }
-
         MouseArea {
-            id: rowMa
+            id: pointer
             anchors.fill: parent
             hoverEnabled: true
-            onClicked: {
-                menu.visible = false
-                rowRect.modelData.run()
-            }
+            onClicked: command.modelData.run()
         }
     }
 
-    // history home while the Bell is hidden (it only shows during DND)
     NotifyPopup {
         id: notifHistory
         anchorItem: root
     }
 
-    PowerMenu {
-        id: powerMenu
-        anchorItem: root
-        alignRight: true
-    }
-
     Popout {
         id: menu
         anchorItem: root
-        cardWidth: 270
-        cardHeight: col.implicitHeight + 2 * cardPadding
+        alignRight: true
+        cardWidth: 330
+        cardHeight: content.implicitHeight + 2 * cardPadding
 
-        onVisibleChanged: if (visible) stateProc.running = true
-
-        // Scriptable with: qs -p <quickshell-dir> ipc call commands toggle
         IpcHandler {
             target: "commands"
             function toggle(): void { menu.visible = !menu.visible }
         }
 
         Column {
-            id: col
+            id: content
             anchors.left: parent.left
             anchors.right: parent.right
-            spacing: 6
+            spacing: 7
+
+            Row {
+                width: parent.width
+                height: 52
+                spacing: 11
+
+                Rectangle {
+                    width: 48
+                    height: 48
+                    radius: 24
+                    clip: true
+                    color: Theme.gray3
+                    border.width: 1
+                    border.color: Theme.gray5
+                    Text {
+                        anchors.centerIn: parent
+                        text: root.displayName.slice(0, 1).toUpperCase()
+                        color: Theme.accent
+                        font.family: Theme.fontFamily
+                        font.pixelSize: 20
+                        font.bold: true
+                    }
+                    Image {
+                        anchors.fill: parent
+                        visible: status === Image.Ready
+                        source: root.avatarPath
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        cache: false
+                    }
+                }
+
+                Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 2
+                    Text {
+                        text: root.displayName
+                        color: Theme.fg
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize + 1
+                        font.bold: true
+                    }
+                    Text {
+                        text: "@" + root.userName
+                        color: Theme.brightBlack
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize - 1
+                    }
+                }
+            }
+
+            Rectangle { width: parent.width; height: 1; color: Theme.gray5 }
 
             Grid {
                 width: parent.width
                 columns: 2
-                spacing: 6
-
+                spacing: 7
                 Repeater {
                     model: [
-                        { icon: root.profileIcons[root.profile],
-                          label: root.profile,
-                          active: root.profile !== "balanced",
-                          run: () => root.cycleProfile() },
-                        { icon: "󰅶", label: "Keep awake",
-                          active: root.caffeine,
-                          run: () => {
-                              root.caffeine = !root.caffeine
-                              Quickshell.execDetached(["sh", "-c",
-                                  root.caffeine ? "xset s off -dpms" : "xset s on +dpms"])
-                          } },
-                        { icon: Sys.micMuted ? "󰍭" : "󰍬",
-                          label: Sys.micMuted ? "Muted" : "Mic",
-                          active: Sys.micMuted, alert: Sys.micMuted,
-                          alt: ["pavucontrol", "-t", "4"],
-                          run: () => Sys.toggleMicMute() },
-                        { icon: "󱩌", label: "Night light",
-                          active: root.nightLight,
-                          run: () => {
-                              root.nightLight = !root.nightLight
-                              Quickshell.execDetached(["sh", "-c",
-                                  root.nightLight ? "redshift -P -O 4500" : "redshift -x"])
-                          } },
                         { icon: Sys.dndOn ? "󰂛" : "󰂚",
-                          label: "DND",
-                          active: Sys.dndOn, alert: Sys.dndOn,
+                          label: "DND", color: Theme.magenta,
+                          active: Sys.dndOn,
                           altFn: () => {
                               menu.visible = false
                               notifHistory.visible = true
                           },
                           run: () => Sys.toggleDnd() },
-                        { icon: "󰔟",
-                          label: root.pomoRunning ? "Stop" : root.pomoMinutes + " min",
+                        { icon: "󰔟", color: Theme.green,
+                          label: root.pomoRunning ? root.fmtPomo(root.pomoLeft)
+                              : root.pomoMinutes + " min",
                           active: root.pomoRunning,
+                          progress: root.pomoRunning
+                              ? root.pomoLeft / root.pomoTotal : undefined,
                           altFn: () => root.cyclePomoPreset(),
-                          onScroll: dir => root.nudgePomo(dir),
+                          onScroll: direction => root.nudgePomo(direction),
                           run: () => root.togglePomodoro() }
                     ]
-                    TogglePill {}
+                    MenuButton {}
                 }
             }
 
-            TweakSlider {
-                visible: root.hasBacklight
-                label: "brightness"
-                from: 5; to: 100
-                value: root.brightness
-                suffix: "%"
-                applyFn: v => Quickshell.execDetached(
-                    ["brightnessctl", "-c", "backlight", "set", v + "%"])
-                persistFn: v => {}   // hardware remembers; nothing to persist
-                onCommitted: v => root.brightness = Math.round(v)
+            Text {
+                text: "Session"
+                color: Theme.brightBlack
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize - 1
             }
 
-            Rectangle {
-                width: parent.width - 8
-                anchors.horizontalCenter: parent.horizontalCenter
-                height: 1
-                color: Qt.alpha(Theme.fg, 0.15)
+            Grid {
+                width: parent.width
+                columns: 2
+                spacing: 7
+                Repeater {
+                    model: [
+                        { icon: "󰌾", label: "Lock", color: Theme.cyan,
+                          run: () => root.run(["betterlockscreen", "-l"]) },
+                        { icon: "󰤄", label: "Suspend", color: Theme.magenta,
+                          run: () => root.run(["loginctl", "suspend"]) },
+                        { icon: "󰍃", label: "Logout", color: Theme.yellow,
+                          run: () => root.run([Wm.msgPath, "quit"]) },
+                        { icon: "󰑓", label: "Reload desktop", color: Theme.brightBlue,
+                          run: () => root.restartDesktop() },
+                        { icon: "󰜉", label: "Reboot", color: Theme.brightOrange,
+                          run: () => root.run(["loginctl", "reboot"]) },
+                        { icon: "󰐥", label: "Shutdown", color: Theme.red,
+                          run: () => root.run(["loginctl", "poweroff"]) }
+                    ]
+                    MenuButton {}
+                }
             }
+
+            Rectangle { width: parent.width; height: 1; color: Theme.gray5 }
 
             Repeater {
                 model: [
-            { icon: "󰚰", label: "Check updates",
-              run: () => Quickshell.execDetached(["sh", "-c",
-                  "if command -v kitty >/dev/null 2>&1; then " +
-                  "exec kitty --hold sh -c 'xbps-install -Mun'; " +
-                  "else exec xterm -hold -e sh -c 'xbps-install -Mun'; fi"]) },
+                    { icon: "󰚰", label: "Check updates",
+                      run: () => root.run(["sh", "-c",
+                          "if command -v kitty >/dev/null 2>&1; then " +
+                          "exec kitty --hold sh -c 'xbps-install -Mun'; " +
+                          "else exec xterm -hold -e sh -c 'xbps-install -Mun'; fi"]) },
                     { icon: "󰌌", label: "Keybindings",
-                      run: () => Quickshell.execDetached([Wm.msgPath, "show-bindings"]) },
-                    { icon: "󰐥", label: "Power menu",
-                      run: () => { powerMenu.visible = true } }
+                      run: () => root.run([Wm.msgPath, "show-bindings"]) }
                 ]
                 CommandRow {}
             }
