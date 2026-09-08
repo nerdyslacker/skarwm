@@ -15,7 +15,7 @@ import Quickshell.Io
 BarModule {
     id: root
 
-    visible: temp !== ""
+    visible: BarVisibility.enabled("weather") && temp !== ""
 
     property string temp: ""
     property int code: 113

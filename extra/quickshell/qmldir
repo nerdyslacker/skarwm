@@ -3,9 +3,13 @@ singleton Wm Wm.qml
 singleton Sys Sys.qml
 singleton KeyboardState KeyboardState.qml
 singleton ClipboardState ClipboardState.qml
+singleton TagConfig TagConfig.qml
+singleton LauncherState LauncherState.qml
+singleton BarVisibility BarVisibility.qml
 Bar Bar.qml
 BarModule BarModule.qml
 Tags Tags.qml
+TagSettingsPopup TagSettingsPopup.qml
 Title Title.qml
 ScratchpadsPopup ScratchpadsPopup.qml
 Launcher Launcher.qml
@@ -17,8 +21,18 @@ Weather Weather.qml
 WeatherPopup WeatherPopup.qml
 WeatherSettings WeatherSettings.qml
 Metrics Metrics.qml
+MetricsPopup MetricsPopup.qml
+Battery Battery.qml
+BatteryPopup BatteryPopup.qml
+Brightness Brightness.qml
+BrightnessPopup BrightnessPopup.qml
 Volume Volume.qml
+MicMute MicMute.qml
+AudioPopup AudioPopup.qml
+AudioSlider AudioSlider.qml
+AudioDeviceSelector AudioDeviceSelector.qml
 Network Network.qml
+NetworkPopup NetworkPopup.qml
 KeyboardLayout KeyboardLayout.qml
 KeyboardLayoutPicker KeyboardLayoutPicker.qml
 KeyboardLayoutSettings KeyboardLayoutSettings.qml
@@ -29,11 +43,10 @@ Tray Tray.qml
 Bell Bell.qml
 Clock Clock.qml
 CalendarPopup CalendarPopup.qml
-MicMute MicMute.qml
 CapsLock CapsLock.qml
 Screenshot Screenshot.qml
-PowerMenu PowerMenu.qml
 Commands Commands.qml
+BarSettingsPopup BarSettingsPopup.qml
 NotifyPopup NotifyPopup.qml
 Popout Popout.qml
 TweakSlider TweakSlider.qml

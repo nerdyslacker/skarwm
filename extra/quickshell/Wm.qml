@@ -11,7 +11,10 @@ Singleton {
     property var workspaces: []
     property var windows: []
     property var registeredScratchpads: []
-    property int tagCount: 12
+    // Highest workspace currently reported by skarwm. Tags.qml combines this
+    // with the user's configured minimum, ensuring an active high tag remains
+    // reachable without forcing the configured count back to nine.
+    property int tagCount: 1
     property string title: ""
     property string activeWinId: ""
     readonly property string msgPath: "skarwm-msg"
@@ -55,7 +58,7 @@ Singleton {
             workspaces = value
             let highest = 1
             for (const ws of value) highest = Math.max(highest, ws.id)
-            tagCount = Math.max(9, highest)
+            tagCount = Math.max(1, highest)
         } catch (e) {
             console.warn("skarwm workspace snapshot:", e)
         }

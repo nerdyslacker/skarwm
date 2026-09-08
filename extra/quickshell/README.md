@@ -9,11 +9,16 @@ The bar includes:
 
 - application launcher, workspace tags, focused-window title, and a
   scratchpad-register popup that appears beside the title when needed;
-- media, weather, CPU/RAM/disk/battery metrics, volume, and network state;
+- media, weather, CPU/RAM/disk metrics, battery controls, per-display
+  brightness, volume, and network state; the
+  volume popup selects output/input devices, controls their global levels, and
+  controls each playback stream, while clicking the metrics module opens a
+  detailed system monitor with load, temperature, memory/swap/storage totals,
+  and the top processes by CPU use;
 - Void Linux update count, keyboard-layout switching, clipboard history,
   system tray, notifications, clock and calendar;
-- microphone mute, Caps Lock, screenshots, power controls, and a quick-command
-  panel.
+- Caps Lock, screenshots, and a user/session command panel with DND, pomodoro,
+  and power controls.
 
 The panel and all cards are square. The panel has no outer margin and is
 anchored directly to the top, left, and right screen edges. Its EWMH strut is
@@ -28,14 +33,14 @@ Individual modules use these optional programs when available:
 - `feh` for wallpaper selection; the application launcher is built into
   Quickshell and reads the system's `.desktop` entries directly;
 - `nmcli` and `nm-connection-editor` for network state and settings, plus
-  `bluetoothctl` for the optional Bluetooth section;
+  `bluetoothctl` for the network popup's optional Bluetooth section;
 - PipeWire/PulseAudio-compatible `pactl` and `pavucontrol` for audio;
 - an MPRIS-compatible media player for media controls;
 - `curl` for weather;
 - `renCal` to open the full calendar on a clock right-click and Python 3 for
   reading its local Caldir events into the calendar popup;
 - `xbps-install`, `sudo`, and `xterm` for Void update actions;
-- `dunstctl`/`notify-send`, `flameshot`, `brightnessctl`, `powerprofilesctl`,
+- `dunstctl`/`notify-send`, `flameshot`, `brightnessctl`, `xrandr`, `powerprofilesctl`,
   `redshift`, `xset`, `loginctl`, and `betterlockscreen` for their corresponding
   optional controls;
 - `xinput` and `xdotool` for outside-click popup dismissal on Quickshell 0.3.0
@@ -74,7 +79,9 @@ per-user install, or in `$SKARWM_STATE_DIR` when it is set:
 - `weather-units` — `c` or `f`;
 - `pomodoro` — persisted timer end time and duration;
 - `keyboard-layout.json` — layouts, aligned variants, and XKB options saved by
-  the keyboard settings popup.
+  the keyboard settings popup;
+- `tags.json` — visible tag count and number/dot display preference.
+- `bar-widgets.json` — enabled/disabled state for individual bar widgets.
 
 The keyboard module shows the active layout. Left-click it to select any
 configured layout; right-click it to search the system XKB language catalogue
@@ -90,6 +97,10 @@ setxkbmap -layout us,am,ru -variant ,phonetic,phonetic \
 
 Other existing XKB options are preserved when the group shortcut changes.
 
+Right-click any workspace tag to set the minimum number of visible tags and
+choose between numbered tags and dot indicators. A currently active workspace
+above the configured count remains visible.
+
 The clipboard module reads clipmenu's daemon-backed text history. Left-click
 its bar module to open the searchable history below the bar; `Super+V` opens
 the same popup beside the pointer. Click an entry to paste it, or use the arrow
@@ -101,6 +112,18 @@ are not supported by this backend.
 
 Left-click the weather module for the forecast. Right-click it for the native
 location and unit settings popup; Save updates the watched state files above.
+
+The battery is a separate module from CPU/RAM/disk. Left-click it to switch the
+power profile, keep the display awake, or toggle night mode. The neighbouring
+sun icon opens one slider per hardware backlight, plus independent XRandR
+controls for additional external displays.
+
+The rightmost command menu shows the current account name and avatar (from
+`~/.face` or AccountsService), followed by DND, pomodoro, and the session power
+buttons. Right-click the command module to choose which other widgets are
+visible on the bar. Microphone mute is controlled from the audio popup's input
+section; a compact warning appears beside Audio while the microphone is muted,
+and clicking it unmutes the input.
 
 The calendar reads renCal's configured Caldir path automatically. Set
 `CALDIR_DIR` only when you want to override that location.
@@ -117,6 +140,7 @@ Put `.png`, `.jpg`, `.jpeg`, or `.webp` images in
 Left-click the launcher icon, type to filter applications, use the arrow keys to
 select a result, and press Enter to launch it. The launcher can also be toggled
 with `qs -p /path/to/quickshell ipc call launcher toggle`.
+`Super+A` opens it centered on skarwm's currently focused monitor.
 Right-click the launcher icon to open the thumbnail picker, or middle-click it
 to apply a random image. Wallpaper changes do not alter the fixed Srcery
 palette.

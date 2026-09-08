@@ -77,9 +77,7 @@ Singleton {
 
     property bool capsOn: false
     property bool dndOn: false
-    property bool micMuted: false
     property bool dndTarget: false
-    property bool micTarget: false
 
     Timer {
         interval: 1000
@@ -97,7 +95,6 @@ Singleton {
     function refreshIndicators() {
         restartQuery(capsProc)
         restartQuery(dndProc)
-        restartQuery(micProc)
     }
 
     Process {
@@ -124,35 +121,10 @@ Singleton {
         }
     }
 
-    Process {
-        id: micProc
-        command: ["sh", "-c",
-            "pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const state = text.trim()
-                if (state.endsWith("yes") || state.endsWith("no"))
-                    root.micMuted = state.endsWith("yes")
-            }
-        }
-    }
-
     Timer {
         id: dndRefresh
         interval: 300
         onTriggered: root.refreshIndicators()
-    }
-
-    Process {
-        id: micToggleProc
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const state = text.trim()
-                if (state.endsWith("yes") || state.endsWith("no"))
-                    root.micMuted = state.endsWith("yes")
-            }
-        }
-        onExited: root.restartQuery(micProc)
     }
 
     Process {
@@ -165,15 +137,6 @@ Singleton {
             }
         }
         onExited: root.restartQuery(dndProc)
-    }
-
-    function toggleMicMute() {
-        micTarget = !micMuted
-        micToggleProc.running = false
-        micToggleProc.command = ["sh", "-c",
-            "pactl set-source-mute @DEFAULT_SOURCE@ " + (micTarget ? "1" : "0") +
-            " 2>/dev/null && pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null"]
-        micToggleProc.running = true
     }
 
     function toggleDnd() {

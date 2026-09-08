@@ -5,13 +5,14 @@ import QtQuick
 Popout {
     id: root
 
-    cardWidth: 330
-    cardHeight: KeyboardState.switcherAvailable
-        ? 44 + KeyboardState.layouts.length * 38 : 100
+    cardWidth: 290
+    cardHeight: content.implicitHeight + 2 * cardPadding
 
     Column {
-        anchors.fill: parent
-        spacing: 6
+        id: content
+        anchors.left: parent.left
+        anchors.right: parent.right
+        spacing: 5
 
         Text {
             text: "Keyboard layout"
@@ -39,7 +40,7 @@ Popout {
                 required property int index
 
                 width: parent.width
-                height: 32
+                height: 29
                 readonly property bool active: KeyboardState.currentSpec === KeyboardState.groupSpec(index)
                     || (KeyboardState.currentLayout === modelData
                         && KeyboardState.currentSpec.indexOf("(") === -1)
@@ -50,9 +51,9 @@ Popout {
 
                 Text {
                     anchors.left: parent.left
-                    anchors.leftMargin: 10
+                    anchors.leftMargin: 8
                     anchors.right: codeText.left
-                    anchors.rightMargin: 10
+                    anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     text: KeyboardState.layoutName(parent.modelData)
                         + ((KeyboardState.variants[parent.index] ?? "") !== ""
@@ -67,7 +68,7 @@ Popout {
                 Text {
                     id: codeText
                     anchors.right: parent.right
-                    anchors.rightMargin: 10
+                    anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     text: parent.modelData.toUpperCase()
                     color: parent.active ? Theme.selfg : Theme.brightBlack

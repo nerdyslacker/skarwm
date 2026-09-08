@@ -7,7 +7,7 @@ import QtQuick
 BarModule {
     id: root
 
-    visible: Sys.dndOn
+    visible: BarVisibility.enabled("notifications") && Sys.dndOn
     icon: "󰂛"
     iconColor: Theme.red
 

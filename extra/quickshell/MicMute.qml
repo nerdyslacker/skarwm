@@ -1,15 +1,26 @@
 import QtQuick
+import Quickshell.Services.Pipewire
 
-// Muted-mic warning, CapsLock-pattern: hidden until the default source
-// is muted, then a red pill. Click unmutes (the toggle also lives in the
-// Commands panel — this is the fast way out, and the "why is my
-// voice-over silent" saver).
+// Compact warning beside Volume. It appears only while the selected default
+// input is muted; clicking it is the fast path back to a live microphone.
 BarModule {
-    visible: Sys.micMuted
+    id: root
+
+    readonly property var source: Pipewire.preferredDefaultAudioSource
+        ?? Pipewire.defaultAudioSource
+    readonly property var audio: source?.audio ?? null
+
+    PwObjectTracker {
+        objects: [root.source]
+    }
+
+    visible: BarVisibility.enabled("micIndicator")
+        && (audio?.muted ?? false)
     icon: "󰍭"
-    iconColor: Theme.bg
-    label: "Mic"
-    labelColor: Theme.bg
-    color: Theme.red
-    onClicked: Sys.toggleMicMute()
+    iconColor: Theme.red
+
+    onClicked: {
+        if (audio)
+            audio.muted = false
+    }
 }

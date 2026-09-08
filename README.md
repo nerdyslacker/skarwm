@@ -73,9 +73,9 @@ configuration under `extra/` uses:
 - `xss-lock` and Betterlockscreen for screen locking;
 - Udiskie for removable-drive automounting and its tray item.
 
-The bar and its companion network panel can additionally use NetworkManager
+The bar and its network popup can additionally use NetworkManager
 tools, BlueZ's `bluetoothctl`, `pactl`, `pavucontrol`, `curl`, `xdg-open`,
-`flameshot`, `brightnessctl`, `powerprofilesctl`, `redshift`, `xset`,
+`flameshot`, `brightnessctl`, `xrandr`, `powerprofilesctl`, `redshift`, `xset`,
 `notify-send`, `xterm`, and the Void `xbps-install` tool. On Quickshell 0.3.0,
 `xinput` and `xdotool` provide the bar popup outside-click fallback. Missing
 optional tools only disable their corresponding widget action.
@@ -90,7 +90,7 @@ Font may need to be installed separately depending on the enabled repositories:
 ```sh
 sudo xbps-install -S quickshell picom dunst feh kitty xss-lock \
   betterlockscreen udiskie lxqt-policykit NetworkManager bluez pavucontrol \
-  curl flameshot brightnessctl python3 renCal xterm xinput xdotool clipmenu \
+  curl flameshot brightnessctl xrandr python3 renCal xterm xinput xdotool clipmenu \
   xkb-switch setxkbmap
 ```
 
@@ -118,11 +118,13 @@ make xephyr
 
 This builds skarwm, opens a 1280×800 Xephyr window on display `:2`, and runs
 skarwm with `extra/config.rc` inside it. `SKARWM_EXTRA_DIR` points at the
-checkout's `extra/` tree, while writable state—including the isolated clipmenu
-store—uses a temporary directory. Click inside the nested display and use the
-full desktop bindings; for example, `Super+V` opens clipboard history. Close
-the Xephyr window or press Ctrl-C in the launching terminal to stop both
-processes.
+checkout's `extra/` tree. Writable test state—including keyboard layouts and
+tag settings—is kept across runs in
+`${XDG_STATE_HOME:-$HOME/.local/state}/skarwm/xephyr`. Set
+`SKARWM_XEPHYR_STATE_DIR` to use another location. Click inside the nested
+display and use the full desktop bindings; for example, `Super+V` opens
+clipboard history. Close the Xephyr window or press Ctrl-C in the launching
+terminal to stop both processes.
 
 For multi-monitor testing:
 
@@ -182,7 +184,7 @@ make install-extra
 ```
 
 `make extra` is a shorter alias. This copies `extra/config.rc` and the Srcery
-Quickshell bar and network panel, Picom, Dunst, Kitty, Polybar, Rofi, wallpaper,
+Quickshell bar and network popup, Picom, Dunst, Kitty, Polybar, Rofi, wallpaper,
 weather, helper scripts, and bar configuration into `~/.config/skarwm`.
 Existing files with the same names are replaced, so back up a customized
 configuration first. An alternative target directory can be selected with
@@ -240,7 +242,7 @@ betterlockscreen -u ~/.config/skarwm/wallpaper/default.jpeg
 Then start skarwm normally from a display manager or `startx`.
 
 <div align="center">
-<a href="https://github.com/nerdyslacker/skarwm"><img src="assets/skarwm_screenshot.png" /></a>
+<img src="assets/skarwm_screenshot.jpg" />
 </div>
 
 ## First run with startx

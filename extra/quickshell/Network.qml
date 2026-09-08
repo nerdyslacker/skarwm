@@ -1,7 +1,7 @@
 import QtQuick
 import Quickshell
 
-// Active connection indicator. Left click toggles the skarwm network panel;
+// Active connection indicator. Left click toggles the network popup;
 // right click opens NetworkManager's full connection editor.
 BarModule {
     id: root
@@ -13,6 +13,11 @@ BarModule {
         if (mouse.button === Qt.RightButton)
             Quickshell.execDetached(["nm-connection-editor"])
         else
-            Quickshell.execDetached([Theme.configDir + "/scripts/network"])
+            popup.visible = !popup.visible
+    }
+
+    NetworkPopup {
+        id: popup
+        anchorItem: root
     }
 }

@@ -23,7 +23,7 @@ SKARWM_CONFIG_DIR ?= $(HOME)/.config/skarwm
 ODIN_SRCS := $(shell find src -name '*.odin')
 EXTRA_CONFIG_FILES := $(shell find \
 	extra/dunst extra/kitty extra/picom extra/polybar extra/quickshell \
-	extra/quickshell-network extra/rofi extra/wallpaper \
+	extra/rofi extra/wallpaper \
 	-type f ! -name '.gitkeep') \
 	extra/config.rc extra/bar-height extra/bar-scale extra/pomodoro \
 	extra/weather-location extra/weather-units

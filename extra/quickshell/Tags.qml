@@ -1,6 +1,10 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 
 Item {
+    id: root
+
     implicitWidth: row.implicitWidth
     implicitHeight: Theme.moduleHeight
 
@@ -14,7 +18,7 @@ Item {
         spacing: 4
 
         Repeater {
-            model: Wm.tagCount
+            model: Math.max(TagConfig.count, Wm.tagCount)
             Rectangle {
                 id: tag
                 required property int index
@@ -37,21 +41,43 @@ Item {
 
                 Text {
                     anchors.centerIn: parent
+                    visible: TagConfig.showNumbers
                     text: tag.index + 1
                     color: tag.selected ? Theme.hardBlack : Theme.brightWhite
                     font.family: Theme.fontFamily
                     font.pixelSize: 12
                     font.bold: tag.selected
                 }
+
+                Rectangle {
+                    visible: !TagConfig.showNumbers
+                    anchors.centerIn: parent
+                    width: tag.selected || tag.urgent ? 5 : 4
+                    height: width
+                    radius: width / 2
+                    color: tag.selected || tag.urgent
+                        ? Theme.hardBlack
+                        : Qt.alpha(Theme.fg, tag.occupied ? 0.55 : 0.28)
+                }
                 MouseArea {
                     anchors.fill: parent
-                    acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+                    acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
                     onClicked: mouse => {
-                        if (mouse.button === Qt.MiddleButton) Wm.sendToTag(tag.index)
-                        else Wm.viewTag(tag.index)
+                        if (mouse.button === Qt.RightButton) {
+                            settings.visible = !settings.visible
+                        } else if (mouse.button === Qt.MiddleButton) {
+                            Wm.sendToTag(tag.index)
+                        } else {
+                            Wm.viewTag(tag.index)
+                        }
                     }
                 }
             }
         }
+    }
+
+    TagSettingsPopup {
+        id: settings
+        anchorItem: root
     }
 }

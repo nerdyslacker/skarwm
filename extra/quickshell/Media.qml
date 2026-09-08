@@ -31,7 +31,7 @@ BarModule {
     property bool dismissed: false
     onPlayerChanged: dismissed = false
 
-    visible: player !== null && !dismissed
+    visible: BarVisibility.enabled("media") && player !== null && !dismissed
         && player.playbackState !== MprisPlaybackState.Stopped
 
     // MPRIS reports artists as an array, but some players hand over a

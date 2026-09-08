@@ -105,9 +105,9 @@ push_geoms :: proc() {
 }
 
 // render_focus sets each window's border colour and applies X input focus to the
-// focused client (or PointerRoot when there is no managed focus). Raising the
-// focused window happens on workspace switches / focus changes that need it via
-// raise_focused().
+// focused client (or PointerRoot when there is no managed focus). A focused
+// floating window is always raised above the other clients; keeping that rule
+// here covers pointer focus, click focus, newly-floated windows and IPC focus.
 render_focus :: proc() {
     m := g_wm.m
     focused := m.Focused
@@ -116,6 +116,7 @@ render_focus :: proc() {
         if cl == focused { col = m.Cfg.FocusedBorder }
         xcb_change_window_attributes(g_wm.conn, cl.Xid, CW_BORDER_PIXEL, &col)
     }
+    if focused != nil && focused.Floating { raise_focused() }
     apply_x_focus()
 }
 

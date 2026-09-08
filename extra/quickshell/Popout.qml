@@ -20,8 +20,13 @@ PopupWindow {
     // Optional point positioning for keyboard-invoked menus. Coordinates are
     // global X11 coordinates and are clamped to their containing screen.
     property bool positionAtPoint: false
+    property bool positionCentered: false
     property real pointX: 0
     property real pointY: 0
+    property real centerRectX: 0
+    property real centerRectY: 0
+    property real centerRectWidth: 0
+    property real centerRectHeight: 0
 
     default property alias content: inner.data
 
@@ -41,13 +46,25 @@ PopupWindow {
 
     function showAtAnchor() {
         positionAtPoint = false
+        positionCentered = false
         visible = true
     }
 
     function showAtGlobalPoint(x, y) {
         positionAtPoint = true
+        positionCentered = false
         pointX = x
         pointY = y
+        visible = true
+    }
+
+    function showCenteredInRect(x, y, width, height) {
+        positionAtPoint = false
+        positionCentered = true
+        centerRectX = x
+        centerRectY = y
+        centerRectWidth = width
+        centerRectHeight = height
         visible = true
     }
 
@@ -55,8 +72,12 @@ PopupWindow {
         if (visible && anchorItem) {
             const p = anchorItem.mapToGlobal(0, 0)
             let target = null
-            const locateX = positionAtPoint ? pointX : p.x
-            const locateY = positionAtPoint ? pointY : p.y
+            const locateX = positionCentered
+                ? centerRectX + centerRectWidth / 2
+                : positionAtPoint ? pointX : p.x
+            const locateY = positionCentered
+                ? centerRectY + centerRectHeight / 2
+                : positionAtPoint ? pointY : p.y
             for (const candidate of Quickshell.screens) {
                 if (locateX >= candidate.x && locateX < candidate.x + candidate.width
                         && locateY >= candidate.y && locateY < candidate.y + candidate.height) {
@@ -73,16 +94,22 @@ PopupWindow {
             const screenHeight = target ? target.height : 1080
             const leftEdge = screenX + 8
             const rightEdge = screenX + screenWidth - cardWidth - 8
-            const desiredX = positionAtPoint
+            const desiredX = positionCentered
+                ? Math.min(Math.max(centerRectX + (centerRectWidth - cardWidth) / 2,
+                                    leftEdge), rightEdge)
+                : positionAtPoint
                 ? Math.min(Math.max(pointX + 12, leftEdge), rightEdge)
                 : alignRight ? rightEdge
                 : Math.min(Math.max(p.x + anchorItem.width / 2 - cardWidth / 2,
                                     leftEdge), rightEdge)
             uOffsetX = desiredX - p.x
-            if (positionAtPoint) {
+            if (positionAtPoint || positionCentered) {
                 const topEdge = screenY + 8
                 const bottomEdge = screenY + screenHeight - cardHeight - 8
-                const desiredY = Math.min(Math.max(pointY + 12, topEdge), bottomEdge)
+                const requestedY = positionCentered
+                    ? centerRectY + (centerRectHeight - cardHeight) / 2
+                    : pointY + 12
+                const desiredY = Math.min(Math.max(requestedY, topEdge), bottomEdge)
                 uOffsetY = desiredY - p.y
             } else {
                 uOffsetY = anchorItem.height + 12

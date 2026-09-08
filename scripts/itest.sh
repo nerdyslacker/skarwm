@@ -22,9 +22,10 @@
 #   - a two-window vertical stack -> 1260x384+10+10 / 1260x384+10+406
 #   - a column of a 2+ strip      -> 624x780+10+10 or 624x780+646+10 (col0/col1)
 # With a third (or later) column the strip overflows and the viewport pans; the
-# focused (newest) column then sits at client X 646 and earlier columns leave
-# the left edge (negative X). Hidden/other-workspace windows are parked at
-# X = -20000 with full-output width 1280. Predicates below are therefore
+# focused (newest) column then sits at client X 646 and off-page columns are
+# parked rather than allowed to spill onto another RandR output. Hidden,
+# off-page, and other-workspace windows are parked at X = -20000 with full-output
+# width 1280. Predicates below are therefore
 # width-agnostic within {1260,624} and treat "tiled" as any such window whose
 # X > -10000 (parked windows are 1280 wide, so they never match).
 
@@ -91,6 +92,12 @@ wait_hidden_x() { # window parked off-screen (x <= -10000)
 }
 ipc_window_count() { ./build/skarwm-msg get-windows 2>/dev/null | grep -o '"id":' | wc -l; }
 ipc_count_is() { [ "$(ipc_window_count)" -eq "$1" ]; }
+ipc_workspace_count() {
+  ./build/skarwm-msg get-windows 2>/dev/null | grep -o "\"workspace\":$1" | wc -l
+}
+wait_workspace_n() { local i=0; while [ "$i" -lt 45 ]; do
+  [ "$(ipc_workspace_count "$1")" -eq "$2" ] && return 0; sleep 0.3; i=$((i+1));
+done; return 1; }
 all_windows_are_tabs_n() {
   state=$(./build/skarwm-msg get-windows 2>/dev/null) || return 1
   [ "$(printf '%s' "$state" | grep -o '"id":' | wc -l)" -eq "$1" ] &&
@@ -266,25 +273,23 @@ xdotool mousemove 640 795 >/dev/null 2>&1; sleep 0.3
 # Strip: page width (1264 - 8) / 2 = 628 tile / 624 client, step 636. Columns 0
 # and 1 fill the work area exactly; a 3rd column makes the strip 1900px wide and
 # each later spawn lands to the right of the focused (newest) column, panning the
-# viewport so the newest column sits at client X 646 and earlier columns leave
-# the left edge. (4 columns -> strip 2536, max viewport 1272.)
+# viewport so the newest column sits at client X 646 and earlier columns are
+# parked off-screen. (4 columns -> strip 2536, max viewport 1272.)
 ok4=true
+scroll_ids=()
 for n in 1 2 3 4; do
   key super+Return
-  wait_tiled_n "$n" || { ok4=false; break; }
+  wait_for ipc_count_is "$n" || { ok4=false; break; }
+  focus_id=$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')
+  scroll_ids+=("$(printf '0x%x' "$focus_id")")
 done
 if [ "$ok4" = true ]; then pass "spawn 4 columns on the strip"; else fail "spawn 4 columns"; fi
 
-# identify leftmost/rightmost windows by current screen x
-left_id=; right_id=; left_x=99999; right_x=-99999
-while read -r id g; do
-  geosplit "$g" || continue
-  if [ "$gx" -lt "$left_x" ]; then left_x=$gx; left_id=$id; fi
-  if [ "$gx" -gt "$right_x" ]; then right_x=$gx; right_id=$id; fi
-done < <(xtops)
+left_id=${scroll_ids[0]}
+right_id=${scroll_ids[3]}
 
-# scrolling started with the 3rd column: the 1st (leftmost) column is off-screen
-if wait_for geom_x_lt0 "$left_id"; then pass "3rd+ spawn pans the strip (1st column leaves view)"; else fail "strip pan start"; fi
+# scrolling started with the 3rd column: the 1st column is safely parked
+if wait_hidden_x "$left_id"; then pass "3rd+ spawn pans the strip (1st column parked)"; else fail "strip pan start"; fi
 
 # focus is the newest = rightmost column; viewport clamps at max so the last
 # column's right edge sits against the work-area right edge (client x = 646).
@@ -309,7 +314,7 @@ fi
 xdotool keydown super >/dev/null 2>&1
 xdotool click 5 >/dev/null 2>&1
 xdotool keyup super >/dev/null 2>&1
-if wait_geom "$left_id" "624x780+-626+10" && [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$left_id")" ]; then
+if wait_hidden_x "$left_id" && [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$left_id")" ]; then
   pass "Mod+wheel down scrolls right without changing focus"
 else
   fail "Mod+wheel down viewport scroll"
@@ -327,7 +332,7 @@ fi
 # ws1 holds the 4 columns; the focused (leftmost) window moves to a fresh ws2.
 moved=$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')   # decimal id
 key super+shift+2
-if wait_tiled_n 3; then pass "move focused window to ws2 (ws1 left with 3)"; else fail "move-to-workspace"; fi
+if wait_workspace_n 1 3; then pass "move focused window to ws2 (ws1 left with 3)"; else fail "move-to-workspace"; fi
 
 key super+2
 moved_hex=$(printf '0x%x' "$moved")   # the window we just moved is the one shown
@@ -339,19 +344,31 @@ else
 fi
 
 key super+1
-if wait_tiled_n 3; then pass "ws1 restores its 3 remaining columns"; else fail "ws1 restore after move"; fi
+if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "624x780+10+10"; then
+  pass "ws1 restores its 3 remaining columns"
+else
+  fail "ws1 restore after move"
+fi
 
 # dynamic next/prev cycle between the two populated workspaces
 key super+n
 if wait_geom "$moved_hex" "1260x780+10+10"; then pass "workspace next (super+n) lands on ws2"; else fail "workspace next"; fi
 key super+p
-if wait_tiled_n 3; then pass "workspace prev (super+p) returns to ws1"; else fail "workspace prev"; fi
+if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "624x780+10+10"; then
+  pass "workspace prev (super+p) returns to ws1"
+else
+  fail "workspace prev"
+fi
 
 # jumping to a never-used id creates that workspace on demand and shows it empty
 key super+9
 if wait_for zero_tiled; then pass "goto fresh workspace 9 (created empty on demand)"; else fail "workspace 9 create"; fi
 key super+1
-if wait_tiled_n 3; then pass "back to ws1"; else fail "back to ws1"; fi
+if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "624x780+10+10"; then
+  pass "back to ws1"
+else
+  fail "back to ws1"
+fi
 
 # ------------------------------------------------------------------------------
 # ---- 12. rc config: load, atomic reload, keep-previous-on-error ----------------

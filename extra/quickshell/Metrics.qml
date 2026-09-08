@@ -1,12 +1,21 @@
 import QtQuick
 
-// System numbers: CPU / RAM / root fs ("/" is the mountpoint), plus battery
-// on laptops. The shared module surface keeps it visually aligned with the
-// rest of the bar even though this module is informational.
+// System numbers: CPU / RAM / root fs ("/" is the mountpoint). Battery has
+// its own interactive module because it also anchors the power-state popup.
 BarModule {
-    interactive: false
+    id: root
 
-    // dim dot — keeps "RAM 15% / 19%" from scanning as a fraction
+    onClicked: mouse => {
+        if (mouse.button === Qt.LeftButton)
+            popup.visible = !popup.visible
+    }
+
+    MetricsPopup {
+        id: popup
+        anchorItem: root
+    }
+
+    // Dim separators keep the compact icon/value groups easy to scan.
     component Sep: Text {
         anchors.verticalCenter: parent.verticalCenter
         text: "·"
@@ -60,39 +69,24 @@ BarModule {
         rightPadding: 4
 
         Seg {
-            tag: "CPU"
-            tagColor: Theme.red
+            icon: "󰻠"
+            tagColor: Sys.cpu > 90 ? Theme.red : Theme.orange
             value: Math.round(Sys.cpu) + "%"
             valueColor: Sys.cpu > 90 ? Theme.red : Theme.fg
         }
         Sep {}
         Seg {
-            tag: "RAM"
+            icon: "󰍛"
             tagColor: Theme.blue
             value: Math.round(Sys.mem) + "%"
             valueColor: Sys.mem > 90 ? Theme.red : Theme.fg
         }
         Sep {}
         Seg {
-            tag: "/"
+            icon: "󰋊"
             tagColor: Theme.yellow
             value: Math.round(Sys.disk) + "%"
             valueColor: Sys.disk > 90 ? Theme.red : Theme.fg
-        }
-        Sep { visible: Sys.hasBattery }
-        Seg {
-            visible: Sys.hasBattery
-            icon: Sys.batteryCharging ? "󰂄"
-                : Sys.battery < 15 ? "󰁺"
-                : Sys.battery < 40 ? "󰁼"
-                : Sys.battery < 80 ? "󰁾"
-                : "󰁹"
-            tagColor: Sys.batteryCharging ? Theme.green
-                : Sys.battery < 15 ? Theme.red
-                : Sys.battery < 40 ? Theme.yellow
-                : Theme.green
-            value: Math.round(Sys.battery) + "%"
-            valueColor: !Sys.batteryCharging && Sys.battery < 15 ? Theme.red : Theme.fg
         }
     }
 }
