@@ -274,7 +274,16 @@ Default interaction highlights:
 - `Super`+wheel up/down: scroll the window strip left/right by one column;
 - `Super+,/.`: focus the previous/next monitor;
 - `Super+Shift+,/.`: send the focused window to the previous/next monitor;
-- click: focus; `Super`+left-drag/right-drag: move/resize a floating window.
+- click: focus; `Super`+left-drag moves a floating window or drops a tiled
+  window into another column; both operations work across monitors;
+  `Super`+right-drag resizes a floating window.
+
+While a tiled window is dragged, exactly four outlined choices appear on each
+monitor, regardless of its window count. Top and bottom insert the window at
+that end of the monitor's focused column. Left and right create a horizontal
+column at the corresponding workspace edge. The zones fill the work area: a
+full-width top band, a middle row split left/right, and a full-width bottom
+band. On an empty monitor, any choice creates its first column.
 
 Tabbed mode applies only to the focused column, so the rest of the workspace
 continues tiling normally. Choose the members by moving windows into that

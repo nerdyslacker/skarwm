@@ -360,6 +360,116 @@ move_window_to_column :: proc(ws: ^Workspace, cl: ^Client, col: ^Column, ci: int
     return true
 }
 
+// Move_Client_To_Column implements pointer drag-and-drop for tiled windows.
+// The destination may belong to another visible workspace/output. The moved
+// client becomes the destination column's focus (and active tab when tabbed),
+// and keyboard focus follows it to the destination output.
+Move_Client_To_Column :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output, dst: ^Workspace, target: ^Column) -> bool {
+    row := 0
+    if target != nil { row = len(target.Wins) }
+    return Move_Client_To_Drop(m, cl, Drop_Target{
+        Kind = .Into_Column, Out = dst_o, Ws = dst, Col = target, Row_Index = row,
+    })
+}
+
+// Move_Client_To_Drop applies a four-way tiled drop target. Top/bottom zones
+// insert at the corresponding end of the focused vertical stack; left/right
+// zones create a new horizontal column at the workspace edge.
+Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool {
+    if drop.Kind == .Into_Column {
+        if m == nil || cl == nil || cl.Ws == nil || cl.Floating || cl.Fullscreen ||
+           drop.Out == nil || drop.Ws == nil || drop.Col == nil ||
+           drop.Out.Current != drop.Ws {
+            return false
+        }
+        dst_index := Output_Index(m, drop.Out)
+        if dst_index < 0 || drop.Row_Index < 0 || drop.Row_Index > len(drop.Col.Wins) { return false }
+        target_found := false
+        for candidate in drop.Ws.Cols {
+            if candidate == drop.Col { target_found = true; break }
+        }
+        if !target_found { return false }
+
+        src := cl.Ws
+        ci, source, row := column_of(src, cl)
+        if source == nil { return false }
+        insert_at := drop.Row_Index
+        if source == drop.Col {
+            if len(source.Wins) == 1 { return false }
+            ordered_remove(&source.Wins, row)
+            if row < insert_at { insert_at -= 1 }
+        } else {
+            if source.Focus == cl { source.Focus = in_column_focus_after_removal(source, row) }
+            ordered_remove(&source.Wins, row)
+            if len(source.Wins) == 0 { detach_column_empty(src, ci) }
+            if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
+        }
+        array_insert_at(&drop.Col.Wins, insert_at, cl)
+        drop.Col.Focus = cl
+        drop.Ws.Focus = cl
+        cl.Ws = drop.Ws
+        cl.Out = drop.Out
+        m.Active = dst_index
+        m.Focused = cl
+        return true
+    }
+    if m == nil || cl == nil || cl.Ws == nil || cl.Floating || cl.Fullscreen ||
+       drop.Kind != .New_Column || drop.Out == nil || drop.Ws == nil ||
+       drop.Out.Current != drop.Ws {
+        return false
+    }
+    dst_index := Output_Index(m, drop.Out)
+    if dst_index < 0 || drop.Insert_Index < 0 || drop.Insert_Index > len(drop.Ws.Cols) { return false }
+
+    src := cl.Ws
+    ci, source, row := column_of(src, cl)
+    if source == nil { return false }
+    insert_at := drop.Insert_Index
+    source_removed := len(source.Wins) == 1
+
+    if source.Focus == cl { source.Focus = in_column_focus_after_removal(source, row) }
+    ordered_remove(&source.Wins, row)
+    if source_removed {
+        detach_column_empty(src, ci)
+        if src == drop.Ws && ci < insert_at { insert_at -= 1 }
+    }
+    if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
+
+    fresh := new_column()
+    append(&fresh.Wins, cl)
+    fresh.Focus = cl
+    array_insert_at(&drop.Ws.Cols, insert_at, fresh)
+    drop.Ws.Focus = cl
+    cl.Ws = drop.Ws
+    cl.Out = drop.Out
+    m.Active = dst_index
+    m.Focused = cl
+    return true
+}
+
+// Move_Floating_To_Output transfers a floating client to another output's
+// visible workspace without changing its root-coordinate drag rectangle.
+Move_Floating_To_Output :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output) -> bool {
+    if m == nil || cl == nil || cl.Ws == nil || !cl.Floating || cl.Fullscreen ||
+       dst_o == nil || dst_o == cl.Out || dst_o.Current == nil {
+        return false
+    }
+    dst_index := Output_Index(m, dst_o)
+    if dst_index < 0 { return false }
+    src := cl.Ws
+    remove_floater(src, cl)
+    if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
+
+    dst := dst_o.Current
+    append(&dst.Floaters, cl)
+    dst.Focus = cl
+    cl.Ws = dst
+    cl.Out = dst_o
+    m.Active = dst_index
+    m.Focused = cl
+    return true
+}
+
 // Move_Focused_To_WS relocates the focused window of the active workspace to the
 // workspace with the given id, creating it when needed. The source workspace
 // keeps a sensible focus. Returns true when the window moved.

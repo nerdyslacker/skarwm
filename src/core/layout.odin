@@ -102,6 +102,100 @@ Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) ->
     }, true
 }
 
+Drop_Kind :: enum u8 {
+    None,
+    Into_Column, // vertical stack / tab group
+    New_Column,  // horizontal column inserted at Insert_Index
+}
+
+Drop_Target :: struct {
+    Kind: Drop_Kind,
+    Out: ^Output,
+    Ws: ^Workspace,
+    Col: ^Column,
+    Insert_Index: int,
+    Row_Index: int,
+    Geom: Rect,
+}
+
+drop_focus_column :: proc(ws: ^Workspace, dragged: ^Client) -> ^Column {
+    if ws == nil || len(ws.Cols) == 0 { return nil }
+    source_index := -1
+    if dragged != nil && dragged.Ws == ws && !dragged.Floating {
+        source_index, _, _ = column_of(ws, dragged)
+    }
+    if ws.Focus != nil && !ws.Focus.Floating {
+        if focused_index, col, _ := column_of(ws, ws.Focus); col != nil && focused_index != source_index { return col }
+    }
+    // Button press focuses the dragged client before overlays are built. When
+    // that makes the source column look focused, prefer its nearest neighbor.
+    if source_index >= 0 && len(ws.Cols) > 1 {
+        if source_index > 0 { return ws.Cols[source_index - 1] }
+        return ws.Cols[source_index + 1]
+    }
+    return ws.Cols[0]
+}
+
+// Drop_Targets creates exactly four targets per output, independent of its
+// window count. Top/bottom insert into the focused column at the corresponding
+// vertical edge; left/right create a horizontal column at the workspace edge.
+// On an empty output every target creates its first column.
+Drop_Targets :: proc(m: ^Manager, dragged: ^Client = nil) -> [dynamic]Drop_Target {
+    if m == nil { return make([dynamic]Drop_Target, 0) }
+    targets := make([dynamic]Drop_Target, 0, max(1, len(m.Outputs) * 4))
+    for o in m.Outputs {
+        ws := o.Current
+        if ws == nil { continue }
+        p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+        work := Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}
+        if rect_empty(work) { continue }
+        // Cover the whole work area without cross-shaped dead space: a top
+        // band, a middle band split left/right, and a bottom band. Remainders
+        // go to the bottom/right zones so every pixel belongs to one target.
+        top_h := max(i32(1), work.H / 3)
+        middle_h := max(i32(1), work.H / 3)
+        if top_h + middle_h >= work.H { middle_h = max(i32(0), work.H - top_h) }
+        bottom_h := work.H - top_h - middle_h
+        left_w := max(i32(1), work.W / 2)
+        right_w := work.W - left_w
+        top := Rect{X = work.X, Y = work.Y, W = work.W, H = top_h}
+        left := Rect{X = work.X, Y = work.Y + top_h, W = left_w, H = middle_h}
+        right := Rect{X = work.X + left_w, Y = work.Y + top_h, W = right_w, H = middle_h}
+        bottom := Rect{X = work.X, Y = work.Y + top_h + middle_h, W = work.W, H = bottom_h}
+
+        col := drop_focus_column(ws, dragged)
+        if col == nil {
+            empty_targets := [4]Rect{top, bottom, left, right}
+            for r in empty_targets {
+                append(&targets, Drop_Target{Kind = .New_Column, Out = o, Ws = ws, Insert_Index = 0, Geom = r})
+            }
+        } else {
+            append(&targets, Drop_Target{Kind = .Into_Column, Out = o, Ws = ws, Col = col, Row_Index = 0, Geom = top})
+            append(&targets, Drop_Target{Kind = .Into_Column, Out = o, Ws = ws, Col = col, Row_Index = len(col.Wins), Geom = bottom})
+            append(&targets, Drop_Target{Kind = .New_Column, Out = o, Ws = ws, Insert_Index = 0, Geom = left})
+            append(&targets, Drop_Target{Kind = .New_Column, Out = o, Ws = ws, Insert_Index = len(ws.Cols), Geom = right})
+        }
+    }
+    return targets
+}
+
+Drop_Target_At_Point :: proc(m: ^Manager, x, y: i32, dragged: ^Client = nil) -> Drop_Target {
+    targets := Drop_Targets(m, dragged)
+    defer delete(targets)
+    for target in targets {
+        r := target.Geom
+        if x >= r.X && x < r.X + r.W && y >= r.Y && y < r.Y + r.H { return target }
+    }
+    return {}
+}
+
+// Compatibility helper for callers that specifically want a vertical target.
+Column_At_Point :: proc(m: ^Manager, x, y: i32) -> (o: ^Output, ws: ^Workspace, col: ^Column) {
+    target := Drop_Target_At_Point(m, x, y)
+    if target.Kind != .Into_Column { return nil, nil, nil }
+    return target.Out, target.Ws, target.Col
+}
+
 // clamp_viewport keeps viewport_x inside [0, max] where max == max(0,
 // total - work_w): you can never pan past the last column's right edge.
 clamp_viewport :: proc(vp: i32, p: Layout_Params, n_cols: int) -> i32 {

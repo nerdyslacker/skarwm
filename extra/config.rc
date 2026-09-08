@@ -95,8 +95,12 @@ call : mod + period        : focus_output_next
 call : mod + Shift + comma : move_to_output_prev
 call : mod + Shift + period : move_to_output_next
 
-# Fixed mouse actions use mod_key: Mod+wheel up/down scrolls the current
-# workspace strip left/right. Mod+left/right drag moves/resizes floating windows.
+# Fixed mouse actions use mod_key: Mod+wheel up/down scrolls the workspace strip
+# under the pointer. Mod+left-drag moves floating windows or drops tiled windows
+# into another column; both work across monitors. Tiled dragging shows four
+# choices per monitor: top/bottom insert vertically in the focused column, and
+# left/right create a horizontal column at the corresponding workspace edge.
+# Mod+right-drag resizes floaters.
 
 # ---- dynamic workspaces --------------------------------------------------------
 # A workspace is created on demand the first time it is shown, so ids are not
