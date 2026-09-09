@@ -138,6 +138,16 @@ Popout {
             persistFn: value => Theme.persistBarScale(value)
         }
 
+        TweakSlider {
+            label: "background opacity"
+            from: 0
+            to: 100
+            value: Math.round(Theme.barBackgroundOpacity * 100)
+            suffix: "%"
+            applyFn: value => Theme.barBackgroundOpacity = value / 100
+            persistFn: value => Theme.persistBarBackgroundOpacity(value / 100)
+        }
+
         SectionLabel { text: "Accent color" }
 
         Grid {

@@ -21,8 +21,8 @@ The bar includes:
   and power controls.
 
 The panel and all cards are square. The panel has no outer margin and is
-anchored directly to the top, left, and right screen edges. Its EWMH strut is
-reserved automatically by skarwm.
+anchored directly to the selected screen edge. Its EWMH strut is reserved
+automatically by skarwm.
 
 ## Requirements
 
@@ -75,13 +75,15 @@ per-user install, or in `$SKARWM_STATE_DIR` when it is set:
 
 - `bar-height` — bar height in pixels, clamped to 28–80;
 - `bar-scale` — module scale, clamped to 0.7–2.0;
+- `bar-transparent` — bar-background opacity from `0` (transparent) to `1`
+  (opaque); module cards keep their normal colors;
 - `weather-location` — city, postal code, or other wttr.in location;
 - `weather-units` — `c` or `f`;
 - `pomodoro` — persisted timer end time and duration;
 - `keyboard-layout.json` — layouts, aligned variants, and XKB options saved by
   the keyboard settings popup;
 - `tags.json` — visible tag count and number/dot display preference.
-- `bar-widgets.json` — enabled/disabled state for individual bar widgets.
+- `bar-widgets.json` — enabled state, ordering, and top/bottom bar placement.
 - `tray-hidden.json` — tray application IDs assigned to the overflow popup.
 
 The keyboard module shows the active layout. Left-click it to select any
@@ -122,9 +124,12 @@ controls for additional external displays.
 The rightmost command menu shows the current account name and avatar (from
 `~/.face` or AccountsService), followed by DND, pomodoro, and the session power
 buttons. Right-click the command module to choose which other widgets are
-visible on the bar. Microphone mute is controlled from the audio popup's input
-section; a compact warning appears beside Audio while the microphone is muted,
-and clicking it unmutes the input.
+visible on the bar, arrange their order, and place the bar on any screen edge.
+Left/right bars use compact upright buttons and treat the three layout groups
+as top/center/bottom. Popups always open inward from the selected edge.
+Microphone mute is controlled from the audio popup's input section; a compact
+warning appears beside Audio while the microphone is muted, and clicking it
+unmutes the input.
 
 The calendar reads renCal's configured Caldir path automatically. Set
 `CALDIR_DIR` only when you want to override that location.

@@ -621,8 +621,8 @@ fi
 # stacked above windows (fullscreen included), and its _NET_WM_STRUT_PARTIAL
 # shrinks the tiling work area live. Work-area numbers below assume the built-in
 # defaults (outer 8 / border 2): baseline client 1260x780+10+10; a 24 px top
-# strut pushes it to 1260x764+10+26; a 48 px strut to 1260x740+10+50; the root
-# _NET_WORKAREA is "8, 24, 1264, 768" repeated per desktop.
+# strut pushes it to 1260x756+10+34; a 48 px strut to 1260x732+10+58; the root
+# _NET_WORKAREA is "8, 32, 1264, 760" repeated per desktop.
 say "== 13. docks and struts =="
 pkill -x skarwm; pkill -x xterm; sleep 0.7
 rm -f "$WM_LOG"
@@ -683,8 +683,8 @@ fi
 key super+Return
 if wait_tiled_n 1; then pass "dock: window spawns while the panel is up"; else fail "dock: spawn"; fi
 xt=$(first_tiled_id)
-if wait_geom "$xt" "1260x764+10+26"; then
-  pass "dock: top strut shrinks the work area (y=26, h=764)"
+if wait_geom "$xt" "1260x756+10+34"; then
+  pass "dock: top strut retains the outer gap (y=34, h=756)"
 else
   fail "dock: strut geometry ($(geom_of "$xt"))"
 fi
@@ -700,8 +700,8 @@ fi
 xdotool mousemove 640 795 >/dev/null 2>&1; sleep 0.3
 
 # workarea root property mirrors the current work rect (one desktop so far)
-if wait_xp "8, 24, 1264, 768" -root _NET_WORKAREA; then
-  pass "dock: _NET_WORKAREA = work rect (8,24,1264,768)"
+if wait_xp "8, 32, 1264, 760" -root _NET_WORKAREA; then
+  pass "dock: _NET_WORKAREA = work rect (8,32,1264,760)"
 else
   fail "dock: _NET_WORKAREA ($(xp_val -root _NET_WORKAREA))"
 fi
@@ -714,13 +714,13 @@ if wait_abs_geom "$DOCK" "1280x24+0+0"; then
 else
   fail "dock: panel hidden by ws switch"
 fi
-if wait_xp "8, 24, 1264, 768, 8, 24, 1264, 768" -root _NET_WORKAREA; then
+if wait_xp "8, 32, 1264, 760, 8, 32, 1264, 760" -root _NET_WORKAREA; then
   pass "dock: workarea repeated per desktop (2 desktops now)"
 else
   fail "dock: workarea multi-desktop ($(xp_val -root _NET_WORKAREA))"
 fi
 key super+1
-if wait_geom "$xt" "1260x764+10+26"; then pass "dock: back on ws1 the window retiles below"; else fail "dock: ws1 restore"; fi
+if wait_geom "$xt" "1260x756+10+34"; then pass "dock: back on ws1 the window retiles below"; else fail "dock: ws1 restore"; fi
 
 # fullscreen covers the output; the panel stays visible and stacked above
 key super+f
@@ -737,7 +737,7 @@ else
   fail "dock: stacking order (dock line $dp vs window line $xp)"
 fi
 key super+f
-if wait_geom "$xt" "1260x764+10+26"; then pass "dock: fullscreen exit retiles below the panel"; else fail "dock: fs exit"; fi
+if wait_geom "$xt" "1260x756+10+34"; then pass "dock: fullscreen exit retiles below the panel"; else fail "dock: fs exit"; fi
 
 # a WM restart re-adopts the still-mapped panel: strut + geometry come back
 pkill -x skarwm; sleep 0.7
@@ -746,7 +746,7 @@ TERMINAL=xterm nohup ./build/skarwm >"$WM_LOG" 2>&1 &
 sleep 1.2
 pgrep -x skarwm >/dev/null || die_display
 xdotool mousemove 640 795 >/dev/null 2>&1; sleep 0.3
-if wait_geom "$xt" "1260x764+10+26" && wait_abs_geom "$DOCK" "1280x24+0+0"; then
+if wait_geom "$xt" "1260x756+10+34" && wait_abs_geom "$DOCK" "1280x24+0+0"; then
   pass "dock: WM restart re-adopts panel + strut"
 else
   fail "dock: restart adoption ($(geom_of "$xt"))"
@@ -754,7 +754,7 @@ fi
 
 # live strut change: PropertyNotify -> Update_Reserved -> reflow of the window
 echo "strut-top 48" >&9
-if wait_geom "$xt" "1260x740+10+50"; then
+if wait_geom "$xt" "1260x732+10+58"; then
   pass "dock: live strut update (24 -> 48) reflows the window"
 else
   fail "dock: live strut change ($(geom_of "$xt"))"

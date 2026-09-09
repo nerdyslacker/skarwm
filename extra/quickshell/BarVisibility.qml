@@ -62,6 +62,9 @@ Singleton {
     property var widgets: defaults
     property var clusters: defaultClusters
     property bool showOnAllMonitors: true
+    property string barPosition: "top"
+    readonly property bool verticalBar: barPosition === "left"
+        || barPosition === "right"
 
     function metadata(key) {
         for (const entry of catalog)
@@ -92,6 +95,15 @@ Singleton {
     function setShowOnAllMonitors(enabled) {
         showOnAllMonitors = enabled
         writeState(widgets, enabled, clusters)
+    }
+
+    function setBarPosition(position) {
+        const next = ["top", "bottom", "left", "right"].indexOf(position) >= 0
+            ? position : "top"
+        if (barPosition === next)
+            return
+        barPosition = next
+        writeState(widgets, showOnAllMonitors, clusters)
     }
 
     function moveWidget(key, targetCluster, targetIndex) {
@@ -149,7 +161,8 @@ Singleton {
     function writeState(widgetState, showAll, clusterState) {
         const saved = ({
             showOnAllMonitors: showAll,
-            clusters: clusterState
+            clusters: clusterState,
+            barPosition: root.barPosition
         })
         for (const name in defaults)
             saved[name] = widgetState[name] !== false
@@ -182,6 +195,8 @@ Singleton {
                 root.widgets = next
                 root.clusters = root.normalizedClusters(saved.clusters)
                 root.showOnAllMonitors = saved.showOnAllMonitors !== false
+                root.barPosition = ["top", "bottom", "left", "right"]
+                    .indexOf(saved.barPosition) >= 0 ? saved.barPosition : "top"
             } catch (error) {
                 console.warn("bar visibility settings:", error)
             }

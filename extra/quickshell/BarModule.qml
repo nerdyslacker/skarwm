@@ -7,6 +7,8 @@ Rectangle {
 
     property string icon: ""
     property color iconColor: Theme.accent
+    property string compactIcon: icon
+    property color compactIconColor: iconColor
     // some glyphs (e.g. Font Logos ) are missing from JetBrainsMono NF here
     property string iconFont: Theme.fontFamily
     property string label: ""
@@ -28,7 +30,8 @@ Rectangle {
     default property alias extraContent: row.data
 
     implicitHeight: Theme.moduleHeight
-    implicitWidth: row.implicitWidth + Math.round(18 * Theme.barScale)
+    implicitWidth: BarVisibility.verticalBar ? Theme.moduleHeight
+        : row.implicitWidth + Math.round(18 * Theme.barScale)
     radius: 0
     color: mouse.containsMouse && interactive ? Qt.alpha(Theme.fg, 0.14) : Qt.alpha(Theme.fg, 0.07)
     border.width: 1
@@ -42,6 +45,7 @@ Rectangle {
 
     Row {
         id: row
+        visible: !BarVisibility.verticalBar
         anchors.centerIn: parent
         spacing: Math.round(7 * Theme.barScale)
 
@@ -64,6 +68,16 @@ Rectangle {
             font.pixelSize: Theme.fontSize
             Behavior on color { ColorAnimation { duration: 250 } }
         }
+    }
+
+    Text {
+        visible: BarVisibility.verticalBar && root.compactIcon !== ""
+        anchors.centerIn: parent
+        text: root.compactIcon
+        color: root.compactIconColor
+        font.family: root.iconFont
+        font.pixelSize: Theme.iconSize
+        Behavior on color { ColorAnimation { duration: 250 } }
     }
 
     Rectangle {

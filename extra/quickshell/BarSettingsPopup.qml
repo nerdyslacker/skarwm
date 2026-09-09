@@ -253,64 +253,162 @@ Popout {
             font.pixelSize: Theme.fontSize - 1
         }
 
-        Rectangle {
-            id: monitorRow
+        Row {
+            id: barOptions
             width: parent.width
-            height: 45
-            color: "transparent"
-            border.width: 1
-            border.color: Theme.gray5
+            height: 68
+            spacing: 8
 
-            Text {
-                id: monitorIcon
-                anchors.left: parent.left
-                anchors.leftMargin: 9
-                anchors.verticalCenter: parent.verticalCenter
-                text: "󰍹"
-                color: Theme.accent
-                font.family: Theme.fontFamily
-                font.pixelSize: 17
-            }
+            Rectangle {
+                id: positionPanel
+                width: (parent.width - barOptions.spacing) / 2
+                height: parent.height
+                color: "transparent"
+                border.width: 1
+                border.color: Theme.gray5
 
-            Column {
-                anchors.left: monitorIcon.right
-                anchors.leftMargin: 9
-                anchors.right: monitorSwitch.left
-                anchors.rightMargin: 9
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 1
                 Text {
-                    text: "Show bar on all monitors"
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.top: parent.top
+                    anchors.topMargin: 6
+                    text: "Bar position"
                     color: Theme.fg
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSize - 1
                 }
-                Text {
-                    text: BarVisibility.showOnAllMonitors
-                        ? "Every connected monitor" : "Main monitor only"
-                    color: Theme.brightBlack
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Math.max(8, Theme.fontSize - 3)
+
+                Row {
+                    id: positionButtons
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.margins: 6
+                    height: 36
+                    spacing: 5
+
+                    Repeater {
+                        model: [
+                            { key: "top", label: "Top", icon: "󰁝" },
+                            { key: "bottom", label: "Bottom", icon: "󰁅" },
+                            { key: "left", label: "Left", icon: "󰁍" },
+                            { key: "right", label: "Right", icon: "󰁔" }
+                        ]
+
+                        Rectangle {
+                            id: positionButton
+                            required property var modelData
+                            readonly property bool selected:
+                                BarVisibility.barPosition === modelData.key
+                            width: (positionButtons.width - positionButtons.spacing * 3) / 4
+                            height: positionButtons.height
+                            color: selected ? Theme.accent
+                                : positionMouse.containsMouse ? Theme.gray3 : Theme.gray2
+                            border.width: 1
+                            border.color: selected ? Theme.brightOrange : Theme.gray5
+
+                            Row {
+                                anchors.centerIn: parent
+                                height: parent.height
+                                spacing: 4
+                                Text {
+                                    width: 15
+                                    height: parent.height
+                                    verticalAlignment: Text.AlignVCenter
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: positionButton.modelData.icon
+                                    color: positionButton.selected ? Theme.selfg : Theme.accent
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: 14
+                                }
+                                Text {
+                                    height: parent.height
+                                    verticalAlignment: Text.AlignVCenter
+                                    text: positionButton.modelData.label
+                                    color: positionButton.selected ? Theme.selfg : Theme.fg
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: Math.max(9, Theme.fontSize - 2)
+                                    font.bold: positionButton.selected
+                                }
+                            }
+
+                            MouseArea {
+                                id: positionMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: BarVisibility.setBarPosition(
+                                    positionButton.modelData.key)
+                            }
+                        }
+                    }
                 }
             }
 
-            ToggleSwitch {
-                id: monitorSwitch
-                anchors.right: parent.right
-                anchors.rightMargin: 9
-                anchors.verticalCenter: parent.verticalCenter
-                checked: BarVisibility.showOnAllMonitors
-                onToggled: BarVisibility.setShowOnAllMonitors(
-                    !BarVisibility.showOnAllMonitors)
+            Rectangle {
+                id: monitorPanel
+                width: (parent.width - barOptions.spacing) / 2
+                height: parent.height
+                color: "transparent"
+                border.width: 1
+                border.color: Theme.gray5
+
+                Text {
+                    id: monitorIcon
+                    anchors.left: parent.left
+                    anchors.leftMargin: 9
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "󰍹"
+                    color: Theme.accent
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 17
+                }
+
+                Column {
+                    anchors.left: monitorIcon.right
+                    anchors.leftMargin: 9
+                    anchors.right: monitorSwitch.left
+                    anchors.rightMargin: 9
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 1
+                    Text {
+                        text: "Show bar on all monitors"
+                        color: Theme.fg
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize - 1
+                    }
+                    Text {
+                        text: BarVisibility.showOnAllMonitors
+                            ? "Every connected monitor" : "Main monitor only"
+                        color: Theme.brightBlack
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Math.max(8, Theme.fontSize - 3)
+                    }
+                }
+
+                ToggleSwitch {
+                    id: monitorSwitch
+                    anchors.right: parent.right
+                    anchors.rightMargin: 9
+                    anchors.verticalCenter: parent.verticalCenter
+                    checked: BarVisibility.showOnAllMonitors
+                    onToggled: BarVisibility.setShowOnAllMonitors(
+                        !BarVisibility.showOnAllMonitors)
+                }
             }
         }
 
         Row {
             width: parent.width
             spacing: 8
-            ClusterSection { clusterName: "left"; heading: "Left" }
+            ClusterSection {
+                clusterName: "left"
+                heading: BarVisibility.verticalBar ? "Top" : "Left"
+            }
             ClusterSection { clusterName: "center"; heading: "Center" }
-            ClusterSection { clusterName: "right"; heading: "Right" }
+            ClusterSection {
+                clusterName: "right"
+                heading: BarVisibility.verticalBar ? "Bottom" : "Right"
+            }
         }
     }
 }

@@ -6,8 +6,9 @@ Item {
 
     readonly property bool hasTitle: Wm.title !== ""
 
-    implicitWidth: hasTitle
-        ? titleText.implicitWidth + Math.round(18 * Theme.barScale) : 0
+    implicitWidth: hasTitle ? (BarVisibility.verticalBar
+        ? Theme.moduleHeight
+        : titleText.implicitWidth + Math.round(18 * Theme.barScale)) : 0
     implicitHeight: Theme.moduleHeight
 
     Rectangle {
@@ -25,9 +26,11 @@ Item {
         Text {
             id: titleText
             anchors.fill: parent
-            anchors.leftMargin: Math.round(9 * Theme.barScale)
-            anchors.rightMargin: Math.round(9 * Theme.barScale)
-            text: Wm.title
+            anchors.leftMargin: BarVisibility.verticalBar
+                ? 0 : Math.round(9 * Theme.barScale)
+            anchors.rightMargin: BarVisibility.verticalBar
+                ? 0 : Math.round(9 * Theme.barScale)
+            text: BarVisibility.verticalBar ? "󰖯" : Wm.title
             color: Qt.alpha(Theme.fg, 0.75)
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize

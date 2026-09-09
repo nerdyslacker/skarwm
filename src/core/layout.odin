@@ -9,10 +9,11 @@ package core
 // strip coordinate 0; successive columns are spaced `inner` px apart. Screen x
 // = work_x + strip_x - viewport_x. Increasing viewport_x pans content left.
 //
-// Work area = output rectangle inset by `outer`, and further by a dock's
-// reserved edge when the reservation exceeds the outer gap:
-//     work_x = geom.X + max(outer, res.left)  ; work_w = geom.W - max(outer, res.left) - max(outer, res.right)
-//     work_y = geom.Y + max(outer, res.top)   ; work_h = geom.H - max(outer, res.top)  - max(outer, res.bottom)
+// Work area = output rectangle inset by `outer`, after any dock reservation:
+//     work_x = geom.X + outer + res.left
+//     work_w = geom.W - outer*2 - res.left - res.right
+//     work_y = geom.Y + outer + res.top
+//     work_h = geom.H - outer*2 - res.top - res.bottom
 // A zero `res` reproduces the plain outer-gap inset.
 //
 // Columns are uniform width derived per workspace (see Resolve_Page_Width):
@@ -40,10 +41,12 @@ Layout_Params :: struct {
 }
 
 compute_params :: proc(cfg: Config, geom: Rect, n_cols: int, res: Insets = {}) -> (p: Layout_Params) {
-    p.WorkX = geom.X + max(cfg.OuterGap, res.Left)
-    p.WorkY = geom.Y + max(cfg.OuterGap, res.Top)
-    p.WorkW = geom.W - max(cfg.OuterGap, res.Left) - max(cfg.OuterGap, res.Right)
-    p.WorkH = geom.H - max(cfg.OuterGap, res.Top) - max(cfg.OuterGap, res.Bottom)
+    p.WorkX = geom.X + cfg.OuterGap + max(i32(0), res.Left)
+    p.WorkY = geom.Y + cfg.OuterGap + max(i32(0), res.Top)
+    p.WorkW = (geom.W - cfg.OuterGap * 2 -
+        max(i32(0), res.Left) - max(i32(0), res.Right))
+    p.WorkH = (geom.H - cfg.OuterGap * 2 -
+        max(i32(0), res.Top) - max(i32(0), res.Bottom))
     p.Inner = cfg.InnerGap
     p.Border = cfg.BorderWidth
     if p.WorkW < 1 || p.WorkH < 1 {

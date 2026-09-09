@@ -8,6 +8,7 @@ BarModule {
     id: root
 
     property bool hasRenCal: false
+    compactIcon: "󰥔"
 
     SystemClock {
         id: clock

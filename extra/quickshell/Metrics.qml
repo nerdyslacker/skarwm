@@ -5,6 +5,10 @@ import QtQuick
 BarModule {
     id: root
 
+    compactIcon: "󰍛"
+    compactIconColor: Sys.cpu > 90 || Sys.mem > 90 || Sys.disk > 90
+        ? Theme.red : Theme.blue
+
     onClicked: mouse => {
         if (mouse.button === Qt.LeftButton)
             popup.visible = !popup.visible

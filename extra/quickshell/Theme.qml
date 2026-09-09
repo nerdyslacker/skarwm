@@ -27,6 +27,7 @@ Singleton {
 
     property int barHeight: 34
     property real barUserScale: 1.0
+    property real barBackgroundOpacity: 1.0
 
     property int _barStateLoads: 0
     readonly property bool barStateReady: _barStateLoads >= 2
@@ -139,6 +140,11 @@ Singleton {
         barScaleState.setText(String(value) + "\n")
     }
 
+    function persistBarBackgroundOpacity(value) {
+        barBackgroundOpacity = Math.min(1, Math.max(0, value))
+        barTransparentState.setText(String(barBackgroundOpacity) + "\n")
+    }
+
     FileView {
         id: barHeightState
         path: root.stateDir + "/bar-height"
@@ -166,6 +172,27 @@ Singleton {
             const value = parseFloat(text())
             if (!isNaN(value))
                 root.barUserScale = Math.min(Math.max(value, 0.7), 2.0)
+        }
+    }
+
+    FileView {
+        id: barTransparentState
+        path: root.stateDir + "/bar-transparent"
+        watchChanges: true
+        atomicWrites: true
+        onFileChanged: reload()
+        onLoaded: {
+            const saved = text().trim()
+            // Migrate the short-lived boolean form of this setting.
+            if (saved === "true") {
+                root.barBackgroundOpacity = 0
+            } else if (saved === "false") {
+                root.barBackgroundOpacity = 1
+            } else {
+                const value = parseFloat(saved)
+                if (!isNaN(value))
+                    root.barBackgroundOpacity = Math.min(1, Math.max(0, value))
+            }
         }
     }
 

@@ -5,16 +5,18 @@ import QtQuick
 Item {
     id: root
 
-    implicitWidth: row.implicitWidth
-    implicitHeight: Theme.moduleHeight
+    implicitWidth: BarVisibility.verticalBar ? Theme.moduleHeight : tagGrid.implicitWidth
+    implicitHeight: BarVisibility.verticalBar ? tagGrid.implicitHeight : Theme.moduleHeight
 
     WheelHandler {
         onWheel: event => Wm.cycleTag(event.angleDelta.y > 0 ? -1 : 1)
     }
 
-    Row {
-        id: row
-        anchors.verticalCenter: parent.verticalCenter
+    Grid {
+        id: tagGrid
+        anchors.centerIn: parent
+        columns: BarVisibility.verticalBar ? 1
+            : Math.max(TagConfig.count, Wm.tagCount)
         spacing: 4
 
         Repeater {
@@ -25,7 +27,8 @@ Item {
                 readonly property bool selected: Wm.isSelected(index)
                 readonly property bool occupied: Wm.isOccupied(index)
                 readonly property bool urgent: Wm.isUrgent(index)
-                width: selected ? 30 : 24
+                width: BarVisibility.verticalBar ? Theme.moduleHeight
+                    : selected ? 30 : 24
                 height: Theme.moduleHeight
                 radius: 0
                 color: urgent ? Theme.red

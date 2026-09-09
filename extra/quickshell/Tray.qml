@@ -13,16 +13,21 @@ Rectangle {
 
     visible: BarVisibility.enabled("tray") && TrayState.ready
         && SystemTray.items.values.length > 0
-    implicitWidth: trayRow.implicitWidth + Math.round(14 * Theme.barScale)
-    implicitHeight: Theme.moduleHeight
+    implicitWidth: BarVisibility.verticalBar ? Theme.moduleHeight
+        : trayRow.implicitWidth + Math.round(14 * Theme.barScale)
+    implicitHeight: BarVisibility.verticalBar
+        ? trayRow.implicitHeight + Math.round(8 * Theme.barScale)
+        : Theme.moduleHeight
     radius: 0
     color: Qt.alpha(Theme.fg, 0.07)
     border.width: 1
     border.color: Theme.gray5
 
-    Row {
+    Grid {
         id: trayRow
         anchors.centerIn: parent
+        columns: BarVisibility.verticalBar ? 1
+            : Math.max(1, root.visibleItems.length + 2)
         spacing: 4
 
         Repeater {
@@ -32,7 +37,8 @@ Rectangle {
                 id: trayItem
                 required property SystemTrayItem modelData
 
-                width: Math.round(20 * Theme.barScale)
+                width: BarVisibility.verticalBar
+                    ? Theme.moduleHeight : Math.round(20 * Theme.barScale)
                 height: Theme.moduleHeight
                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
 
@@ -66,16 +72,17 @@ Rectangle {
 
         Rectangle {
             visible: root.visibleItems.length > 0
-            anchors.verticalCenter: parent.verticalCenter
-            width: 1
-            height: Math.round(16 * Theme.barScale)
+            width: BarVisibility.verticalBar
+                ? Math.round(16 * Theme.barScale) : 1
+            height: BarVisibility.verticalBar
+                ? 1 : Math.round(16 * Theme.barScale)
             color: Theme.gray5
         }
 
         MouseArea {
             id: overflowButton
-            anchors.verticalCenter: parent.verticalCenter
-            width: overflowLabel.implicitWidth + Math.round(8 * Theme.barScale)
+            width: BarVisibility.verticalBar ? Theme.moduleHeight
+                : overflowLabel.implicitWidth + Math.round(8 * Theme.barScale)
             height: Theme.moduleHeight
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton
@@ -88,7 +95,9 @@ Rectangle {
             Text {
                 id: overflowLabel
                 anchors.centerIn: parent
-                text: "󰅀"
+                text: BarVisibility.barPosition === "bottom" ? "󰅃"
+                    : BarVisibility.barPosition === "left" ? "󰅂"
+                    : BarVisibility.barPosition === "right" ? "󰅁" : "󰅀"
                 color: Theme.brightBlack
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSize
