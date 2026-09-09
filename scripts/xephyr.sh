@@ -143,9 +143,9 @@ if [ "$mode" = multi ]; then
         exit 1
     fi
     DISPLAY="$nested_display" xrandr \
-        --setmonitor LEFT 960/254x1080/286+0+0 "$output"
+        --setmonitor LEFT 800/211x900/238+0+0 "$output"
     DISPLAY="$nested_display" xrandr \
-        --setmonitor RIGHT 960/254x1080/286+960+0 none
+        --setmonitor RIGHT 800/211x900/238+800+0 none
     printf 'Created RandR monitors LEFT and RIGHT (960x1080 each)\n'
 fi
 

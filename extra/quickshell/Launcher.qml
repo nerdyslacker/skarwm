@@ -1,7 +1,7 @@
 import QtQuick
 
 // Left click opens the native application launcher, right click opens the
-// wallpaper picker, and middle click applies a random wallpaper.
+// wallpaper picker, and middle click immediately applies a random wallpaper.
 BarModule {
     id: root
 

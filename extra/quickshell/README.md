@@ -30,7 +30,7 @@ Install skarwm first so `skarwm-msg` is available on `PATH`. The bar itself
 requires Quickshell and a Nerd Font; `JetBrainsMono Nerd Font` is configured.
 Individual modules use these optional programs when available:
 
-- `feh` for wallpaper selection; the application launcher is built into
+- `feh` and ImageMagick for per-monitor wallpaper selection; the application launcher is built into
   Quickshell and reads the system's `.desktop` entries directly;
 - `nmcli` and `nm-connection-editor` for network state and settings, plus
   `bluetoothctl` for the network popup's optional Bluetooth section;
