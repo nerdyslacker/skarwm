@@ -421,15 +421,21 @@ Popout {
             Repeater {
                 model: win.devices
 
-                Item {
+                Rectangle {
                     id: devRow
                     required property var modelData
                     width: parent.width
                     height: 30
+                    radius: 0
+                    color: devRow.modelData.state === "connected"
+                        ? Qt.alpha(Theme.accent, 0.16) : Theme.gray2
+                    border.width: 1
+                    border.color: Theme.gray5
 
                     Text {
                         id: devName
                         anchors.left: parent.left
+                        anchors.leftMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
                         text: (devRow.modelData.type === "wifi" ? "󰖩  " : "󰈀  ")
                             + devRow.modelData.dev
@@ -451,7 +457,7 @@ Popout {
 
                     Text {
                         anchors.right: devRow.modelData.type === "wifi" ? radioPill.left : parent.right
-                        anchors.rightMargin: 12
+                        anchors.rightMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
                         text: devRow.modelData.state === "connected"
                             ? devRow.modelData.conn
@@ -466,6 +472,7 @@ Popout {
                         id: radioPill
                         visible: devRow.modelData.type === "wifi"
                         anchors.right: parent.right
+                        anchors.rightMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
                         width: 34
                         height: 18
@@ -494,6 +501,13 @@ Popout {
             }
 
             // VPN connections — shield row per saved vpn/wireguard profile
+            Rectangle {
+                visible: win.vpns.length > 0
+                width: parent.width
+                height: 1
+                color: Qt.alpha(Theme.fg, 0.1)
+            }
+
             Text {
                 visible: win.vpns.length > 0
                 text: "VPN"
@@ -506,15 +520,21 @@ Popout {
             Repeater {
                 model: win.vpns
 
-                Item {
+                Rectangle {
                     id: vpnRow
                     required property var modelData
                     width: parent.width
                     height: 30
+                    radius: 0
+                    color: vpnRow.modelData.active
+                        ? Qt.alpha(Theme.green, 0.14) : Theme.gray2
+                    border.width: 1
+                    border.color: Theme.gray5
 
                     Text {
                         id: vpnName
                         anchors.left: parent.left
+                        anchors.leftMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
                         text: "󰦝  " + vpnRow.modelData.name
                         color: vpnRow.modelData.active ? Theme.green : Theme.fg
@@ -536,6 +556,7 @@ Popout {
                     Text {
                         visible: vpnRow.modelData.external
                         anchors.right: parent.right
+                        anchors.rightMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
                         text: vpnRow.modelData.active ? "on · external" : "external"
                         color: vpnRow.modelData.active ? Theme.green : Theme.disabled
@@ -546,6 +567,7 @@ Popout {
                     Rectangle {
                         visible: !vpnRow.modelData.external
                         anchors.right: parent.right
+                        anchors.rightMargin: 10
                         anchors.verticalCenter: parent.verticalCenter
                         width: 34
                         height: 18
@@ -574,6 +596,13 @@ Popout {
             }
 
             // Bluetooth — hidden entirely on machines without an adapter
+            Rectangle {
+                visible: win.btPresent
+                width: parent.width
+                height: 1
+                color: Qt.alpha(Theme.fg, 0.1)
+            }
+
             Item {
                 visible: win.btPresent
                 width: parent.width
@@ -666,11 +695,11 @@ Popout {
                             width: parent.width
                             height: 30
                             radius: 0
-                            color: btRow.modelData.connected ? Qt.alpha(Theme.accent, 0.25)
-                                 : btMa.containsMouse ? Qt.alpha(Theme.fg, 0.1)
-                                 : "transparent"
-
-                            Behavior on color { ColorAnimation { duration: 120 } }
+                            color: btRow.modelData.connected ? Qt.alpha(Theme.accent, 0.22)
+                                 : btMa.containsMouse ? Theme.gray3 : Theme.gray2
+                            border.width: 1
+                            border.color: btRow.modelData.connected
+                                ? Theme.accent : Theme.gray5
 
                             Text {
                                 anchors.left: parent.left
@@ -712,9 +741,9 @@ Popout {
                             width: parent.width
                             height: 30
                             radius: 0
-                            color: btNewMa.containsMouse ? Qt.alpha(Theme.fg, 0.1) : "transparent"
-
-                            Behavior on color { ColorAnimation { duration: 120 } }
+                            color: btNewMa.containsMouse ? Theme.gray3 : Theme.gray2
+                            border.width: 1
+                            border.color: Theme.gray5
 
                             Text {
                                 anchors.left: parent.left
@@ -818,11 +847,11 @@ Popout {
                                 width: parent.width
                                 height: 34
                                 radius: 0
-                                color: netRow.modelData.inUse ? Qt.alpha(Theme.accent, 0.25)
-                                     : netMa.containsMouse ? Qt.alpha(Theme.fg, 0.1)
-                                     : "transparent"
-
-                                Behavior on color { ColorAnimation { duration: 120 } }
+                                color: netRow.modelData.inUse ? Qt.alpha(Theme.accent, 0.22)
+                                     : netMa.containsMouse ? Theme.gray3 : Theme.gray2
+                                border.width: 1
+                                border.color: netRow.modelData.inUse
+                                    ? Theme.accent : Theme.gray5
 
                                 Text {
                                     anchors.left: parent.left

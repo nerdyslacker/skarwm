@@ -13,7 +13,6 @@ Popout {
     property var upcomingEvents: []
     property var eventDates: ({})
 
-    alignRight: true
     cardWidth: 280
     cardHeight: upcomingEvents.length > 0 ? 470 : 300
 

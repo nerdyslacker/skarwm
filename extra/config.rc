@@ -53,7 +53,7 @@ autostart : "lxqt-policykit-agent"
 # first session, when Feh has not created ~/.fehbg yet.
 autostart : "if [ -f ~/.fehbg ]; then sh ~/.fehbg; else feh --bg-fill ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/wallpaper/hadrut_srcery.jpeg; fi"
 autostart : "dunst -config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/dunst/dunstrc"
-autostart : "picom --config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/picom/picom.conf -b"
+autostart : "picom --config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/picom/picom.conf ${SKARWM_PICOM_ARGS:-} -b"
 autostart : "${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/scripts/clipboard-history daemon"
 autostart : "qs --no-duplicate -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell"
 autostart : "xss-lock -- betterlockscreen -l"

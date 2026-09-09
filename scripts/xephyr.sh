@@ -63,6 +63,10 @@ log_path=${TMPDIR:-/tmp}/skarwm-xephyr-$$.log
 xephyr_pid=
 state_dir=${SKARWM_XEPHYR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/skarwm/xephyr}
 extra_dir=$(pwd)/extra
+# Picom's incremental XRender damage path can lose background-window repaint
+# regions behind ARGB popup windows when compositing inside Xephyr. A full
+# repaint is cheap on this fixed-size test display and avoids that nested-X bug.
+picom_args=${SKARWM_PICOM_ARGS:---no-use-damage}
 
 stop_quickshell_instance() {
     if command -v qs >/dev/null 2>&1; then
@@ -152,5 +156,6 @@ mkdir -p "$state_dir"
 printf 'Persistent state: %s\n' "$state_dir"
 DISPLAY="$nested_display" SKARWM_SOCKET="$socket_path" \
     SKARWM_EXTRA_DIR="$extra_dir" SKARWM_STATE_DIR="$state_dir" \
+    SKARWM_PICOM_ARGS="$picom_args" \
     KITTY_CONFIG_DIRECTORY="$extra_dir/kitty" \
     ./build/skarwm "$@"
