@@ -109,7 +109,7 @@ if DISPLAY="$nested_display" xwininfo -root >/dev/null 2>&1; then
 fi
 
 printf 'Starting Xephyr on %s (%s mode)\n' "$nested_display" "$mode"
-Xephyr "$nested_display" -screen 1280x800 -ac -br -noreset >"$log_path" 2>&1 &
+Xephyr "$nested_display" -screen 1920x1080 -ac -br -noreset >"$log_path" 2>&1 &
 xephyr_pid=$!
 
 ready=false
@@ -139,10 +139,10 @@ if [ "$mode" = multi ]; then
         exit 1
     fi
     DISPLAY="$nested_display" xrandr \
-        --setmonitor LEFT 640/170x800/210+0+0 "$output"
+        --setmonitor LEFT 960/254x1080/286+0+0 "$output"
     DISPLAY="$nested_display" xrandr \
-        --setmonitor RIGHT 640/170x800/210+640+0 none
-    printf 'Created RandR monitors LEFT and RIGHT (640x800 each)\n'
+        --setmonitor RIGHT 960/254x1080/286+960+0 none
+    printf 'Created RandR monitors LEFT and RIGHT (960x1080 each)\n'
 fi
 
 printf 'Launching skarwm; close the Xephyr window or press Ctrl-C here to stop.\n'
