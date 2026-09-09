@@ -5,31 +5,232 @@ import QtQuick
 Popout {
     id: root
 
-    readonly property var widgetModel: [
-        { key: "launcher", label: "Launcher", icon: "󰀻" },
-        { key: "tags", label: "Tags", icon: "󰓹" },
-        { key: "layout", label: "Layout picker", icon: "󰙀" },
-        { key: "title", label: "Window title", icon: "󰖯" },
-        { key: "media", label: "Media", icon: "󰎈" },
-        { key: "weather", label: "Weather", icon: "󰖐" },
-        { key: "metrics", label: "System metrics", icon: "󰍛" },
-        { key: "battery", label: "Battery", icon: "󰁹" },
-        { key: "brightness", label: "Brightness", icon: "󰃠" },
-        { key: "volume", label: "Audio", icon: "󰕾" },
-        { key: "micIndicator", label: "Muted mic", icon: "󰍭" },
-        { key: "network", label: "Network", icon: "󰤨" },
-        { key: "keyboard", label: "Keyboard", icon: "󰌌" },
-        { key: "clipboard", label: "Clipboard", icon: "󰅌" },
-        { key: "tray", label: "System tray", icon: "󰔚" },
-        { key: "notifications", label: "DND indicator", icon: "󰂛" },
-        { key: "clock", label: "Clock", icon: "󰥔" },
-        { key: "capsLock", label: "Caps Lock", icon: "󰘲" },
-        { key: "screenshot", label: "Screenshot", icon: "󰻛" }
-    ]
-
-    cardWidth: 430
+    cardWidth: 790
     cardHeight: content.implicitHeight + 2 * cardPadding
     alignRight: true
+
+    component ToggleSwitch: Rectangle {
+        id: control
+        property bool checked: false
+        signal toggled()
+
+        width: 34
+        height: 18
+        color: checked ? Theme.accent : Qt.alpha(Theme.fg, 0.15)
+        Behavior on color { ColorAnimation { duration: 150 } }
+
+        Rectangle {
+            x: control.checked ? parent.width - width - 2 : 2
+            anchors.verticalCenter: parent.verticalCenter
+            width: 14
+            height: 14
+            color: control.checked ? Theme.bg : Qt.alpha(Theme.fg, 0.7)
+            Behavior on x {
+                NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: control.toggled()
+        }
+    }
+
+    component WidgetRow: Rectangle {
+        id: widgetRow
+        required property string widgetKey
+        readonly property var info: BarVisibility.metadata(widgetKey)
+        readonly property bool isEnabled: BarVisibility.enabled(widgetKey)
+        property bool dragging: false
+
+        width: parent.width
+        height: 36
+        color: dragging
+            ? Qt.alpha(Theme.accent, 0.22) : Qt.alpha(Theme.fg, 0.045)
+        border.width: 1
+        border.color: dragging ? Theme.accent : Theme.gray5
+        z: dragging ? 100 : 1
+        opacity: dragging ? 0.82 : 1
+
+        DragHandler {
+            id: dragHandler
+            target: dragProxy
+            acceptedButtons: Qt.LeftButton
+            onActiveChanged: {
+                if (active) {
+                    widgetRow.dragging = true
+                } else if (widgetRow.dragging) {
+                    dragProxy.Drag.drop()
+                    widgetRow.dragging = false
+                    dragProxy.x = 0
+                    dragProxy.y = 0
+                }
+            }
+        }
+
+        // A free-moving proxy keeps the source row in its Column while giving
+        // Qt's drag system real scene coordinates across all three sections.
+        Item {
+            id: dragProxy
+            property string widgetKey: widgetRow.widgetKey
+            x: 0
+            y: 0
+            width: widgetRow.width
+            height: widgetRow.height
+            z: 200
+
+            Drag.active: widgetRow.dragging
+            Drag.source: dragProxy
+            Drag.keys: ["bar-widget"]
+            Drag.hotSpot.x: width / 2
+            Drag.hotSpot.y: height / 2
+            Drag.supportedActions: Qt.MoveAction
+
+            Rectangle {
+                anchors.fill: parent
+                visible: widgetRow.dragging
+                color: Theme.gray2
+                border.width: 2
+                border.color: Theme.accent
+                Text {
+                    anchors.centerIn: parent
+                    text: widgetRow.info ? widgetRow.info.label : widgetRow.widgetKey
+                    color: Theme.fg
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSize - 1
+                }
+            }
+        }
+
+        Text {
+            id: handle
+            anchors.left: parent.left
+            anchors.leftMargin: 7
+            anchors.verticalCenter: parent.verticalCenter
+            text: "󰇙"
+            color: widgetRow.dragging ? Theme.accent : Theme.gray6
+            font.family: Theme.fontFamily
+            font.pixelSize: 13
+        }
+
+        Text {
+            id: widgetIcon
+            anchors.left: handle.right
+            anchors.leftMargin: 7
+            anchors.verticalCenter: parent.verticalCenter
+            text: widgetRow.info ? widgetRow.info.icon : ""
+            color: widgetRow.isEnabled ? Theme.cyan : Theme.brightBlack
+            font.family: Theme.fontFamily
+            font.pixelSize: 15
+        }
+
+        Text {
+            anchors.left: widgetIcon.right
+            anchors.leftMargin: 7
+            anchors.right: widgetSwitch.left
+            anchors.rightMargin: 7
+            anchors.verticalCenter: parent.verticalCenter
+            text: widgetRow.info ? widgetRow.info.label : widgetRow.widgetKey
+            elide: Text.ElideRight
+            color: widgetRow.isEnabled ? Theme.fg : Theme.brightBlack
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize - 1
+        }
+
+        ToggleSwitch {
+            id: widgetSwitch
+            anchors.right: parent.right
+            anchors.rightMargin: 7
+            anchors.verticalCenter: parent.verticalCenter
+            checked: widgetRow.isEnabled
+            onToggled: BarVisibility.setEnabled(
+                widgetRow.widgetKey, !widgetRow.isEnabled)
+        }
+    }
+
+    component ClusterSection: Column {
+        id: section
+        required property string clusterName
+        required property string heading
+        width: (parent.width - 16) / 3
+        spacing: 6
+
+        Row {
+            width: parent.width
+            height: 24
+            spacing: 7
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: section.clusterName === "left" ? "󰁍"
+                    : section.clusterName === "center" ? "󰘖" : "󰁔"
+                color: Theme.accent
+                font.family: Theme.fontFamily
+                font.pixelSize: 15
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: section.heading
+                color: Theme.fg
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+                font.bold: true
+            }
+        }
+
+        Rectangle {
+            id: dropPanel
+            width: parent.width
+            height: Math.max(64, rows.implicitHeight + 8)
+            color: dropArea.containsDrag
+                ? Qt.alpha(Theme.accent, 0.09) : "transparent"
+            border.width: 1
+            border.color: dropArea.containsDrag ? Theme.accent : Theme.gray5
+            Behavior on color { ColorAnimation { duration: 100 } }
+            Behavior on border.color { ColorAnimation { duration: 100 } }
+
+            Column {
+                id: rows
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: 4
+                spacing: 4
+
+                Repeater {
+                    model: BarVisibility.cluster(section.clusterName)
+                    WidgetRow {
+                        required property string modelData
+                        widgetKey: modelData
+                    }
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: rows.children.length === 1
+                text: "Drop widgets here"
+                color: Theme.gray6
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize - 2
+            }
+
+            DropArea {
+                id: dropArea
+                anchors.fill: parent
+                keys: ["bar-widget"]
+                onDropped: drop => {
+                    const source = drop.source
+                    if (!source || source.widgetKey === undefined)
+                        return
+                    const rowPitch = 40
+                    const index = Math.round(Math.max(0, drop.y - 4) / rowPitch)
+                    BarVisibility.moveWidget(source.widgetKey,
+                        section.clusterName, index)
+                    drop.acceptProposedAction()
+                }
+            }
+        }
+    }
 
     Column {
         id: content
@@ -38,7 +239,7 @@ Popout {
         spacing: 9
 
         Text {
-            text: "Bar widgets"
+            text: "Bar layout"
             color: Theme.fg
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize + 1
@@ -46,7 +247,7 @@ Popout {
         }
 
         Text {
-            text: "Choose which widgets appear on the bar"
+            text: "Drag widgets between sections or within a section to reorder them"
             color: Theme.brightBlack
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize - 1
@@ -78,7 +279,6 @@ Popout {
                 anchors.rightMargin: 9
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 1
-
                 Text {
                     text: "Show bar on all monitors"
                     color: Theme.fg
@@ -94,119 +294,23 @@ Popout {
                 }
             }
 
-            Rectangle {
+            ToggleSwitch {
                 id: monitorSwitch
                 anchors.right: parent.right
                 anchors.rightMargin: 9
                 anchors.verticalCenter: parent.verticalCenter
-                width: 34
-                height: 18
-                color: BarVisibility.showOnAllMonitors
-                    ? Theme.accent : Qt.alpha(Theme.fg, 0.15)
-                Behavior on color { ColorAnimation { duration: 150 } }
-
-                Rectangle {
-                    x: BarVisibility.showOnAllMonitors
-                        ? parent.width - width - 2 : 2
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 14
-                    height: 14
-                    color: BarVisibility.showOnAllMonitors
-                        ? Theme.bg : Qt.alpha(Theme.fg, 0.7)
-                    Behavior on x {
-                        NumberAnimation {
-                            duration: 150
-                            easing.type: Easing.OutCubic
-                        }
-                    }
-                }
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                onClicked: BarVisibility.setShowOnAllMonitors(
+                checked: BarVisibility.showOnAllMonitors
+                onToggled: BarVisibility.setShowOnAllMonitors(
                     !BarVisibility.showOnAllMonitors)
             }
         }
 
-        Grid {
+        Row {
             width: parent.width
-            columns: 2
-            spacing: 6
-
-            Repeater {
-                model: root.widgetModel
-
-                Rectangle {
-                    id: widgetRow
-                    required property var modelData
-                    readonly property bool isEnabled: BarVisibility.enabled(modelData.key)
-
-                    width: (parent.width - 6) / 2
-                    height: 36
-                    color: rowMouse.containsMouse
-                        ? Qt.alpha(Theme.fg, 0.08) : "transparent"
-
-                    Text {
-                        id: widgetIcon
-                        anchors.left: parent.left
-                        anchors.leftMargin: 7
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: widgetRow.modelData.icon
-                        color: widgetRow.isEnabled ? Theme.cyan : Theme.brightBlack
-                        font.family: Theme.fontFamily
-                        font.pixelSize: 15
-                    }
-
-                    Text {
-                        anchors.left: widgetIcon.right
-                        anchors.leftMargin: 7
-                        anchors.right: widgetSwitch.left
-                        anchors.rightMargin: 7
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: widgetRow.modelData.label
-                        elide: Text.ElideRight
-                        color: widgetRow.isEnabled ? Theme.fg : Theme.brightBlack
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize - 1
-                    }
-
-                    Rectangle {
-                        id: widgetSwitch
-                        anchors.right: parent.right
-                        anchors.rightMargin: 7
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 34
-                        height: 18
-                        color: widgetRow.isEnabled
-                            ? Theme.accent : Qt.alpha(Theme.fg, 0.15)
-                        Behavior on color { ColorAnimation { duration: 150 } }
-
-                        Rectangle {
-                            x: widgetRow.isEnabled ? parent.width - width - 2 : 2
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 14
-                            height: 14
-                            color: widgetRow.isEnabled
-                                ? Theme.bg : Qt.alpha(Theme.fg, 0.7)
-                            Behavior on x {
-                                NumberAnimation {
-                                    duration: 150
-                                    easing.type: Easing.OutCubic
-                                }
-                            }
-                        }
-                    }
-
-                    MouseArea {
-                        id: rowMouse
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: BarVisibility.setEnabled(
-                            widgetRow.modelData.key, !widgetRow.isEnabled)
-                    }
-                }
-            }
+            spacing: 8
+            ClusterSection { clusterName: "left"; heading: "Left" }
+            ClusterSection { clusterName: "center"; heading: "Center" }
+            ClusterSection { clusterName: "right"; heading: "Right" }
         }
     }
 }

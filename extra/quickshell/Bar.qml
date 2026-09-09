@@ -6,6 +6,28 @@ import Quickshell
 PanelWindow {
     id: root
     property var modelData
+    readonly property var widgetSources: ({
+        launcher: Qt.resolvedUrl("Launcher.qml"),
+        tags: Qt.resolvedUrl("Tags.qml"),
+        layout: Qt.resolvedUrl("LayoutButton.qml"),
+        title: Qt.resolvedUrl("Title.qml"),
+        scratchpads: Qt.resolvedUrl("Scratchpads.qml"),
+        media: Qt.resolvedUrl("Media.qml"),
+        weather: Qt.resolvedUrl("Weather.qml"),
+        metrics: Qt.resolvedUrl("Metrics.qml"),
+        battery: Qt.resolvedUrl("Battery.qml"),
+        brightness: Qt.resolvedUrl("Brightness.qml"),
+        volume: Qt.resolvedUrl("Volume.qml"),
+        micIndicator: Qt.resolvedUrl("MicMute.qml"),
+        network: Qt.resolvedUrl("Network.qml"),
+        keyboard: Qt.resolvedUrl("KeyboardLayout.qml"),
+        clipboard: Qt.resolvedUrl("Clipboard.qml"),
+        tray: Qt.resolvedUrl("Tray.qml"),
+        notifications: Qt.resolvedUrl("Bell.qml"),
+        clock: Qt.resolvedUrl("Clock.qml"),
+        capsLock: Qt.resolvedUrl("CapsLock.qml"),
+        screenshot: Qt.resolvedUrl("Screenshot.qml")
+    })
     screen: modelData
     anchors { top: true; left: true; right: true }
     implicitHeight: Theme.effectiveBarHeight
@@ -16,36 +38,60 @@ PanelWindow {
         anchorItem: panel
     }
 
+    component WidgetLoader: Loader {
+        required property string widgetKey
+        readonly property real naturalWidth: item ? item.implicitWidth : 0
+
+        active: BarVisibility.enabled(widgetKey)
+        source: root.widgetSources[widgetKey] ?? ""
+        visible: active
+        width: active && status === Loader.Ready && item && item.visible
+            ? (widgetKey === "title"
+            ? Math.min(naturalWidth, root.width * 0.34) : naturalWidth) : 0
+        height: item ? item.implicitHeight : Theme.moduleHeight
+    }
+
+    component WidgetCluster: Row {
+        required property string clusterName
+        spacing: 4
+
+        Repeater {
+            model: BarVisibility.cluster(parent.clusterName)
+            WidgetLoader {
+                required property string modelData
+                widgetKey: modelData
+            }
+        }
+    }
+
     Rectangle {
         id: panel
         anchors.fill: parent
         color: Theme.bg
         radius: 0
 
-        Row {
+        WidgetCluster {
             id: leftCluster
+            clusterName: "left"
             anchors.left: parent.left
             anchors.leftMargin: 6
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 4
-
-            Launcher { visible: BarVisibility.enabled("launcher") }
-            Tags { visible: BarVisibility.enabled("tags") }
-            LayoutButton { visible: BarVisibility.enabled("layout") }
         }
 
-        // Title lives in the gap between the clusters: screen-centered when
-        // it fits, nudged inward when it doesn't, elided to the gap width.
-        // (A symmetric clamp goes negative on narrow screens — the right
-        // cluster is wide — and a negative-width Text ignores elide.)
-        Title {
+        // Keep the center genuinely centered when space permits, then nudge
+        // it between the outer clusters on crowded bars.
+        WidgetCluster {
+            id: centerCluster
+            clusterName: "center"
+            readonly property real gapLeft: leftCluster.x + leftCluster.width + 12
+            readonly property real gapRight: rightCluster.x - 12
+            readonly property real availableWidth: Math.max(0, gapRight - gapLeft)
             anchors.verticalCenter: parent.verticalCenter
-            readonly property real gapL: leftCluster.x + leftCluster.width + 24
-            readonly property real gapR: rightCluster.x - 24
-            width: Math.max(0, Math.min(implicitWidth, gapR - gapL))
-            x: Math.max(gapL, Math.min((parent.width - width) / 2, gapR - width))
-            visible: BarVisibility.enabled("title")
-                && (hasScratchpads || width > 40)
+            width: Math.min(implicitWidth, availableWidth)
+            clip: width < implicitWidth
+            x: Math.max(gapLeft,
+                Math.min((parent.width - width) / 2,
+                    gapRight - width))
         }
 
         Row {
@@ -53,23 +99,9 @@ PanelWindow {
             anchors.right: parent.right
             anchors.rightMargin: 6
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 2
+            spacing: 4
 
-            Media {}
-            Weather {}
-            Metrics { visible: BarVisibility.enabled("metrics") }
-            Battery {}
-            Brightness { visible: BarVisibility.enabled("brightness") }
-            Volume { visible: BarVisibility.enabled("volume") }
-            MicMute {}
-            Network { visible: BarVisibility.enabled("network") }
-            KeyboardLayout { visible: BarVisibility.enabled("keyboard") }
-            Clipboard { visible: BarVisibility.enabled("clipboard") }
-            Tray {}
-            Bell {}
-            Clock { visible: BarVisibility.enabled("clock") }
-            CapsLock {}
-            Screenshot { visible: BarVisibility.enabled("screenshot") }
+            WidgetCluster { clusterName: "right" }
             Commands {}
         }
     }

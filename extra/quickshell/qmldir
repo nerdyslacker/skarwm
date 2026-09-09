@@ -14,6 +14,7 @@ LayoutPicker LayoutPicker.qml
 TagSettingsPopup TagSettingsPopup.qml
 Title Title.qml
 ScratchpadsPopup ScratchpadsPopup.qml
+Scratchpads Scratchpads.qml
 Launcher Launcher.qml
 ApplicationLauncher ApplicationLauncher.qml
 WindowOverview WindowOverview.qml
