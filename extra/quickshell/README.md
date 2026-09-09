@@ -82,6 +82,7 @@ per-user install, or in `$SKARWM_STATE_DIR` when it is set:
   the keyboard settings popup;
 - `tags.json` — visible tag count and number/dot display preference.
 - `bar-widgets.json` — enabled/disabled state for individual bar widgets.
+- `tray-hidden.json` — tray application IDs assigned to the overflow popup.
 
 The keyboard module shows the active layout. Left-click it to select any
 configured layout; right-click it to search the system XKB language catalogue
@@ -130,6 +131,11 @@ The calendar reads renCal's configured Caldir path automatically. Set
 Left-click the clock for the month calendar and upcoming events. Clicking an
 event or a highlighted day opens that event in renCal; right-clicking the clock
 opens renCal directly.
+
+The system tray's trailing arrow opens its overflow popup. Click an application
+row to activate it, right-click for its native menu, or use Hide/Show to choose
+whether its icon occupies space on the bar. This placement persists across
+restarts.
 
 When skarwm has one or more numbered scratchpad registrations, a terminal icon
 appears beside the focused-window title. Click it to see the registered windows

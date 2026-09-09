@@ -6,6 +6,7 @@ singleton ClipboardState ClipboardState.qml
 singleton TagConfig TagConfig.qml
 singleton LauncherState LauncherState.qml
 singleton BarVisibility BarVisibility.qml
+singleton TrayState TrayState.qml
 Bar Bar.qml
 BarModule BarModule.qml
 Tags Tags.qml
@@ -44,6 +45,7 @@ Clipboard Clipboard.qml
 ClipboardPopup ClipboardPopup.qml
 Updates Updates.qml
 Tray Tray.qml
+TrayPopup TrayPopup.qml
 Bell Bell.qml
 Clock Clock.qml
 CalendarPopup CalendarPopup.qml

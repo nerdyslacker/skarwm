@@ -3,12 +3,16 @@ import Quickshell
 import Quickshell.Widgets
 import Quickshell.Services.SystemTray
 
-// StatusNotifierItem tray (SNI over DBus, works fine on X11).
-// Left click activates, right click opens the item's menu.
+// StatusNotifierItem tray (SNI over DBus, works fine on X11). Icons assigned
+// to overflow remain available from the trailing button.
 Rectangle {
     id: root
 
-    visible: BarVisibility.enabled("tray") && SystemTray.items.values.length > 0
+    readonly property var visibleItems: SystemTray.items.values.filter(
+        item => !TrayState.isHidden(item))
+
+    visible: BarVisibility.enabled("tray") && TrayState.ready
+        && SystemTray.items.values.length > 0
     implicitWidth: trayRow.implicitWidth + Math.round(14 * Theme.barScale)
     implicitHeight: Theme.moduleHeight
     radius: 0
@@ -22,7 +26,7 @@ Rectangle {
         spacing: 4
 
         Repeater {
-            model: SystemTray.items
+            model: root.visibleItems
 
             MouseArea {
                 id: trayItem
@@ -46,14 +50,56 @@ Rectangle {
                 }
 
                 onClicked: m => {
-                    if (m.button === Qt.LeftButton)
-                        modelData.activate()
-                    else if (m.button === Qt.MiddleButton)
+                    if (m.button === Qt.LeftButton) {
+                        if (modelData.onlyMenu && modelData.hasMenu)
+                            menuAnchor.open()
+                        else
+                            modelData.activate()
+                    } else if (m.button === Qt.MiddleButton) {
                         modelData.secondaryActivate()
-                    else if (modelData.hasMenu)
+                    } else if (modelData.hasMenu) {
                         menuAnchor.open()
+                    }
                 }
             }
         }
+
+        Rectangle {
+            visible: root.visibleItems.length > 0
+            anchors.verticalCenter: parent.verticalCenter
+            width: 1
+            height: Math.round(16 * Theme.barScale)
+            color: Theme.gray5
+        }
+
+        MouseArea {
+            id: overflowButton
+            anchors.verticalCenter: parent.verticalCenter
+            width: overflowLabel.implicitWidth + Math.round(8 * Theme.barScale)
+            height: Theme.moduleHeight
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+
+            Rectangle {
+                anchors.fill: parent
+                color: overflowButton.containsMouse ? Theme.gray3 : "transparent"
+            }
+
+            Text {
+                id: overflowLabel
+                anchors.centerIn: parent
+                text: "󰅀"
+                color: Theme.brightBlack
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+            }
+
+            onClicked: overflowPopup.visible = !overflowPopup.visible
+        }
+    }
+
+    TrayPopup {
+        id: overflowPopup
+        anchorItem: overflowButton
     }
 }
