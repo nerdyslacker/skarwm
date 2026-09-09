@@ -19,7 +19,7 @@ Rectangle {
         ? trayRow.implicitHeight + Math.round(8 * Theme.barScale)
         : Theme.moduleHeight
     radius: 0
-    color: Qt.alpha(Theme.fg, 0.07)
+    color: Theme.barSurface(0.07)
     border.width: 1
     border.color: Theme.gray5
 

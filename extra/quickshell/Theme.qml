@@ -53,6 +53,12 @@ Singleton {
     readonly property color brightBlue: "#68A8E4"
     readonly property color brightMagenta: "#FF5C8F"
     readonly property color brightCyan: "#2BE4D0"
+
+    // Bar controls stay visually identical to their appearance on a fully
+    // opaque bar even when the panel background itself is translucent.
+    function barSurface(opacity) {
+        return Qt.tint(root.bg, Qt.alpha(root.fg, opacity))
+    }
     readonly property color brightWhite: "#FCE8C3"
 
     readonly property color darkGreen: "#294229"

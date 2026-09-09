@@ -5,6 +5,7 @@ Popout {
 
     property int draftCount: TagConfig.count
     property bool draftShowNumbers: TagConfig.showNumbers
+    property bool draftDynamicWorkspaces: TagConfig.dynamicWorkspaces
 
     cardWidth: 270
     cardHeight: content.implicitHeight + 2 * cardPadding
@@ -13,6 +14,7 @@ Popout {
         if (visible) {
             draftCount = TagConfig.count
             draftShowNumbers = TagConfig.showNumbers
+            draftDynamicWorkspaces = TagConfig.dynamicWorkspaces
         }
     }
 
@@ -23,13 +25,15 @@ Popout {
 
         width: 30
         height: 28
-        color: pointer.containsMouse ? Theme.gray4 : Theme.gray2
+        color: !enabled ? Qt.alpha(Theme.fg, 0.04)
+            : pointer.containsMouse ? Theme.gray4 : Theme.gray2
         border.width: 1
-        border.color: pointer.containsMouse ? Theme.accent : Theme.gray5
+        border.color: !enabled ? Qt.alpha(Theme.gray5, 0.45)
+            : pointer.containsMouse ? Theme.accent : Theme.gray5
         Text {
             anchors.centerIn: parent
             text: step.symbol
-            color: Theme.fg
+            color: step.enabled ? Theme.fg : Theme.brightBlack
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize + 2
         }
@@ -37,7 +41,35 @@ Popout {
             id: pointer
             anchors.fill: parent
             hoverEnabled: true
+            enabled: step.enabled
             onClicked: step.activated()
+        }
+    }
+
+    component SettingSwitch: Rectangle {
+        id: control
+        property bool checked: false
+        signal toggled()
+
+        width: 34
+        height: 18
+        color: checked ? Theme.accent : Qt.alpha(Theme.fg, 0.15)
+        Behavior on color { ColorAnimation { duration: 150 } }
+
+        Rectangle {
+            x: control.checked ? parent.width - width - 2 : 2
+            anchors.verticalCenter: parent.verticalCenter
+            width: 14
+            height: 14
+            color: control.checked ? Theme.bg : Qt.alpha(Theme.fg, 0.7)
+            Behavior on x {
+                NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+            }
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            onClicked: control.toggled()
         }
     }
 
@@ -55,9 +87,34 @@ Popout {
             font.bold: true
         }
 
+        Item {
+            width: parent.width
+            height: 30
+
+            Text {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Dynamic workspaces"
+                color: Theme.fg
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+            }
+
+            SettingSwitch {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                checked: root.draftDynamicWorkspaces
+                onToggled: root.draftDynamicWorkspaces =
+                    !root.draftDynamicWorkspaces
+            }
+        }
+
         Row {
+            id: visibleTagsRow
             width: parent.width
             height: 28
+            opacity: root.draftDynamicWorkspaces ? 0.42 : 1
+            Behavior on opacity { NumberAnimation { duration: 120 } }
 
             Text {
                 width: parent.width - controls.width
@@ -69,6 +126,7 @@ Popout {
             }
             Row {
                 id: controls
+                enabled: !root.draftDynamicWorkspaces
                 spacing: 7
                 StepButton {
                     symbol: "−"
@@ -104,37 +162,12 @@ Popout {
                 font.pixelSize: Theme.fontSize
             }
 
-            Rectangle {
+            SettingSwitch {
                 id: displaySwitch
                 anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
-                width: 34
-                height: 18
-                radius: 0
-                color: root.draftShowNumbers
-                    ? Theme.accent : Qt.alpha(Theme.fg, 0.15)
-                Behavior on color { ColorAnimation { duration: 150 } }
-
-                Rectangle {
-                    x: root.draftShowNumbers ? parent.width - width - 2 : 2
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 14
-                    height: 14
-                    radius: 0
-                    color: root.draftShowNumbers
-                        ? Theme.bg : Qt.alpha(Theme.fg, 0.7)
-                    Behavior on x {
-                        NumberAnimation {
-                            duration: 150
-                            easing.type: Easing.OutCubic
-                        }
-                    }
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: root.draftShowNumbers = !root.draftShowNumbers
-                }
+                checked: root.draftShowNumbers
+                onToggled: root.draftShowNumbers = !root.draftShowNumbers
             }
         }
 
@@ -155,7 +188,8 @@ Popout {
                 anchors.fill: parent
                 hoverEnabled: true
                 onClicked: {
-                    TagConfig.save(root.draftCount, root.draftShowNumbers)
+                    TagConfig.save(root.draftCount, root.draftShowNumbers,
+                        root.draftDynamicWorkspaces)
                     root.visible = false
                 }
             }

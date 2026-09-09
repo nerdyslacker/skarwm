@@ -115,39 +115,6 @@ Popout {
             persistFn: value => Wm.persistGaps(value)
         }
 
-        SectionLabel { text: "Bar" }
-
-        TweakSlider {
-            label: "bar height"
-            from: 28
-            to: 80
-            value: Theme.barHeight
-            suffix: " px"
-            applyFn: value => Theme.barHeight = value
-            persistFn: value => Theme.persistBarHeight(value)
-        }
-
-        TweakSlider {
-            label: "item scale"
-            from: 0.7
-            to: 2.0
-            value: Theme.barUserScale
-            isInt: false
-            suffix: "×"
-            applyFn: value => Theme.barUserScale = value
-            persistFn: value => Theme.persistBarScale(value)
-        }
-
-        TweakSlider {
-            label: "background opacity"
-            from: 0
-            to: 100
-            value: Math.round(Theme.barBackgroundOpacity * 100)
-            suffix: "%"
-            applyFn: value => Theme.barBackgroundOpacity = value / 100
-            persistFn: value => Theme.persistBarBackgroundOpacity(value / 100)
-        }
-
         SectionLabel { text: "Accent color" }
 
         Grid {

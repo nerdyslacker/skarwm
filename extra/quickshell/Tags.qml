@@ -4,6 +4,8 @@ import QtQuick
 
 Item {
     id: root
+    readonly property int visibleTagCount: TagConfig.dynamicWorkspaces
+        ? Wm.dynamicTagCount : Math.max(TagConfig.count, Wm.tagCount)
 
     implicitWidth: BarVisibility.verticalBar ? Theme.moduleHeight : tagGrid.implicitWidth
     implicitHeight: BarVisibility.verticalBar ? tagGrid.implicitHeight : Theme.moduleHeight
@@ -16,11 +18,11 @@ Item {
         id: tagGrid
         anchors.centerIn: parent
         columns: BarVisibility.verticalBar ? 1
-            : Math.max(TagConfig.count, Wm.tagCount)
+            : root.visibleTagCount
         spacing: 4
 
         Repeater {
-            model: Math.max(TagConfig.count, Wm.tagCount)
+            model: root.visibleTagCount
             Rectangle {
                 id: tag
                 required property int index
@@ -33,7 +35,7 @@ Item {
                 radius: 0
                 color: urgent ? Theme.red
                     : selected ? Theme.accent
-                    : Qt.alpha(Theme.fg, occupied ? 0.12 : 0.07)
+                    : Theme.barSurface(occupied ? 0.12 : 0.07)
                 border.width: 1
                 border.color: urgent ? Theme.red
                     : selected ? Theme.accent

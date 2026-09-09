@@ -28,7 +28,8 @@ PanelWindow {
         notifications: Qt.resolvedUrl("Bell.qml"),
         clock: Qt.resolvedUrl("Clock.qml"),
         capsLock: Qt.resolvedUrl("CapsLock.qml"),
-        screenshot: Qt.resolvedUrl("Screenshot.qml")
+        screenshot: Qt.resolvedUrl("Screenshot.qml"),
+        commands: Qt.resolvedUrl("Commands.qml")
     })
     screen: modelData
     anchors {
@@ -43,7 +44,10 @@ PanelWindow {
     // panel's height, which is the full screen dimension for side bars. The WM
     // adds its configured outer gap outside this physical reservation.
     exclusiveZone: Math.round(root.vertical ? root.width : root.height)
-    color: Qt.alpha(Theme.bg, Theme.barBackgroundOpacity)
+    // Keep the native window surface ARGB. Giving PanelWindow a translucent
+    // color can be flattened against black by X11 compositors; the child
+    // rectangle below paints the requested opacity onto this clear surface.
+    color: "transparent"
     visible: Theme.barStateReady && BarVisibility.showOnScreen(modelData)
 
     WindowOverview {
@@ -158,34 +162,13 @@ PanelWindow {
                 : (parent.height - height) / 2
         }
 
-        Item {
+        WidgetCluster {
             id: endCluster
-            implicitWidth: root.vertical
-                ? Math.max(rightCluster.implicitWidth, commandButton.implicitWidth)
-                : rightCluster.implicitWidth + 4 + commandButton.implicitWidth
-            implicitHeight: root.vertical
-                ? rightCluster.implicitHeight + 4 + commandButton.implicitHeight
-                : Math.max(rightCluster.implicitHeight, commandButton.implicitHeight)
-            width: implicitWidth
-            height: implicitHeight
+            clusterName: "right"
             x: root.vertical ? (parent.width - width) / 2
                 : parent.width - width - 6
             y: root.vertical ? parent.height - height - 6
                 : (parent.height - height) / 2
-            WidgetCluster {
-                id: rightCluster
-                clusterName: "right"
-                x: root.vertical ? (parent.width - width) / 2 : 0
-                y: root.vertical ? 0 : (parent.height - height) / 2
-            }
-
-            Commands {
-                id: commandButton
-                x: root.vertical ? (parent.width - width) / 2
-                    : rightCluster.width + 4
-                y: root.vertical ? rightCluster.height + 4
-                    : (parent.height - height) / 2
-            }
         }
     }
 }

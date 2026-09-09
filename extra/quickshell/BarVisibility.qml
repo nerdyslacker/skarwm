@@ -27,7 +27,8 @@ Singleton {
         { key: "notifications", label: "DND indicator", icon: "󰂛", defaultCluster: "right" },
         { key: "clock", label: "Clock", icon: "󰥔", defaultCluster: "right" },
         { key: "capsLock", label: "Caps Lock", icon: "󰘲", defaultCluster: "right" },
-        { key: "screenshot", label: "Screenshot", icon: "󰻛", defaultCluster: "right" }
+        { key: "screenshot", label: "Screenshot", icon: "󰻛", defaultCluster: "right" },
+        { key: "commands", label: "Commands", icon: "󰀄", defaultCluster: "right", mandatory: true }
     ]
     readonly property var clusterNames: ["left", "center", "right"]
     readonly property var defaultClusters: ({
@@ -35,7 +36,8 @@ Singleton {
         center: ["title", "scratchpads"],
         right: ["media", "weather", "metrics", "battery", "brightness",
                 "volume", "micIndicator", "network", "keyboard", "clipboard",
-                "tray", "notifications", "clock", "capsLock", "screenshot"]
+                "tray", "notifications", "clock", "capsLock", "screenshot",
+                "commands"]
     })
     readonly property var defaults: ({
         launcher: true,
@@ -57,7 +59,8 @@ Singleton {
         notifications: true,
         clock: true,
         capsLock: true,
-        screenshot: true
+        screenshot: true,
+        commands: true
     })
     property var widgets: defaults
     property var clusters: defaultClusters
@@ -78,11 +81,13 @@ Singleton {
     }
 
     function enabled(key) {
-        return widgets[key] !== false
+        const info = metadata(key)
+        return (info && info.mandatory === true) || widgets[key] !== false
     }
 
     function setEnabled(key, enabled) {
-        if (defaults[key] === undefined)
+        const info = metadata(key)
+        if (defaults[key] === undefined || (info && info.mandatory === true))
             return
         const next = ({})
         for (const name in defaults)
@@ -164,8 +169,11 @@ Singleton {
             clusters: clusterState,
             barPosition: root.barPosition
         })
-        for (const name in defaults)
-            saved[name] = widgetState[name] !== false
+        for (const name in defaults) {
+            const info = metadata(name)
+            saved[name] = (info && info.mandatory === true)
+                || widgetState[name] !== false
+        }
         stateFile.setText(JSON.stringify(saved) + "\n")
     }
 
@@ -190,8 +198,11 @@ Singleton {
             try {
                 const saved = JSON.parse(text())
                 const next = ({})
-                for (const name in root.defaults)
-                    next[name] = saved[name] !== false
+                for (const name in root.defaults) {
+                    const info = root.metadata(name)
+                    next[name] = (info && info.mandatory === true)
+                        || saved[name] !== false
+                }
                 root.widgets = next
                 root.clusters = root.normalizedClusters(saved.clusters)
                 root.showOnAllMonitors = saved.showOnAllMonitors !== false

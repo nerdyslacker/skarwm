@@ -13,7 +13,7 @@
     padding = 15
     horizontal_padding = 15
     frame_width = 3
-    frame_color = "#ff5f00"  # THEME: dunst_frame_global
+    frame_color = "#fed06e"  # THEME: dunst_frame_global
     separator_color = auto
     sort = yes
     idle_threshold = 120
@@ -80,16 +80,16 @@
 [urgency_low]
     background = "#121110"  # THEME: dunst_bg_low
     foreground = "#917E6B"  # THEME: dunst_fg_low
-    frame_color = "#ff5f00"  # THEME: dunst_frame_low
+    frame_color = "#fed06e"  # THEME: dunst_frame_low
     timeout = 10
     highlight = "#68A8E4"  # THEME: dunst_highlight_low
 
 [urgency_normal]
     background = "#121110"  # THEME: dunst_bg_normal
     foreground = "#FCE8C3"  # THEME: dunst_fg_normal
-    frame_color = "#ff5f00"  # THEME: dunst_frame_normal
+    frame_color = "#fed06e"  # THEME: dunst_frame_normal
     timeout = 10
-    highlight = "#ff5f00"  # THEME: dunst_highlight_normal
+    highlight = "#fed06e"  # THEME: dunst_highlight_normal
 
 [urgency_critical]
     background = "#121110"  # THEME: dunst_bg_critical

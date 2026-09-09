@@ -15,7 +15,7 @@ BarModule {
     label: pomoRunning ? fmtPomo(pomoLeft) : pomoDone ? "0:00" : ""
     labelColor: pomoDone ? Theme.bg : Theme.fg
     color: pomoDone ? Theme.red
-        : hovered ? Qt.alpha(Theme.fg, 0.14) : Qt.alpha(Theme.fg, 0.07)
+        : hovered ? Theme.barSurface(0.14) : Theme.barSurface(0.07)
     progress: pomoRunning ? pomoLeft / pomoTotal : -1
 
     property string userName: String(Quickshell.env("USER") ?? "user")

@@ -33,7 +33,8 @@ Rectangle {
     implicitWidth: BarVisibility.verticalBar ? Theme.moduleHeight
         : row.implicitWidth + Math.round(18 * Theme.barScale)
     radius: 0
-    color: mouse.containsMouse && interactive ? Qt.alpha(Theme.fg, 0.14) : Qt.alpha(Theme.fg, 0.07)
+    color: mouse.containsMouse && interactive
+        ? Theme.barSurface(0.14) : Theme.barSurface(0.07)
     border.width: 1
     border.color: Theme.gray5
     // tactile press feedback — slow-starting apps otherwise make a click

@@ -17,6 +17,20 @@ Singleton {
     // with the user's configured minimum, ensuring an active high tag remains
     // reachable without forcing the configured count back to nine.
     property int tagCount: 1
+    // Dynamic mode shows every occupied/focused workspace plus exactly one
+    // empty workspace after the highest occupied one.
+    readonly property int dynamicTagCount: {
+        let highestOccupied = 0
+        let focused = 1
+        for (const ws of workspaces) {
+            const id = Math.max(1, Number(ws.id) || 1)
+            if (ws.windows > 0)
+                highestOccupied = Math.max(highestOccupied, id)
+            if (ws.focused)
+                focused = id
+        }
+        return Math.max(1, focused, highestOccupied + 1)
+    }
     property string title: ""
     property string activeWinId: ""
     readonly property string msgPath: "skarwm-msg"
