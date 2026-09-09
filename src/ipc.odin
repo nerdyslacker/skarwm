@@ -364,6 +364,11 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
             ipc_broadcast_focus_change(old_focus, g_wm.m.Focused)
         }
         return
+    case .Focus_Window:
+        if cl := g_wm.m.ByXid[u32(cmd.arg)]; cl != nil && !cl.Dock && !cl.Stashed {
+            ewmh_activate(cl)
+        }
+        return
     case .Set_Gaps:
         gap := i32(cmd.arg)
         g_wm.m.Cfg.Gap = 0

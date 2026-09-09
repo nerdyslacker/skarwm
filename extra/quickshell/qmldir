@@ -16,6 +16,7 @@ Title Title.qml
 ScratchpadsPopup ScratchpadsPopup.qml
 Launcher Launcher.qml
 ApplicationLauncher ApplicationLauncher.qml
+WindowOverview WindowOverview.qml
 WallpaperPicker WallpaperPicker.qml
 Media Media.qml
 MediaPopup MediaPopup.qml

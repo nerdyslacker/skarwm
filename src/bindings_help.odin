@@ -30,6 +30,8 @@ binding_description :: proc(b: ^Binding) -> string {
     case .Layout_Tabbed:       return fmt.aprintf("use tabbed layout")
     case .Layout_Stacked:      return fmt.aprintf("use stacked layout")
     case .Layout_Toggle:       return fmt.aprintf("toggle tabbed layout")
+    case .Overview_Next:       return fmt.aprintf("window overview (next)")
+    case .Overview_Prev:       return fmt.aprintf("window overview (previous)")
     case .Scratchpad_Toggle:   return fmt.aprintf("toggle scratchpad %d", b.arg)
     case .Scratchpad_Toggle_Float: return fmt.aprintf("toggle floating scratchpad %d", b.arg)
     case .Scratchpad_Remove:   return fmt.aprintf("remove scratchpad %d", b.arg)

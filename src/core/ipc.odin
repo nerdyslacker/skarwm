@@ -57,6 +57,7 @@ Ipc_Action :: enum {
     Focus_Left, Focus_Right, Focus_Up, Focus_Down,
     Move_Left, Move_Right, Move_Up, Move_Down,
     Workspace, Workspace_Next, Workspace_Prev,
+    Focus_Window,
     Move_To_Workspace, Move_To_Workspace_Next, Move_To_Workspace_Prev,
     Toggle_Floating, Toggle_Fullscreen,
     Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
@@ -624,6 +625,20 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
             if tokens[2] == "next" { return Ipc_Command{action = .Move_To_Output_Next}, "", true }
             if tokens[2] == "prev" || tokens[2] == "previous" { return Ipc_Command{action = .Move_To_Output_Prev}, "", true }
         }
+    }
+
+    if len(tokens) == 3 && tokens[0] == "focus" && tokens[1] == "window" {
+        value: u64
+        valid := len(tokens[2]) > 0
+        for ch in tokens[2] {
+            if ch < '0' || ch > '9' { valid = false; break }
+            value = value * 10 + u64(ch - '0')
+            if value > 0xffffffff { valid = false; break }
+        }
+        if valid && value > 0 {
+            return Ipc_Command{action = .Focus_Window, arg = int(value)}, "", true
+        }
+        return {}, strings.clone("focus window: expected a positive X11 window id"), false
     }
 
     if len(tokens) == 1 {

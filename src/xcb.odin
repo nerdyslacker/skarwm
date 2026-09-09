@@ -349,6 +349,14 @@ Get_Modifier_Mapping_Reply :: struct {
     pad:                      [24]u8,
 }
 
+Grab_Keyboard_Reply :: struct {
+    response_type: u8,
+    status:        u8,
+    sequence:      u16,
+    length:        u32,
+    pad:           [6]u32,
+}
+
 Event_Header :: struct {
     response_type: u8,
     pad0:          u8,
@@ -384,6 +392,7 @@ Event_Header :: struct {
 #assert(size_of(Get_Atom_Name_Reply) == 32)
 #assert(size_of(Get_Keyboard_Mapping_Reply) == 32)
 #assert(size_of(Get_Modifier_Mapping_Reply) == 32)
+#assert(size_of(Grab_Keyboard_Reply) == 32)
 #assert(size_of(Event_Header) == 4)
 #assert(offset_of(Get_Property_Reply, type_) == 8)
 #assert(offset_of(Get_Property_Reply, value_len) == 16)
@@ -610,6 +619,9 @@ foreign xcb {
 
     xcb_grab_key   :: proc(c: ^Connection, owner_events: u8, grab_window: u32, modifiers: u16, key: u8, pointer_mode: u8, keyboard_mode: u8) -> Cookie ---
     xcb_ungrab_key :: proc(c: ^Connection, key: u8, grab_window: u32, modifiers: u16) -> Cookie ---
+    xcb_grab_keyboard :: proc(c: ^Connection, owner_events: u8, grab_window: u32, time: u32, pointer_mode, keyboard_mode: u8) -> Cookie ---
+    xcb_grab_keyboard_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Grab_Keyboard_Reply ---
+    xcb_ungrab_keyboard :: proc(c: ^Connection, time: u32) -> Cookie ---
     xcb_grab_button :: proc(c: ^Connection, owner_events: u8, grab_window: u32, event_mask: u16, pointer_mode, keyboard_mode: u8, confine_to, cursor: u32, button: u8, modifiers: u16) -> Cookie ---
     xcb_ungrab_button :: proc(c: ^Connection, button: u8, grab_window: u32, modifiers: u16) -> Cookie ---
     xcb_allow_events :: proc(c: ^Connection, mode: u8, time: u32) -> Cookie ---

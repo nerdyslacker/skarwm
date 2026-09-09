@@ -10,7 +10,9 @@ Singleton {
 
     property var workspaces: []
     property var windows: []
+    property var outputs: []
     property var registeredScratchpads: []
+    signal overviewCommand(string action)
     // Highest workspace currently reported by skarwm. Tags.qml combines this
     // with the user's configured minimum, ensuring an active high tag remains
     // reachable without forcing the configured count back to nine.
@@ -28,6 +30,11 @@ Singleton {
         for (const win of windows)
             if (win.focused && !win.dock) return win
         return null
+    }
+    readonly property var focusedOutput: {
+        for (const output of outputs)
+            if (output.focused) return output
+        return outputs.length > 0 ? outputs[0] : null
     }
     readonly property int layoutIndex: focusedWindow?.floating === true ? 2
         : focusedWindow?.column_layout === "tabbed" ? 1 : 0
@@ -63,6 +70,8 @@ Singleton {
     function refreshAll() {
         refreshWorkspaces()
         refreshWindows()
+        outputQuery.running = false
+        outputQuery.running = true
     }
 
     function acceptWorkspaces(line) {
@@ -114,6 +123,15 @@ Singleton {
         }
     }
 
+    function acceptOutputs(line) {
+        try {
+            const value = JSON.parse(line)
+            if (Array.isArray(value)) outputs = value
+        } catch (e) {
+            console.warn("skarwm output snapshot:", e)
+        }
+    }
+
     Process {
         id: workspaceQuery
         command: [root.msgPath, "get-workspaces"]
@@ -127,6 +145,12 @@ Singleton {
         stdout: SplitParser { onRead: line => root.acceptWindows(line) }
     }
     Process {
+        id: outputQuery
+        command: [root.msgPath, "get-outputs"]
+        running: true
+        stdout: SplitParser { onRead: line => root.acceptOutputs(line) }
+    }
+    Process {
         command: [root.msgPath, "subscribe", "workspace", "window", "output"]
         running: true
         stdout: SplitParser {
@@ -136,7 +160,13 @@ Singleton {
                 // the QML model deterministic even after event bursts.
                 try {
                     const event = JSON.parse(line)
-                    if (event && event.change !== undefined) root.refreshAll()
+                    if (!event || event.change === undefined) return
+                    const change = String(event.change)
+                    if (change.startsWith("overview-")) {
+                        root.overviewCommand(change.slice(9))
+                        return
+                    }
+                    root.refreshAll()
                 } catch (e) {
                     console.warn("skarwm event:", e)
                 }
@@ -161,6 +191,10 @@ Singleton {
     }
     function cycleLayout(direction) {
         setLayout((layoutIndex + direction + layouts.length) % layouts.length)
+    }
+    function focusWindow(id) {
+        if (id !== undefined && id !== null)
+            Quickshell.execDetached([msgPath, "focus", "window", String(id)])
     }
     function setGaps(value, persist) {
         const next = Math.min(40, Math.max(0, Math.round(value)))

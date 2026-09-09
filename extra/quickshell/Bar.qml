@@ -12,6 +12,10 @@ PanelWindow {
     color: Theme.bg
     visible: Theme.barStateReady && BarVisibility.showOnScreen(modelData)
 
+    WindowOverview {
+        anchorItem: panel
+    }
+
     Rectangle {
         id: panel
         anchors.fill: parent
