@@ -8,6 +8,7 @@ Popout {
     readonly property var widgetModel: [
         { key: "launcher", label: "Launcher", icon: "󰀻" },
         { key: "tags", label: "Tags", icon: "󰓹" },
+        { key: "layout", label: "Layout picker", icon: "󰙀" },
         { key: "title", label: "Window title", icon: "󰖯" },
         { key: "media", label: "Media", icon: "󰎈" },
         { key: "weather", label: "Weather", icon: "󰖐" },
@@ -49,6 +50,83 @@ Popout {
             color: Theme.brightBlack
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize - 1
+        }
+
+        Rectangle {
+            id: monitorRow
+            width: parent.width
+            height: 45
+            color: "transparent"
+            border.width: 1
+            border.color: Theme.gray5
+
+            Text {
+                id: monitorIcon
+                anchors.left: parent.left
+                anchors.leftMargin: 9
+                anchors.verticalCenter: parent.verticalCenter
+                text: "󰍹"
+                color: Theme.accent
+                font.family: Theme.fontFamily
+                font.pixelSize: 17
+            }
+
+            Column {
+                anchors.left: monitorIcon.right
+                anchors.leftMargin: 9
+                anchors.right: monitorSwitch.left
+                anchors.rightMargin: 9
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 1
+
+                Text {
+                    text: "Show bar on all monitors"
+                    color: Theme.fg
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSize - 1
+                }
+                Text {
+                    text: BarVisibility.showOnAllMonitors
+                        ? "Every connected monitor" : "Main monitor only"
+                    color: Theme.brightBlack
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Math.max(8, Theme.fontSize - 3)
+                }
+            }
+
+            Rectangle {
+                id: monitorSwitch
+                anchors.right: parent.right
+                anchors.rightMargin: 9
+                anchors.verticalCenter: parent.verticalCenter
+                width: 34
+                height: 18
+                color: BarVisibility.showOnAllMonitors
+                    ? Theme.accent : Qt.alpha(Theme.fg, 0.15)
+                Behavior on color { ColorAnimation { duration: 150 } }
+
+                Rectangle {
+                    x: BarVisibility.showOnAllMonitors
+                        ? parent.width - width - 2 : 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 14
+                    height: 14
+                    color: BarVisibility.showOnAllMonitors
+                        ? Theme.bg : Qt.alpha(Theme.fg, 0.7)
+                    Behavior on x {
+                        NumberAnimation {
+                            duration: 150
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                }
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                onClicked: BarVisibility.setShowOnAllMonitors(
+                    !BarVisibility.showOnAllMonitors)
+            }
         }
 
         Grid {

@@ -59,7 +59,8 @@ Ipc_Action :: enum {
     Workspace, Workspace_Next, Workspace_Prev,
     Move_To_Workspace, Move_To_Workspace_Next, Move_To_Workspace_Prev,
     Toggle_Floating, Toggle_Fullscreen,
-    Layout_Tabbed, Layout_Stacked, Layout_Toggle,
+    Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
+    Set_Gaps,
     Scratchpad_Toggle, Scratchpad_Toggle_Float, Scratchpad_Remove,
     Scratchpad_Target_AppId, Scratchpad_Target_Class,
     Scratchpad_Target_Instance, Scratchpad_Target_Title,
@@ -641,10 +642,24 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
 
     if len(tokens) == 2 && tokens[0] == "layout" {
         switch tokens[1] {
+        case "floating":         return Ipc_Command{action = .Layout_Floating}, "", true
+        case "tiling", "tiled": return Ipc_Command{action = .Layout_Stacked}, "", true
         case "tabbed":           return Ipc_Command{action = .Layout_Tabbed}, "", true
         case "stacked", "stacking": return Ipc_Command{action = .Layout_Stacked}, "", true
         case "toggle":           return Ipc_Command{action = .Layout_Toggle}, "", true
         }
+    }
+
+    if len(tokens) == 2 && tokens[0] == "gaps" {
+        value := 0
+        valid := len(tokens[1]) > 0
+        for ch in tokens[1] {
+            if ch < '0' || ch > '9' { valid = false; break }
+            value = value * 10 + int(ch - '0')
+            if value > 100 { valid = false; break }
+        }
+        if valid { return Ipc_Command{action = .Set_Gaps, arg = value}, "", true }
+        return {}, strings.clone("gaps: expected a value from 0 to 100"), false
     }
 
     if len(tokens) == 3 && tokens[0] == "scratchpad" {

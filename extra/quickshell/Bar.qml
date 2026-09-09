@@ -10,7 +10,7 @@ PanelWindow {
     anchors { top: true; left: true; right: true }
     implicitHeight: Theme.effectiveBarHeight
     color: Theme.bg
-    visible: Theme.barStateReady
+    visible: Theme.barStateReady && BarVisibility.showOnScreen(modelData)
 
     Rectangle {
         id: panel
@@ -27,6 +27,7 @@ PanelWindow {
 
             Launcher { visible: BarVisibility.enabled("launcher") }
             Tags { visible: BarVisibility.enabled("tags") }
+            LayoutButton { visible: BarVisibility.enabled("layout") }
         }
 
         // Title lives in the gap between the clusters: screen-centered when

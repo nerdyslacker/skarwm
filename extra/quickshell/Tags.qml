@@ -29,11 +29,11 @@ Item {
                 height: Theme.moduleHeight
                 radius: 0
                 color: urgent ? Theme.red
-                    : selected ? Theme.orange
+                    : selected ? Theme.accent
                     : Qt.alpha(Theme.fg, occupied ? 0.12 : 0.07)
                 border.width: 1
                 border.color: urgent ? Theme.red
-                    : selected ? Theme.brightOrange
+                    : selected ? Theme.accent
                     : Theme.gray5
 
                 Behavior on width { NumberAnimation { duration: 160 } }

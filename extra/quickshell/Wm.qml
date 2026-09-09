@@ -19,6 +19,20 @@ Singleton {
     property string activeWinId: ""
     readonly property string msgPath: "skarwm-msg"
 
+    readonly property var layouts: [
+        { name: "Tiling", glyph: "󰙀", command: "tiling" },
+        { name: "Tabbed", glyph: "󰓩", command: "tabbed" },
+        { name: "Floating", glyph: "󰕰", command: "floating" }
+    ]
+    readonly property var focusedWindow: {
+        for (const win of windows)
+            if (win.focused && !win.dock) return win
+        return null
+    }
+    readonly property int layoutIndex: focusedWindow?.floating === true ? 2
+        : focusedWindow?.column_layout === "tabbed" ? 1 : 0
+    property int gaps: 8
+
     function workspaceAt(index) {
         const id = index + 1
         for (const ws of workspaces)
@@ -140,7 +154,49 @@ Singleton {
     function cycleTag(direction) {
         Quickshell.execDetached([msgPath, "workspace", direction > 0 ? "next" : "prev"])
     }
+    function setLayout(index) {
+        const layout = layouts[index]
+        if (layout)
+            Quickshell.execDetached([msgPath, "layout", layout.command])
+    }
+    function cycleLayout(direction) {
+        setLayout((layoutIndex + direction + layouts.length) % layouts.length)
+    }
+    function setGaps(value, persist) {
+        const next = Math.min(40, Math.max(0, Math.round(value)))
+        gaps = next
+        Quickshell.execDetached([msgPath, "gaps", String(next)])
+        if (persist !== false)
+            gapState.setText(String(next) + "\n")
+    }
+    function persistGaps(value) {
+        const next = Math.min(40, Math.max(0, Math.round(value)))
+        gaps = next
+        gapState.setText(String(next) + "\n")
+    }
     function toggleScratchpad(register) {
         Quickshell.execDetached([msgPath, "scratchpad", "toggle", String(register)])
+    }
+
+    FileView {
+        id: gapState
+        path: Theme.stateDir + "/window-gap"
+        watchChanges: true
+        atomicWrites: true
+        onFileChanged: reload()
+        onLoaded: {
+            const saved = parseInt(text())
+            if (!isNaN(saved)) {
+                root.gaps = Math.min(40, Math.max(0, saved))
+                restoreGap.restart()
+            }
+        }
+    }
+
+    Timer {
+        id: restoreGap
+        interval: 150
+        onTriggered: Quickshell.execDetached(
+            [root.msgPath, "gaps", String(root.gaps)])
     }
 }

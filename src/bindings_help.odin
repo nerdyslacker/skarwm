@@ -26,6 +26,7 @@ binding_description :: proc(b: ^Binding) -> string {
     case .Move_Down:           return fmt.aprintf("move window down")
     case .Toggle_Floating:     return fmt.aprintf("toggle floating")
     case .Toggle_Fullscreen:   return fmt.aprintf("toggle fullscreen")
+    case .Layout_Floating:     return fmt.aprintf("use floating layout")
     case .Layout_Tabbed:       return fmt.aprintf("use tabbed layout")
     case .Layout_Stacked:      return fmt.aprintf("use stacked layout")
     case .Layout_Toggle:       return fmt.aprintf("toggle tabbed layout")

@@ -493,7 +493,7 @@ Action_Kind :: enum u8 {
     Move_Left, Move_Right, Move_Up, Move_Down,
     Toggle_Floating,
     Toggle_Fullscreen,
-    Layout_Tabbed, Layout_Stacked, Layout_Toggle,
+    Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
     Scratchpad_Toggle, Scratchpad_Toggle_Float, Scratchpad_Remove,
     Show_Bindings,
     Close,
@@ -556,13 +556,28 @@ dispatch_action :: proc(b: ^Binding) {
             raise_focused()
             reflow()
         }
+    case .Layout_Floating:
+        if m.Focused != nil && !m.Focused.Floating && c.Toggle_Floating(m) {
+            reflow()
+            ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
+        }
     case .Layout_Tabbed:
-        if c.Set_Column_Layout(m, .Tabbed) {
+        changed := false
+        if m.Focused != nil && m.Focused.Floating {
+            changed = c.Toggle_Floating(m)
+        }
+        changed = c.Set_Column_Layout(m, .Tabbed) || changed
+        if changed {
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
     case .Layout_Stacked:
-        if c.Set_Column_Layout(m, .Stacked) {
+        changed := false
+        if m.Focused != nil && m.Focused.Floating {
+            changed = c.Toggle_Floating(m)
+        }
+        changed = c.Set_Column_Layout(m, .Stacked) || changed
+        if changed {
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }

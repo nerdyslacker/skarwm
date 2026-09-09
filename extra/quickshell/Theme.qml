@@ -78,8 +78,14 @@ Singleton {
     readonly property color alert: red
     readonly property color disabled: gray6
 
-    readonly property color accent: primary
-    readonly property color selbg: primary
+    readonly property var accentNames: [
+        "orange", "red", "green", "yellow", "blue", "magenta", "cyan",
+        "brightOrange", "brightRed", "brightGreen", "brightYellow",
+        "brightBlue", "brightMagenta", "brightCyan"
+    ]
+    property string accentName: "orange"
+    readonly property color accent: accentColor(accentName)
+    readonly property color selbg: accent
     readonly property color selfg: hardBlack
 
     readonly property string fontFamily: "JetBrainsMono Nerd Font"
@@ -90,9 +96,54 @@ Singleton {
     readonly property int moduleHeight: Math.round(28 * barScale)
     readonly property int effectiveBarHeight: Math.max(barHeight, moduleHeight)
 
+    function accentColor(name) {
+        switch (name) {
+        case "red": return red
+        case "green": return green
+        case "yellow": return yellow
+        case "blue": return blue
+        case "magenta": return magenta
+        case "cyan": return cyan
+        case "brightOrange": return brightOrange
+        case "brightRed": return brightRed
+        case "brightGreen": return brightGreen
+        case "brightYellow": return brightYellow
+        case "brightBlue": return brightBlue
+        case "brightMagenta": return brightMagenta
+        case "brightCyan": return brightCyan
+        default: return orange
+        }
+    }
+
+    function setAccent(name) {
+        if (accentNames.indexOf(name) < 0)
+            return
+        accentName = name
+        accentState.setText(name + "\n")
+        applyExternalAccent(name)
+    }
+
+    function applyExternalAccent(name) {
+        const selected = accentColor(name)
+        Quickshell.execDetached([
+            root.configDir + "/scripts/apply-accent",
+            selected.toString()
+        ])
+    }
+
+    function persistBarHeight(value) {
+        barHeightState.setText(String(Math.round(value)) + "\n")
+    }
+
+    function persistBarScale(value) {
+        barScaleState.setText(String(value) + "\n")
+    }
+
     FileView {
+        id: barHeightState
         path: root.stateDir + "/bar-height"
         watchChanges: true
+        atomicWrites: true
         onFileChanged: reload()
         onLoadFailed: root._barStateLoads++
         onLoaded: {
@@ -104,8 +155,10 @@ Singleton {
     }
 
     FileView {
+        id: barScaleState
         path: root.stateDir + "/bar-scale"
         watchChanges: true
+        atomicWrites: true
         onFileChanged: reload()
         onLoadFailed: root._barStateLoads++
         onLoaded: {
@@ -113,6 +166,23 @@ Singleton {
             const value = parseFloat(text())
             if (!isNaN(value))
                 root.barUserScale = Math.min(Math.max(value, 0.7), 2.0)
+        }
+    }
+
+    FileView {
+        id: accentState
+        path: root.stateDir + "/theme-accent"
+        watchChanges: true
+        atomicWrites: true
+        onFileChanged: reload()
+        onLoaded: {
+            const saved = text().trim()
+            if (root.accentNames.indexOf(saved) >= 0) {
+                const changed = root.accentName !== saved
+                root.accentName = saved
+                if (changed)
+                    root.applyExternalAccent(saved)
+            }
         }
     }
 }

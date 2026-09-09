@@ -9,6 +9,8 @@ singleton BarVisibility BarVisibility.qml
 Bar Bar.qml
 BarModule BarModule.qml
 Tags Tags.qml
+LayoutButton LayoutButton.qml
+LayoutPicker LayoutPicker.qml
 TagSettingsPopup TagSettingsPopup.qml
 Title Title.qml
 ScratchpadsPopup ScratchpadsPopup.qml
