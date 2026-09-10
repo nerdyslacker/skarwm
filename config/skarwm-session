@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Display-manager entry point for the standalone window manager.
+exec skarwm "$@"

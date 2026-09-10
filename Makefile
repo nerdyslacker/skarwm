@@ -12,22 +12,13 @@
 #   make xephyr     run interactively in a nested X server
 #   make xephyr-multi  run with two nested RandR monitor objects
 #   make install    install the minimal WM, IPC client, and session files
-#   make install-extra  install the full user desktop into ~/.config/skarwm
 #   make clean      remove build/
 
 PREFIX   ?= /usr/local
 ODIN     ?= odin
 XEPHYR_DISPLAY ?= :2
-SKARWM_CONFIG_DIR ?= $(HOME)/.config/skarwm
 
 ODIN_SRCS := $(shell find src -name '*.odin')
-EXTRA_CONFIG_FILES := $(shell find \
-	extra/dunst extra/kitty extra/picom extra/polybar extra/quickshell \
-	extra/rofi extra/wallpaper \
-	-type f ! -name '.gitkeep') \
-	extra/config.rc extra/bar-height extra/bar-scale extra/pomodoro \
-	extra/weather-location extra/weather-units
-EXTRA_SCRIPT_FILES := $(shell find extra/scripts -type f)
 
 all: build/skarwm build/skarwm-msg
 
@@ -50,23 +41,9 @@ debug: build/skarwm-debug
 install: build/skarwm build/skarwm-msg
 	install -Dm755 build/skarwm $(DESTDIR)$(PREFIX)/bin/skarwm
 	install -Dm755 build/skarwm-msg $(DESTDIR)$(PREFIX)/bin/skarwm-msg
-	install -Dm755 extra/skarwm-session $(DESTDIR)$(PREFIX)/bin/skarwm-session
-	install -Dm644 extra/skarwm.desktop $(DESTDIR)$(PREFIX)/share/xsessions/skarwm.desktop
+	install -Dm755 config/skarwm-session $(DESTDIR)$(PREFIX)/bin/skarwm-session
+	install -Dm644 config/skarwm.desktop $(DESTDIR)$(PREFIX)/share/xsessions/skarwm.desktop
 	install -Dm644 config/example.rc $(DESTDIR)$(PREFIX)/share/skarwm/config.rc.example
-
-install-extra:
-	@set -e; for src in $(EXTRA_CONFIG_FILES); do \
-		rel=$${src#extra/}; \
-		install -Dm644 "$$src" "$(SKARWM_CONFIG_DIR)/$$rel"; \
-	done
-	@set -e; for src in $(EXTRA_SCRIPT_FILES); do \
-		rel=$${src#extra/}; \
-		install -Dm755 "$$src" "$(SKARWM_CONFIG_DIR)/$$rel"; \
-	done
-	@printf 'Installed skarwm desktop configuration to %s\n' "$(SKARWM_CONFIG_DIR)"
-
-# Short alias, allowing `make extra` after the minimal system install.
-extra: install-extra
 
 test: build/skarwm build/skarwm-msg
 	odin run tests/core_tests
@@ -82,4 +59,4 @@ xephyr-multi: build/skarwm build/skarwm-msg
 clean:
 	rm -rf build
 
-.PHONY: all debug install install-extra extra test xephyr xephyr-multi clean
+.PHONY: all debug install test xephyr xephyr-multi clean

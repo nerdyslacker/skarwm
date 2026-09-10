@@ -1,0 +1,4 @@
+#!/bin/sh
+
+# Session programs can be declared with `autostart` in the selected rc file.
+exec skarwm-session

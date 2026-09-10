@@ -18,11 +18,10 @@ case "$mode" in
         ;;
 esac
 
-# Interactive Xephyr runs exercise the full desktop configuration by default.
-# An explicit -c/--config supplied after the mode still takes precedence.
+# An explicit -c/--config supplied after the mode takes precedence.
 has_config=false
 expect_config_path=false
-config_path=extra/config.rc
+config_path=config/example.rc
 for arg in "$@"; do
     if [ "$expect_config_path" = true ]; then
         config_path=$arg
@@ -39,7 +38,7 @@ if [ "$expect_config_path" = true ]; then
     exit 2
 fi
 if [ "$has_config" = false ]; then
-    set -- -c extra/config.rc "$@"
+    set -- -c config/example.rc "$@"
 fi
 
 for tool in Xephyr xwininfo; do
@@ -61,42 +60,7 @@ nested_display=${SKARWM_XEPHYR_DISPLAY:-:2}
 socket_path=${SKARWM_XEPHYR_SOCKET:-${TMPDIR:-/tmp}/skarwm-xephyr-$$.sock}
 log_path=${TMPDIR:-/tmp}/skarwm-xephyr-$$.log
 xephyr_pid=
-state_dir=${SKARWM_XEPHYR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/skarwm/xephyr}
-extra_dir=$(pwd)/extra
-# Picom's incremental XRender damage path can lose background-window repaint
-# regions behind ARGB popup windows when compositing inside Xephyr. A full
-# repaint is cheap on this fixed-size test display and avoids that nested-X bug.
-picom_args=${SKARWM_PICOM_ARGS:---no-use-damage}
-
-stop_quickshell_instance() {
-    if command -v qs >/dev/null 2>&1; then
-        qs list --all 2>/dev/null | awk \
-            -v wanted_path="$extra_dir/quickshell/shell.qml" \
-            -v wanted_connection="x11/$nested_display" '
-                /^Instance / {
-                    pid = ""
-                    config_path = ""
-                    connection = ""
-                }
-                /^[[:space:]]+Process ID:/ { pid = $3 }
-                /^[[:space:]]+Config path:/ {
-                    sub(/^[^:]*:[[:space:]]*/, "")
-                    config_path = $0
-                }
-                /^[[:space:]]+Display connection:/ {
-                    sub(/^[^:]*:[[:space:]]*/, "")
-                    connection = $0
-                    if (pid ~ /^[0-9]+$/ && config_path == wanted_path && connection == wanted_connection)
-                        print pid
-                }
-            ' | while IFS= read -r quickshell_pid; do
-                kill -TERM "$quickshell_pid" 2>/dev/null || true
-            done
-    fi
-}
-
 cleanup() {
-    stop_quickshell_instance
     if [ -n "$xephyr_pid" ] && kill -0 "$xephyr_pid" 2>/dev/null; then
         kill "$xephyr_pid" 2>/dev/null || true
         wait "$xephyr_pid" 2>/dev/null || true
@@ -152,10 +116,5 @@ fi
 printf 'Launching skarwm; close the Xephyr window or press Ctrl-C here to stop.\n'
 printf 'Nested IPC socket: %s\n' "$socket_path"
 printf 'Configuration: %s\n' "$config_path"
-mkdir -p "$state_dir"
-printf 'Persistent state: %s\n' "$state_dir"
 DISPLAY="$nested_display" SKARWM_SOCKET="$socket_path" \
-    SKARWM_EXTRA_DIR="$extra_dir" SKARWM_STATE_DIR="$state_dir" \
-    SKARWM_PICOM_ARGS="$picom_args" \
-    KITTY_CONFIG_DIRECTORY="$extra_dir/kitty" \
     ./build/skarwm "$@"
