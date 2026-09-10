@@ -14,6 +14,8 @@ Rectangle {
     property string iconFont: Theme.fontFamily
     property string label: ""
     property color labelColor: Theme.fg
+    property int labelPixelSize: Theme.fontSize
+    property int compactLabelPixelSize: Math.max(8, Theme.fontSize - 2)
     property bool interactive: true
     readonly property bool hovered: mouse.containsMouse
 
@@ -69,7 +71,7 @@ Rectangle {
             text: root.label
             color: root.labelColor
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSize
+            font.pixelSize: root.labelPixelSize
             Behavior on color { ColorAnimation { duration: 250 } }
         }
     }
@@ -96,7 +98,7 @@ Rectangle {
             text: root.compactLabel
             color: root.labelColor
             font.family: Theme.fontFamily
-            font.pixelSize: Math.max(8, Theme.fontSize - 2)
+            font.pixelSize: root.compactLabelPixelSize
             Behavior on color { ColorAnimation { duration: 250 } }
         }
     }

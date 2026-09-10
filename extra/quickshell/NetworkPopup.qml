@@ -6,12 +6,11 @@ import Quickshell.Io
 
 // Network — a small connectivity front-end (nmcli + bluetoothctl
 // underneath) in a popup anchored to the bar. Device status + wifi radio
-// toggle up top, bluetooth power + paired devices (click to connect/
-// disconnect; "pair new" scans and pairs PIN-less devices — anything
-// needing a PIN is blueman's job), scannable wifi list below: click a
-// network to connect (inline password field for new secured networks),
-// click the active one to disconnect. The bluetooth section only renders
-// when an adapter exists.
+// toggle up top, bluetooth power + paired devices, and a scannable wifi list
+// below. Device/network rows expand to expose their actions; new secured wifi
+// connections add an inline password field. "Pair new" handles PIN-less
+// devices — anything needing a PIN is blueman's job. The bluetooth section
+// only renders when an adapter exists.
 Popout {
         id: win
 
@@ -21,8 +20,11 @@ Popout {
         onVisibleChanged: {
             if (visible)
                 refresh(false)
-            else
+            else {
                 pwFor = ""
+                expandedWifi = ""
+                expandedBluetooth = ""
+            }
         }
 
         property var devices: []    // {dev, type, state, conn}
@@ -33,6 +35,7 @@ Popout {
         property bool busy: false
         property string status: ""
         property string pwFor: ""   // ssid currently asking for a password
+        property string expandedWifi: ""
 
         readonly property string wifiDev: {
             for (const d of devices)
@@ -45,6 +48,7 @@ Popout {
         property var btDevices: []  // {mac, name, connected}
         property var btFound: []    // {mac, name} — unpaired, from a scan
         property bool btScanning: false
+        property string expandedBluetooth: ""
 
         function refresh(rescan) {
             devProc.running = true
@@ -82,6 +86,7 @@ Popout {
         function run(cmd, msg) {
             if (busy)
                 return
+            statusClear.stop()
             busy = true
             status = msg
             _err = []
@@ -99,6 +104,16 @@ Popout {
                 win.status = code === 0 ? "done"
                     : (win._err.length ? win._err[win._err.length - 1] : "failed")
                 win.refresh(false)
+                statusClear.restart()
+            }
+        }
+
+        Timer {
+            id: statusClear
+            interval: 5000
+            onTriggered: {
+                if (!win.busy)
+                    win.status = ""
             }
         }
 
@@ -274,7 +289,14 @@ Popout {
             }
             onRunningChanged: {
                 if (running) sawController = false
-                else win.btPresent = sawController
+                else {
+                    win.btPresent = sawController
+                    if (!sawController)
+                        win.btOn = false
+                    Sys.bluetoothOn = win.btPresent && win.btOn
+                    if (!Sys.bluetoothOn)
+                        Sys.bluetoothConnected = false
+                }
             }
         }
 
@@ -307,6 +329,8 @@ Popout {
                     win.btDevices = win._btPaired.map(d => ({
                         mac: d.mac, name: d.name,
                         connected: win._btConn.indexOf(d.mac) !== -1 }))
+                    Sys.bluetoothConnected = win.btOn
+                        && win._btConn.length > 0
                 }
             }
         }
@@ -351,6 +375,11 @@ Popout {
                 (d.connected ? "disconnecting " : "connecting ") + d.name + "…")
         }
 
+        function btForgetDevice(d) {
+            expandedBluetooth = ""
+            run(["bluetoothctl", "remove", d.mac], "forgetting " + d.name + "…")
+        }
+
         // PIN-less pair+trust+connect; devices that want a PIN fail here
         // and belong in blueman
         function btPairNew(d) {
@@ -359,6 +388,44 @@ Popout {
                  " && bluetoothctl connect " + d.mac],
                 "pairing " + d.name + "…")
             btFound = btFound.filter(f => f.mac !== d.mac)
+        }
+
+        component ActionButton: Rectangle {
+            id: actionButton
+            required property string buttonText
+            property color accentColor: Theme.accent
+            property bool filled: true
+            signal activated()
+
+            implicitWidth: actionLabel.implicitWidth + 24
+            height: 28
+            color: !enabled ? Theme.gray2
+                : filled ? (actionMouse.containsMouse
+                    ? Qt.lighter(accentColor, 1.12) : accentColor)
+                : actionMouse.containsMouse ? Qt.alpha(accentColor, 0.20)
+                : Qt.alpha(accentColor, 0.09)
+            border.width: 1
+            border.color: enabled ? accentColor : Theme.gray5
+            Behavior on color { ColorAnimation { duration: 120 } }
+
+            Text {
+                id: actionLabel
+                anchors.centerIn: parent
+                text: actionButton.buttonText
+                color: !actionButton.enabled ? Theme.disabled
+                    : actionButton.filled ? Theme.selfg : actionButton.accentColor
+                font.family: Theme.fontFamily
+                font.pixelSize: 11
+                font.bold: true
+            }
+
+            MouseArea {
+                id: actionMouse
+                anchors.fill: parent
+                enabled: actionButton.enabled
+                hoverEnabled: true
+                onClicked: actionButton.activated()
+            }
         }
 
         // --- UI ---
@@ -692,42 +759,100 @@ Popout {
                         Rectangle {
                             id: btRow
                             required property var modelData
+                            readonly property bool expanded:
+                                win.expandedBluetooth === modelData.mac
                             width: parent.width
-                            height: 30
-                            radius: 0
-                            color: btRow.modelData.connected ? Qt.alpha(Theme.accent, 0.22)
-                                 : btMa.containsMouse ? Theme.gray3 : Theme.gray2
-                            border.width: 1
-                            border.color: btRow.modelData.connected
-                                ? Theme.accent : Theme.gray5
+                            height: 30 + (expanded ? 40 : 0)
+                            clip: true
+                            color: Theme.gray2
+                            Behavior on height {
+                                NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                            }
 
-                            Text {
-                                anchors.left: parent.left
-                                anchors.leftMargin: 10
-                                anchors.right: btState.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "󰂯  " + btRow.modelData.name
-                                color: btRow.modelData.connected ? Theme.accent : Theme.fg
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 12
-                                font.bold: btRow.modelData.connected
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                id: btState
-                                anchors.right: parent.right
-                                anchors.rightMargin: 10
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: btRow.modelData.connected ? "connected" : "paired"
-                                color: btRow.modelData.connected ? Theme.green : Theme.disabled
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 11
-                            }
-                            MouseArea {
-                                id: btMa
+                            Column {
                                 anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: win.btToggleDevice(btRow.modelData)
+                                spacing: 0
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: 30
+                                    color: btRow.modelData.connected
+                                        ? Qt.alpha(Theme.accent, 0.22)
+                                        : btMa.containsMouse ? Theme.gray3 : Theme.gray2
+
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 10
+                                        anchors.right: btState.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "󰂯  " + btRow.modelData.name
+                                        color: btRow.modelData.connected
+                                            ? Theme.accent : Theme.fg
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 12
+                                        font.bold: btRow.modelData.connected
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        id: btState
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: (btRow.modelData.connected
+                                            ? "connected" : "paired")
+                                            + (btRow.expanded ? "  󰅀" : "  󰅂")
+                                        color: btRow.modelData.connected
+                                            ? Theme.green : Theme.disabled
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 11
+                                    }
+                                    MouseArea {
+                                        id: btMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: win.expandedBluetooth = btRow.expanded
+                                            ? "" : btRow.modelData.mac
+                                    }
+                                }
+
+                                Item {
+                                    width: parent.width
+                                    height: 40
+
+                                    Row {
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 5
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 7
+
+                                        ActionButton {
+                                            buttonText: "Forget"
+                                            accentColor: Theme.red
+                                            filled: false
+                                            enabled: !win.busy
+                                            onActivated: win.btForgetDevice(btRow.modelData)
+                                        }
+
+                                        ActionButton {
+                                            buttonText: btRow.modelData.connected
+                                                ? "Disconnect" : "Connect"
+                                            accentColor: btRow.modelData.connected
+                                                ? Theme.brightOrange : Theme.green
+                                            enabled: !win.busy
+                                            onActivated: win.btToggleDevice(btRow.modelData)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                z: 2
+                                color: "transparent"
+                                border.width: 1
+                                border.color: btRow.expanded
+                                    || btRow.modelData.connected
+                                    ? Theme.accent : Theme.gray5
                             }
                         }
                     }
@@ -738,39 +863,81 @@ Popout {
                         Rectangle {
                             id: btNewRow
                             required property var modelData
+                            readonly property bool expanded:
+                                win.expandedBluetooth === modelData.mac
                             width: parent.width
-                            height: 30
-                            radius: 0
-                            color: btNewMa.containsMouse ? Theme.gray3 : Theme.gray2
-                            border.width: 1
-                            border.color: Theme.gray5
+                            height: 30 + (expanded ? 40 : 0)
+                            clip: true
+                            color: Theme.gray2
+                            Behavior on height {
+                                NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                            }
 
-                            Text {
-                                anchors.left: parent.left
-                                anchors.leftMargin: 10
-                                anchors.right: btNewTag.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "󰂱  " + btNewRow.modelData.name
-                                color: Qt.alpha(Theme.fg, 0.7)
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 12
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                id: btNewTag
-                                anchors.right: parent.right
-                                anchors.rightMargin: 10
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "pair"
-                                color: Theme.disabled
-                                font.family: Theme.fontFamily
-                                font.pixelSize: 11
-                            }
-                            MouseArea {
-                                id: btNewMa
+                            Column {
                                 anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: win.btPairNew(btNewRow.modelData)
+                                spacing: 0
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: 30
+                                    color: btNewMa.containsMouse
+                                        ? Theme.gray3 : Theme.gray2
+
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 10
+                                        anchors.right: btNewTag.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "󰂱  " + btNewRow.modelData.name
+                                        color: Qt.alpha(Theme.fg, 0.7)
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 12
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        id: btNewTag
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "new  "
+                                            + (btNewRow.expanded ? "󰅀" : "󰅂")
+                                        color: Theme.disabled
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 11
+                                    }
+                                    MouseArea {
+                                        id: btNewMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: win.expandedBluetooth
+                                            = btNewRow.expanded
+                                            ? "" : btNewRow.modelData.mac
+                                    }
+                                }
+
+                                Item {
+                                    width: parent.width
+                                    height: 40
+
+                                    ActionButton {
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 5
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        buttonText: "Pair and connect"
+                                        accentColor: Theme.green
+                                        enabled: !win.busy
+                                        onActivated: win.btPairNew(btNewRow.modelData)
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                z: 2
+                                color: "transparent"
+                                border.width: 1
+                                border.color: btNewRow.expanded
+                                    ? Theme.accent : Theme.gray5
                             }
                         }
                     }
@@ -837,115 +1004,162 @@ Popout {
                     Repeater {
                         model: win.nets
 
-                        Column {
+                        Rectangle {
                             id: netRow
                             required property var modelData
                             readonly property bool asking: win.pwFor === modelData.ssid
+                            readonly property bool expanded:
+                                win.expandedWifi === modelData.ssid
                             width: netCol.width
+                            height: 34 + (expanded ? 40 : 0) + (asking ? 38 : 0)
+                            clip: true
+                            color: Theme.gray2
+                            Behavior on height {
+                                NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+                            }
 
-                            Rectangle {
-                                width: parent.width
-                                height: 34
-                                radius: 0
-                                color: netRow.modelData.inUse ? Qt.alpha(Theme.accent, 0.22)
-                                     : netMa.containsMouse ? Theme.gray3 : Theme.gray2
-                                border.width: 1
-                                border.color: netRow.modelData.inUse
-                                    ? Theme.accent : Theme.gray5
+                            Column {
+                                anchors.fill: parent
+                                spacing: 0
 
-                                Text {
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 10
-                                    anchors.right: lockT.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: win.sigGlyph(netRow.modelData.signal) + "  "
-                                        + netRow.modelData.ssid
-                                        + (netRow.modelData.inUse ? "  󰄬" : "")
-                                    color: netRow.modelData.inUse ? Theme.accent : Theme.fg
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: 12
-                                    font.bold: netRow.modelData.inUse
-                                    elide: Text.ElideRight
+                                Rectangle {
+                                    width: parent.width
+                                    height: 34
+                                    radius: 0
+                                    color: netRow.modelData.inUse ? Qt.alpha(Theme.accent, 0.22)
+                                         : netMa.containsMouse ? Theme.gray3 : Theme.gray2
+
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 10
+                                        anchors.right: lockT.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: win.sigGlyph(netRow.modelData.signal) + "  "
+                                            + netRow.modelData.ssid
+                                            + (netRow.modelData.inUse ? "  󰄬" : "")
+                                        color: netRow.modelData.inUse ? Theme.accent : Theme.fg
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 12
+                                        font.bold: netRow.modelData.inUse
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        id: lockT
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: (win.savedWifi.indexOf(netRow.modelData.ssid) !== -1
+                                            ? "saved  " : "")
+                                            + (netRow.modelData.security !== ""
+                                               && netRow.modelData.security !== "--" ? "󰌾  " : "")
+                                            + (netRow.expanded ? "󰅀" : "󰅂")
+                                        color: Theme.disabled
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: 11
+                                    }
+
+                                    MouseArea {
+                                        id: netMa
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        onClicked: {
+                                            if (netRow.expanded) {
+                                                win.expandedWifi = ""
+                                                if (netRow.asking)
+                                                    win.pwFor = ""
+                                            } else {
+                                                win.expandedWifi = netRow.modelData.ssid
+                                                win.pwFor = ""
+                                            }
+                                        }
+                                    }
                                 }
 
-                                Text {
-                                    id: lockT
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: 10
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: (win.savedWifi.indexOf(netRow.modelData.ssid) !== -1
-                                        ? "saved  " : "")
-                                        + (netRow.modelData.security !== ""
-                                           && netRow.modelData.security !== "--" ? "󰌾" : "")
-                                    color: Theme.disabled
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: 11
+                                Item {
+                                    width: parent.width
+                                    height: 40
+
+                                    ActionButton {
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 5
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        buttonText: netRow.modelData.inUse
+                                            ? "Disconnect" : "Connect"
+                                        accentColor: netRow.modelData.inUse
+                                            ? Theme.brightOrange : Theme.green
+                                        enabled: !win.busy
+                                        onActivated: win.connectTo(netRow.modelData)
+                                    }
                                 }
 
-                                MouseArea {
-                                    id: netMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: win.connectTo(netRow.modelData)
+                                // inline password entry for new secured networks
+                                Item {
+                                    visible: netRow.asking
+                                    width: parent.width
+                                    height: visible ? 38 : 0
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        anchors.margins: 4
+                                        radius: 0
+                                        color: Qt.alpha(Theme.fg, 0.08)
+
+                                        TextInput {
+                                            id: pwInput
+                                            anchors.left: parent.left
+                                            anchors.right: goBtn.left
+                                            anchors.leftMargin: 10
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            echoMode: TextInput.Password
+                                            color: Theme.fg
+                                            font.family: Theme.fontFamily
+                                            font.pixelSize: 12
+                                            focus: netRow.asking
+                                            onAccepted: win.connectPw(netRow.modelData.ssid, text)
+
+                                            Text {
+                                                visible: pwInput.text === ""
+                                                text: "password"
+                                                color: Theme.disabled
+                                                font: pwInput.font
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            id: goBtn
+                                            anchors.right: parent.right
+                                            anchors.rightMargin: 4
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 64
+                                            height: 24
+                                            radius: 0
+                                            color: Theme.accent
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "join"
+                                                color: Theme.bg
+                                                font.family: Theme.fontFamily
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: win.connectPw(netRow.modelData.ssid, pwInput.text)
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
-                            // inline password entry for new secured networks
-                            Item {
-                                visible: netRow.asking
-                                width: parent.width
-                                height: visible ? 38 : 0
-
-                                Rectangle {
-                                    anchors.fill: parent
-                                    anchors.margins: 4
-                                    radius: 0
-                                    color: Qt.alpha(Theme.fg, 0.08)
-
-                                    TextInput {
-                                        id: pwInput
-                                        anchors.left: parent.left
-                                        anchors.right: goBtn.left
-                                        anchors.leftMargin: 10
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        echoMode: TextInput.Password
-                                        color: Theme.fg
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: 12
-                                        focus: netRow.asking
-                                        onAccepted: win.connectPw(netRow.modelData.ssid, text)
-
-                                        Text {
-                                            visible: pwInput.text === ""
-                                            text: "password"
-                                            color: Theme.disabled
-                                            font: pwInput.font
-                                        }
-                                    }
-
-                                    Rectangle {
-                                        id: goBtn
-                                        anchors.right: parent.right
-                                        anchors.rightMargin: 4
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: 64
-                                        height: 24
-                                        radius: 0
-                                        color: Theme.accent
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: "join"
-                                            color: Theme.bg
-                                            font.family: Theme.fontFamily
-                                            font.pixelSize: 11
-                                            font.bold: true
-                                        }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            onClicked: win.connectPw(netRow.modelData.ssid, pwInput.text)
-                                        }
-                                    }
-                                }
+                            Rectangle {
+                                anchors.fill: parent
+                                z: 2
+                                color: "transparent"
+                                border.width: 1
+                                border.color: netRow.expanded
+                                    || netRow.modelData.inUse
+                                    ? Theme.accent : Theme.gray5
                             }
                         }
                     }

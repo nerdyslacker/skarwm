@@ -3,7 +3,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// Lightweight system metrics: cpu/mem/disk on a 3s tick, network on 10s.
+// Lightweight system metrics and persistent bar indicators.
 Singleton {
     id: root
 
@@ -17,6 +17,8 @@ Singleton {
     property string netType: ""
     property bool vpnOn: false
     property string vpnName: ""
+    property bool bluetoothOn: false
+    property bool bluetoothConnected: false
 
     readonly property string netIcon: vpnOn ? "󰦝"
                                     : netType.indexOf("wireless") !== -1 ? "󰤨"
@@ -193,6 +195,42 @@ Singleton {
                 root.netType = type
                 root.vpnOn = vOn
                 root.vpnName = vName
+            }
+        }
+    }
+
+    Timer {
+        interval: 5000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: root.restartQuery(bluetoothProc)
+    }
+
+    Process {
+        id: bluetoothProc
+        command: ["sh", "-c",
+            "bluetoothctl show 2>/dev/null; printf '%s\\n' ===; " +
+            "bluetoothctl devices Connected 2>/dev/null"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                let powered = false
+                let connected = false
+                let readingConnections = false
+                for (const line of text.split("\n")) {
+                    const value = line.trim()
+                    if (value === "===") {
+                        readingConnections = true
+                    } else if (!readingConnections
+                            && value.indexOf("Powered:") === 0) {
+                        powered = value.indexOf("yes") !== -1
+                    } else if (readingConnections
+                            && value.indexOf("Device ") === 0) {
+                        connected = true
+                    }
+                }
+                root.bluetoothOn = powered
+                root.bluetoothConnected = powered && connected
             }
         }
     }
