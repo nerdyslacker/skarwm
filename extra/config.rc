@@ -24,8 +24,8 @@ inner_gap : 8
 border_width : 2
 
 # Window border colours as #RRGGBB.
-norm_outer_border : #504D47
-sel_outer_border  : #FF5F00
+norm_outer_border : #705c6a
+sel_outer_border  : #d9d4a1
 
 # True (default): moving the pointer over a window focuses it.
 focus_follows_mouse : true

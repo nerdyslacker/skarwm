@@ -30,7 +30,7 @@ Install skarwm first so `skarwm-msg` is available on `PATH`. The bar itself
 requires Quickshell and a Nerd Font; `JetBrainsMono Nerd Font` is configured.
 Individual modules use these optional programs when available:
 
-- `feh` and ImageMagick for per-monitor wallpaper selection; the application launcher is built into
+- `feh` for wallpaper selection; the application launcher is built into
   Quickshell and reads the system's `.desktop` entries directly;
 - `nmcli` and `nm-connection-editor` for network state and settings, plus
   `bluetoothctl` for the network popup's optional Bluetooth section;
@@ -153,5 +153,9 @@ select a result, and press Enter to launch it. The launcher can also be toggled
 with `qs -p /path/to/quickshell ipc call launcher toggle`.
 `Super+A` opens it centered on skarwm's currently focused monitor.
 Right-click the launcher icon to open the thumbnail picker, or middle-click it
-to apply a random image. Wallpaper changes do not alter the fixed Srcery
-palette.
+to apply a random image. Clicking a thumbnail applies it to every screen.
+Enable **Generate theme based on wallpaper** in the
+picker to immediately derive the Quickshell palette, accent choices, skarwm
+borders, Rofi, Dunst, and Kitty colors from the selected image. Switching back to **Use
+default theme** immediately restores Srcery everywhere, including the Srcery
+accent selected before wallpaper theming was enabled.

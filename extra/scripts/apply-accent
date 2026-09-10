@@ -41,6 +41,12 @@ rewrite "$extra_dir/kitty/current-theme.conf" \
 rewrite "$extra_dir/dunst/dunstrc" \
     "/THEME: dunst_(frame_(global|low|normal)|highlight_normal)/ s/#[0-9A-Fa-f]{6}/$accent/"
 
+rewrite "$extra_dir/polybar/colors.ini" \
+    "/^[[:space:]]*(primary|border)[[:space:]]*=/ s/#[0-9A-Fa-f]{6}/$accent/"
+
+rewrite "$extra_dir/config.rc" \
+    "/^[[:space:]]*sel_outer_border[[:space:]]*:/ s/#[0-9A-Fa-f]{6}/$accent/"
+
 # Rofi reads its theme for every invocation. Reload existing Kitty and Dunst
 # processes when their control mechanisms are available.
 if [ "${SKARWM_ACCENT_NO_RELOAD:-0}" != 1 ]; then
@@ -52,4 +58,9 @@ if [ "${SKARWM_ACCENT_NO_RELOAD:-0}" != 1 ]; then
     elif command -v pkill >/dev/null 2>&1; then
         pkill -HUP -x dunst 2>/dev/null || true
     fi
+    message=$(command -v skarwm-msg 2>/dev/null || true)
+    if [ -z "$message" ] && [ -x "$extra_dir/../build/skarwm-msg" ]; then
+        message=$extra_dir/../build/skarwm-msg
+    fi
+    [ -z "$message" ] || "$message" reload >/dev/null 2>&1 || true
 fi

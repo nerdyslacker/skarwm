@@ -88,7 +88,7 @@ On Void, install the available packages with XBPS; Betterlockscreen and a Nerd
 Font may need to be installed separately depending on the enabled repositories:
 
 ```sh
-sudo xbps-install -S quickshell picom dunst feh ImageMagick kitty xss-lock \
+sudo xbps-install -S quickshell picom dunst feh kitty xss-lock \
   betterlockscreen udiskie lxqt-policykit NetworkManager bluez pavucontrol \
   curl flameshot brightnessctl xrandr python3 renCal xterm xinput xdotool clipmenu \
   xkb-switch setxkbmap

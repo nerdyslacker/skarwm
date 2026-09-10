@@ -3,16 +3,16 @@ import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 
-// Thumbnail picker for images in local/wallpaper. It keeps the original
-// picker interactions while leaving the desktop on the fixed Srcery palette.
+// Thumbnail picker for images in local/wallpaper. Wallpaper-driven palette
+// generation is optional; disabled mode leaves the current theme unchanged.
 Popout {
     id: root
 
     cardWidth: 176 * 3 + 2 * cardPadding
     readonly property real titleHeight: 20
     readonly property real galleryHeight: 103 * 4
-    readonly property real footerHeight: 36
-    cardHeight: titleHeight + 9 + galleryHeight + footerHeight + 10
+    readonly property real themeOptionHeight: 30
+    cardHeight: titleHeight + 9 + galleryHeight + 8 + themeOptionHeight
         + 2 * cardPadding
 
     property var wallpapers: []
@@ -36,25 +36,13 @@ Popout {
         scan()
     }
 
-    function apply(path, scope, targetX, targetY) {
+    function apply(path) {
         if (path === "")
             return
-        const anchorCenter = root.anchorItem
-            ? root.anchorItem.mapToGlobal(root.anchorItem.width / 2,
-                root.anchorItem.height / 2) : null
-        const suppliedX = Number(targetX)
-        const suppliedY = Number(targetY)
-        const screenX = isFinite(suppliedX) ? suppliedX
-            : anchorCenter ? anchorCenter.x : ""
-        const screenY = isFinite(suppliedY) ? suppliedY
-            : anchorCenter ? anchorCenter.y : ""
         Quickshell.execDetached([
             Theme.configDir + "/scripts/wallpaper-theme",
             path,
-            scope === "current" ? "current" : "all",
-            "",
-            String(Math.round(screenX)),
-            String(Math.round(screenY))
+            Theme.wallpaperThemeEnabled ? "true" : "false"
         ])
         visible = false
     }
@@ -63,7 +51,7 @@ Popout {
         target: "wallpapers"
         function toggle(): void { root.toggle() }
         function random(): void { root.applyRandom() }
-        function set(path: string): void { root.apply(path, "all") }
+        function set(path: string): void { root.apply(path) }
     }
 
     Process {
@@ -89,43 +77,36 @@ Popout {
                     root.randomPending = false
                     if (root.wallpapers.length > 0)
                         root.apply(root.wallpapers[
-                            Math.floor(Math.random() * root.wallpapers.length)],
-                            "all")
+                            Math.floor(Math.random() * root.wallpapers.length)])
                 }
             }
         }
     }
 
-    component ApplyButton: Rectangle {
-        id: button
-        required property string buttonText
-        required property string scope
-        readonly property bool available: root.selectedPath !== ""
+    component SettingSwitch: Rectangle {
+        id: control
+        property bool checked: false
+        signal toggled()
 
-        height: root.footerHeight
-        color: !available ? Theme.gray2
-            : pointer.containsMouse ? Theme.brightOrange : Theme.accent
-        border.width: 1
-        border.color: available ? Theme.brightOrange : Theme.gray5
+        width: 34
+        height: 18
+        color: checked ? Theme.accent : Qt.alpha(Theme.fg, 0.15)
+        Behavior on color { ColorAnimation { duration: 150 } }
 
-        Text {
-            anchors.centerIn: parent
-            text: button.buttonText
-            color: button.available ? Theme.selfg : Theme.brightBlack
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSize - 1
-            font.bold: button.available
+        Rectangle {
+            x: control.checked ? parent.width - width - 2 : 2
+            anchors.verticalCenter: parent.verticalCenter
+            width: 14
+            height: 14
+            color: control.checked ? Theme.bg : Qt.alpha(Theme.fg, 0.7)
+            Behavior on x {
+                NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+            }
         }
 
         MouseArea {
-            id: pointer
             anchors.fill: parent
-            enabled: button.available
-            hoverEnabled: true
-            onClicked: mouse => {
-                const point = pointer.mapToGlobal(mouse.x, mouse.y)
-                root.apply(root.selectedPath, button.scope, point.x, point.y)
-            }
+            onClicked: control.toggled()
         }
     }
 
@@ -202,7 +183,10 @@ Popout {
                     id: mouse
                     anchors.fill: parent
                     hoverEnabled: true
-                    onClicked: root.selectedPath = cell.modelData
+                    onClicked: {
+                        root.selectedPath = cell.modelData
+                        root.apply(cell.modelData)
+                    }
                 }
             }
         }
@@ -219,22 +203,38 @@ Popout {
     }
 
     Row {
+        id: themeOption
         anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: root.footerHeight
-        spacing: 8
+        anchors.top: grid.bottom
+        anchors.topMargin: 8
+        height: root.themeOptionHeight
+        spacing: 9
 
-        ApplyButton {
-            width: (parent.width - parent.spacing) / 2
-            buttonText: "Apply to current screen"
-            scope: "current"
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Use default theme"
+            color: Theme.wallpaperThemeEnabled
+                ? Theme.brightBlack : Theme.accent
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize - 1
+            font.bold: !Theme.wallpaperThemeEnabled
         }
 
-        ApplyButton {
-            width: (parent.width - parent.spacing) / 2
-            buttonText: "Apply to all screens"
-            scope: "all"
+        SettingSwitch {
+            anchors.verticalCenter: parent.verticalCenter
+            checked: Theme.wallpaperThemeEnabled
+            onToggled: Theme.persistWallpaperThemeEnabled(
+                !Theme.wallpaperThemeEnabled, root.selectedPath)
+        }
+
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "Generate theme based on wallpaper"
+            color: Theme.wallpaperThemeEnabled
+                ? Theme.accent : Theme.brightBlack
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize - 1
+            font.bold: Theme.wallpaperThemeEnabled
         }
     }
 }

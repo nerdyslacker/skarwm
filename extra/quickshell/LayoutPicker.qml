@@ -9,20 +9,9 @@ Popout {
     id: root
 
     readonly property var accents: [
-        { key: "orange", label: "Orange" },
-        { key: "red", label: "Red" },
-        { key: "green", label: "Green" },
-        { key: "yellow", label: "Yellow" },
-        { key: "blue", label: "Blue" },
-        { key: "magenta", label: "Magenta" },
-        { key: "cyan", label: "Cyan" },
-        { key: "brightOrange", label: "Bright orange" },
-        { key: "brightRed", label: "Bright red" },
-        { key: "brightGreen", label: "Bright green" },
-        { key: "brightYellow", label: "Bright yellow" },
-        { key: "brightBlue", label: "Bright blue" },
-        { key: "brightMagenta", label: "Bright magenta" },
-        { key: "brightCyan", label: "Bright cyan" }
+        "orange", "red", "green", "yellow", "blue", "magenta", "cyan",
+        "brightOrange", "brightRed", "brightGreen", "brightYellow",
+        "brightBlue", "brightMagenta", "brightCyan"
     ]
 
     cardWidth: 360
@@ -120,7 +109,7 @@ Popout {
         Grid {
             id: accentGrid
             width: parent.width
-            columns: 4
+            columns: 7
             spacing: 4
 
             Repeater {
@@ -128,54 +117,33 @@ Popout {
 
                 Rectangle {
                     id: swatch
-                    required property var modelData
+                    required property string modelData
                     readonly property bool current:
-                        Theme.accentName === modelData.key
+                        Theme.accentName === modelData
                     readonly property color swatchColor:
-                        Theme.accentColor(modelData.key)
+                        Theme.accentColor(modelData)
 
-                    width: (accentGrid.width - 12) / 4
+                    width: (accentGrid.width - accentGrid.spacing * 6) / 7
                     height: 31
                     color: swatchMouse.containsMouse
-                        ? Qt.alpha(swatch.swatchColor, 0.22)
-                        : Qt.alpha(Theme.fg, 0.04)
+                        ? Theme.gray3 : Theme.gray2
                     border.width: swatch.current ? 2 : 1
                     border.color: swatch.current
                         ? swatch.swatchColor : Theme.gray5
 
-                    Row {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 7
-                        anchors.right: parent.right
-                        anchors.rightMargin: 5
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 6
-
-                        Rectangle {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: 11
-                            height: 11
-                            color: swatch.swatchColor
-                            border.width: 1
-                            border.color: Qt.alpha(Theme.fg, 0.35)
-                        }
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width - 17
-                            text: swatch.modelData.label
-                            elide: Text.ElideRight
-                            color: swatch.current ? swatch.swatchColor : Theme.fg
-                            font.family: Theme.fontFamily
-                            font.pixelSize: 9
-                            font.bold: swatch.current
-                        }
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: swatch.current ? 5 : 6
+                        color: swatch.swatchColor
+                        border.width: 1
+                        border.color: Qt.alpha(Theme.fg, 0.35)
                     }
 
                     MouseArea {
                         id: swatchMouse
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: Theme.setAccent(swatch.modelData.key)
+                        onClicked: Theme.setAccent(swatch.modelData)
                     }
                 }
             }

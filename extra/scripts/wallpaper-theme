@@ -1,173 +1,23 @@
 #!/bin/sh
 
-# Apply a wallpaper while keeping skarwm's fixed Srcery palette.
+# Apply one wallpaper to the whole desktop and optionally generate a matching
+# theme. Feh handles the active Xinerama/RandR layout directly, so no stale
+# monitor-sized composite remains when outputs are connected or removed.
 set -eu
 
-image=${1:?usage: wallpaper-theme IMAGE [current|all] [MONITOR] [X] [Y]}
-scope=${2:-all}
-monitor=${3:-}
-screen_x=${4:-}
-screen_y=${5:-}
+image=${1:?usage: wallpaper-theme IMAGE [GENERATE_THEME]}
+generate_theme=${2:-false}
 [ -f "$image" ] || {
     printf 'wallpaper-theme: no such image: %s\n' "$image" >&2
     exit 1
 }
 
-state_root=${SKARWM_STATE_DIR:-${XDG_STATE_HOME:-"$HOME/.local/state"}/skarwm}
-wallpaper_state_dir=$state_root/wallpapers
-mkdir -p "$wallpaper_state_dir"
+feh --bg-fill "$image"
 
-monitor_layout=$(xrandr --listmonitors 2>/dev/null | awk '
-    NR > 1 {
-        # RandR monitor name is always field 2. The final field is the
-        # backing output and is absent for synthetic Xephyr monitors.
-        name = $2
-        sub(/^[+*]+/, "", name)
-        geometry = $3
-        gsub(/\/[0-9]+/, "", geometry)
-        gsub(/\+\-/, "-", geometry)
-        split(geometry, dimensions, "x")
-        width = dimensions[1] + 0
-        remainder = dimensions[2]
-        height = remainder + 0
-        sub(/^[0-9]+/, "", remainder)
-        tail = substr(remainder, 2)
-        separator = match(tail, /[+-]/)
-        if (separator > 0) {
-            left = substr(remainder, 1, separator) + 0
-            top = substr(tail, separator) + 0
-            printf "%s\t%d\t%d\t%d\t%d\n", name, width, height, left, top
-        }
-    }
-')
-[ -n "$monitor_layout" ] || monitor_layout="${monitor:-default}	1	1	0	0"
-monitors=$(printf '%s\n' "$monitor_layout" | cut -f1)
-
-monitor_key() {
-    printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '_'
-}
-
-render_background() {
-    fallback_image=$1
-    command -v magick >/dev/null 2>&1 || {
-        printf 'wallpaper-theme: ImageMagick is required for per-monitor wallpapers\n' >&2
-        exit 3
-    }
-
-    bounds=$(printf '%s\n' "$monitor_layout" | awk -F '\t' '
-        NR == 1 {
-            min_x = $4; min_y = $5
-            max_x = $4 + $2; max_y = $5 + $3
-        }
-        {
-            if ($4 < min_x) min_x = $4
-            if ($5 < min_y) min_y = $5
-            if ($4 + $2 > max_x) max_x = $4 + $2
-            if ($5 + $3 > max_y) max_y = $5 + $3
-        }
-        END { printf "%d %d %d %d\n", min_x, min_y, max_x-min_x, max_y-min_y }
-    ')
-    set -- $bounds
-    min_x=$1
-    min_y=$2
-    canvas_width=$3
-    canvas_height=$4
-    composite_path=$wallpaper_state_dir/current.jpg
-    next_path=$wallpaper_state_dir/.current.jpg
-
-    # Build the whole desktop in one process. An explicit TrueColor sRGB
-    # canvas prevents ImageMagick from inheriting grayscale from xc:black;
-    # JPEG avoids the expensive full-desktop PNG encoding used previously.
-    set -- -size "${canvas_width}x${canvas_height}" xc:black \
-        -colorspace sRGB -type TrueColor
-    tab=$(printf '\t')
-    old_ifs=$IFS
-    IFS='
-'
-    for record in $monitor_layout; do
-        output=${record%%"$tab"*}
-        remainder=${record#*"$tab"}
-        width=${remainder%%"$tab"*}
-        remainder=${remainder#*"$tab"}
-        height=${remainder%%"$tab"*}
-        remainder=${remainder#*"$tab"}
-        left=${remainder%%"$tab"*}
-        top=${remainder#*"$tab"}
-
-        key=$(monitor_key "$output")
-        output_image=$fallback_image
-        if [ -r "$wallpaper_state_dir/$key" ]; then
-            saved=$(sed -n '1p' "$wallpaper_state_dir/$key")
-            if [ -f "$saved" ]; then
-                output_image=$saved
-            fi
-        fi
-        offset_x=$((left - min_x))
-        offset_y=$((top - min_y))
-        set -- "$@" "(" "$output_image" -auto-orient -colorspace sRGB \
-            -resize "${width}x${height}^" -gravity center \
-            -extent "${width}x${height}" ")" \
-            -gravity northwest -geometry "+${offset_x}+${offset_y}" -composite
-    done
-    IFS=$old_ifs
-    magick "$@" -colorspace sRGB -type TrueColor -quality 94 "$next_path"
-    mv "$next_path" "$composite_path"
-    feh --no-xinerama --bg-fill "$composite_path"
-}
-
-case "$scope" in
-    current)
-        # feh paints one combined root pixmap for all Xinerama monitors. A
-        # single --xinerama-index update can therefore blank its neighbours;
-        # rebuild the complete image list while replacing only this monitor.
-        first_monitor=$(printf '%s\n' "$monitors" | sed -n '1p')
-        resolved_monitor=$(printf '%s\n' "$monitor_layout" | awk -F '\t' \
-            -v wanted="$monitor" -v px="$screen_x" -v py="$screen_y" '
-            {
-                if ($1 == wanted) exact = $1
-                if (px != "" && py != "" && px >= $4 && px < $4 + $2 && py >= $5 && py < $5 + $3)
-                    containing = $1
-            }
-            END {
-                if (exact != "") print exact
-                else if (containing != "") print containing
-            }
-        ')
-        monitor=${resolved_monitor:-$first_monitor}
-
-        fallback=""
-        if [ -r "$wallpaper_state_dir/default" ]; then
-            fallback=$(sed -n '1p' "$wallpaper_state_dir/default")
-        elif [ -r "$HOME/.fehbg" ]; then
-            fallback=$(sed -n "s/^[^']*'\([^']*\)'.*/\1/p" "$HOME/.fehbg")
-        fi
-        [ -f "$fallback" ] || fallback=$image
-
-        target_key=$(monitor_key "$monitor")
-        printf '%s\n' "$image" > "$wallpaper_state_dir/$target_key"
-        if [ ! -r "$wallpaper_state_dir/default" ]; then
-            printf '%s\n' "$fallback" > "$wallpaper_state_dir/default"
-        fi
-
-        render_background "$fallback"
-        ;;
-    all)
-        printf '%s\n' "$image" > "$wallpaper_state_dir/default"
-        old_ifs=$IFS
-        IFS='
-'
-        for output in $monitors; do
-            key=$(monitor_key "$output")
-            printf '%s\n' "$image" > "$wallpaper_state_dir/$key"
-        done
-        IFS=$old_ifs
-        render_background "$image"
-        ;;
-    *)
-        printf 'wallpaper-theme: invalid scope: %s\n' "$scope" >&2
-        exit 2
-        ;;
-esac
+if [ "$generate_theme" = true ] || [ "$generate_theme" = 1 ]; then
+    script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+    "$script_dir/generate-wallpaper-theme" "$image"
+fi
 
 # Keep the lock screen in sync when Betterlockscreen is installed.
 if command -v betterlockscreen >/dev/null 2>&1; then
