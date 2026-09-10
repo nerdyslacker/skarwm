@@ -1,5 +1,0 @@
-#!/bin/sh
-
-# skarwm-session resolves SKARWM_CONFIG, SKARWM_EXTRA_DIR, and writable state
-# before starting the WM. Session programs can be declared with `autostart`.
-exec skarwm-session
