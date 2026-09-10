@@ -152,7 +152,7 @@ Left-click the launcher icon, type to filter applications, use the arrow keys to
 select a result, and press Enter to launch it. The launcher can also be toggled
 with `qs -p /path/to/quickshell ipc call launcher toggle`.
 `Super+A` opens it centered on skarwm's currently focused monitor.
-Right-click the launcher icon to open the thumbnail picker, or middle-click it
+Right-click the layout icon to open the thumbnail picker, or middle-click it
 to apply a random image. Clicking a thumbnail applies it to every screen.
 Enable **Generate theme based on wallpaper** in the
 picker to immediately derive the Quickshell palette, accent choices, skarwm

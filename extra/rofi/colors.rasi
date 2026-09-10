@@ -3,13 +3,13 @@
 * {
     bg:          #291c25;
     fg:          #d2cbbc;
-    accent:      #d9d4a1;
+    accent:      #7973ca;
     accent-2:    #c29fc6;
-    border:      #d9d4a1;
+    border:      #7973ca;
     urgent:      #cb8a86;
     selected-fg: #291c25;
     entry-fg:    #c29fc6;
-    prompt-fg:   #d9d4a1;
+    prompt-fg:   #7973ca;
     header:      #c29fc6;
     background-color: @bg;
 }
