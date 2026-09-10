@@ -8,6 +8,8 @@ BarModule {
     id: root
 
     property bool hasRenCal: false
+    compactIcon: "󰥔"
+    compactLabel: Qt.formatDateTime(clock.date, "HH:mm")
 
     SystemClock {
         id: clock

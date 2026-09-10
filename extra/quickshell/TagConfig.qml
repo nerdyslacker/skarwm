@@ -9,13 +9,16 @@ Singleton {
 
     property int count: 9
     property bool showNumbers: true
+    property bool dynamicWorkspaces: false
 
-    function save(newCount, numbersVisible) {
+    function save(newCount, numbersVisible, dynamic) {
         count = Math.max(1, Math.min(20, Math.round(newCount)))
         showNumbers = numbersVisible
+        dynamicWorkspaces = dynamic === true
         stateFile.setText(JSON.stringify({
             count: count,
-            showNumbers: showNumbers
+            showNumbers: showNumbers,
+            dynamicWorkspaces: dynamicWorkspaces
         }) + "\n")
     }
 
@@ -32,6 +35,7 @@ Singleton {
                 if (isFinite(savedCount))
                     root.count = Math.max(1, Math.min(20, Math.round(savedCount)))
                 root.showNumbers = saved.showNumbers !== false
+                root.dynamicWorkspaces = saved.dynamicWorkspaces === true
             } catch (error) {
                 console.warn("tag settings:", error)
             }

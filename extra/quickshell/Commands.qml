@@ -15,12 +15,14 @@ BarModule {
     label: pomoRunning ? fmtPomo(pomoLeft) : pomoDone ? "0:00" : ""
     labelColor: pomoDone ? Theme.bg : Theme.fg
     color: pomoDone ? Theme.red
-        : hovered ? Qt.alpha(Theme.fg, 0.14) : Qt.alpha(Theme.fg, 0.07)
+        : hovered ? Theme.barSurface(0.14) : Theme.barSurface(0.07)
     progress: pomoRunning ? pomoLeft / pomoTotal : -1
 
     property string userName: String(Quickshell.env("USER") ?? "user")
     property string displayName: userName
     property string avatarPath: ""
+    property var barSettingsPopup: null
+    property var barSettingsAnchor: null
 
     property int pomoMinutes: 25
     readonly property var pomoPresets: [15, 25, 45, 60]
@@ -33,11 +35,19 @@ BarModule {
     onClicked: mouse => {
         if (mouse.button === Qt.RightButton) {
             menu.visible = false
-            barSettings.visible = !barSettings.visible
+            if (barSettingsPopup && barSettingsAnchor) {
+                const point = root.mapToItem(barSettingsAnchor.parent, 0, 0)
+                barSettingsAnchor.x = point.x
+                barSettingsAnchor.y = point.y
+                barSettingsAnchor.width = root.width
+                barSettingsAnchor.height = root.height
+                barSettingsPopup.visible = !barSettingsPopup.visible
+            }
             return
         }
         if (mouse.button !== Qt.LeftButton) return
-        barSettings.visible = false
+        if (barSettingsPopup)
+            barSettingsPopup.visible = false
         pomoDone = false
         menu.visible = !menu.visible
     }
@@ -45,6 +55,12 @@ BarModule {
     function run(command) {
         menu.visible = false
         Quickshell.execDetached(command)
+    }
+
+    function confirmPowerAction(action) {
+        menu.visible = false
+        powerConfirmation.action = action
+        powerConfirmation.visible = true
     }
 
     function restartDesktop() {
@@ -267,14 +283,124 @@ BarModule {
         }
     }
 
+    component ConfirmationButton: Rectangle {
+        id: confirmationButton
+        required property string buttonText
+        property color accentColor: Theme.gray6
+        property bool primary: false
+        signal activated()
+
+        height: 36
+        color: primary
+            ? (confirmationMouse.containsMouse
+                ? Qt.lighter(accentColor, 1.15) : accentColor)
+            : (confirmationMouse.containsMouse ? Theme.gray3 : Theme.gray2)
+        border.width: 1
+        border.color: primary ? accentColor : Theme.gray5
+        Behavior on color { ColorAnimation { duration: 120 } }
+
+        Text {
+            anchors.centerIn: parent
+            text: confirmationButton.buttonText
+            color: confirmationButton.primary ? Theme.selfg : Theme.fg
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize
+            font.bold: confirmationButton.primary
+        }
+
+        MouseArea {
+            id: confirmationMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: confirmationButton.activated()
+        }
+    }
+
     NotifyPopup {
         id: notifHistory
         anchorItem: root
     }
 
-    BarSettingsPopup {
-        id: barSettings
+    Popout {
+        id: powerConfirmation
+        property string action: ""
+        readonly property bool rebooting: action === "reboot"
+
         anchorItem: root
+        alignRight: true
+        cardWidth: 310
+        cardHeight: confirmationContent.implicitHeight + 2 * cardPadding
+
+        function execute() {
+            const command = rebooting ? "reboot" : "poweroff"
+            visible = false
+            Quickshell.execDetached(["loginctl", command])
+        }
+
+        Column {
+            id: confirmationContent
+            anchors.left: parent.left
+            anchors.right: parent.right
+            spacing: 10
+
+            Row {
+                width: parent.width
+                height: 30
+                spacing: 10
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: powerConfirmation.rebooting ? "󰜉" : "󰐥"
+                    color: powerConfirmation.rebooting
+                        ? Theme.brightOrange : Theme.red
+                    font.family: Theme.fontFamily
+                    font.pixelSize: 22
+                }
+
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: powerConfirmation.rebooting
+                        ? "Restart the system?" : "Shut down the system?"
+                    color: Theme.fg
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSize + 1
+                    font.bold: true
+                }
+            }
+
+            Text {
+                width: parent.width
+                text: "All open applications will be closed."
+                color: Theme.brightBlack
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize - 1
+                wrapMode: Text.WordWrap
+            }
+
+            Rectangle { width: parent.width; height: 1; color: Theme.gray5 }
+
+            Row {
+                width: parent.width
+                height: 36
+                spacing: 8
+
+                ConfirmationButton {
+                    width: (parent.width - parent.spacing) / 2
+                    buttonText: "Cancel"
+                    onActivated: powerConfirmation.visible = false
+                }
+
+                ConfirmationButton {
+                    width: (parent.width - parent.spacing) / 2
+                    buttonText: powerConfirmation.rebooting
+                        ? "Restart" : "Shut down"
+                    accentColor: powerConfirmation.rebooting
+                        ? Theme.brightOrange : Theme.red
+                    primary: true
+                    onActivated: powerConfirmation.execute()
+                }
+            }
+        }
     }
 
     Popout {
@@ -397,9 +523,9 @@ BarModule {
                         { icon: "󰑓", label: "Reload desktop", color: Theme.brightBlue,
                           run: () => root.restartDesktop() },
                         { icon: "󰜉", label: "Reboot", color: Theme.brightOrange,
-                          run: () => root.run(["loginctl", "reboot"]) },
+                          run: () => root.confirmPowerAction("reboot") },
                         { icon: "󰐥", label: "Shutdown", color: Theme.red,
-                          run: () => root.run(["loginctl", "poweroff"]) }
+                          run: () => root.confirmPowerAction("poweroff") }
                     ]
                     MenuButton {}
                 }

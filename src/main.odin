@@ -89,7 +89,9 @@ wm_startup :: proc() -> bool {
     mask := u32(
         EVENT_MASK_SUBSTRUCTURE_REDIRECT |
         EVENT_MASK_SUBSTRUCTURE_NOTIFY |
-        EVENT_MASK_STRUCTURE_NOTIFY,
+        EVENT_MASK_STRUCTURE_NOTIFY |
+        EVENT_MASK_KEY_PRESS |
+        EVENT_MASK_KEY_RELEASE,
     )
     cookie := xcb_change_window_attributes_checked(g_wm.conn, g_wm.root, CW_EVENT_MASK, &mask)
     if err := xcb_request_check(g_wm.conn, cookie); err != nil {
@@ -277,6 +279,9 @@ handle_event :: proc(ev: ^Event) {
     switch rt {
     case u8(EVENT_KEY_PRESS):
         on_keypress((^Key_Press_Event)(ev))
+
+    case u8(EVENT_KEY_RELEASE):
+        on_keyrelease((^Key_Press_Event)(ev))
 
     case u8(EVENT_MAP_REQUEST):
         // a client (or the server adopting) wants to map an unmanaged window

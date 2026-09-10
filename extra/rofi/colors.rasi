@@ -1,16 +1,15 @@
-/* Srcery palette */
+/* Generated from wallpaper: hadrut_dark.jpeg */
 
 * {
-    bg:          #121110;
-    fg:          #FCE8C3;
-    accent:      #FF5F00;
-    accent-2:    #68A8E4;
-    border:      #FF5F00;
-    urgent:      #EF2F27;
-    selected-fg: #0E0D0C;
-    entry-fg:    #68A8E4;
-    prompt-fg:   #FF5F00;
-    header:      #68A8E4;
-
+    bg:          #291c25;
+    fg:          #d2cbbc;
+    accent:      #7973ca;
+    accent-2:    #c29fc6;
+    border:      #7973ca;
+    urgent:      #cb8a86;
+    selected-fg: #291c25;
+    entry-fg:    #c29fc6;
+    prompt-fg:   #7973ca;
+    header:      #c29fc6;
     background-color: @bg;
 }

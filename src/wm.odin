@@ -49,6 +49,7 @@ Wm :: struct {
     white_pixel: u32,
     tab_spawn_target: u32,
     tab_spawn_started: time.Tick,
+    overview_active: bool,
 }
 
 g_wm: Wm
@@ -456,6 +457,10 @@ grab_all_keys :: proc() {
 
 // key press dispatch: match by exact (mods,keycode) after stripping Lock/NumLock.
 on_keypress :: proc(ev: ^Key_Press_Event) {
+    if g_wm.overview_active {
+        overview_keypress(ev)
+        return
+    }
     clean := ev.state & ~(g_wm.lock | g_wm.numlock)
     for i in 0 ..< len(g_wm.bindings) {
         b := &g_wm.bindings[i]
@@ -486,6 +491,77 @@ on_keypress :: proc(ev: ^Key_Press_Event) {
     }
 }
 
+keycode_is :: proc(keycode: u8, name: string) -> bool {
+    wanted, _ := keysym_to_keycode(&g_wm.kb, keysym_from_name(name))
+    return wanted != 0 && keycode == wanted
+}
+
+overview_emit :: proc(change: string) {
+    ipc_broadcast_window_event(change, nil)
+}
+
+overview_begin :: proc(direction: int) {
+    if !g_wm.overview_active {
+        // Convert the passive Alt+Tab grab into an explicit keyboard grab.
+        // Releasing the active passive grab first is required: attempting
+        // XGrabKeyboard while it is active returns AlreadyGrabbed on Xorg.
+        xcb_ungrab_keyboard(g_wm.conn, CURRENT_TIME)
+        cookie := xcb_grab_keyboard(g_wm.conn, 0, g_wm.root, CURRENT_TIME,
+                                    GRAB_MODE_ASYNC, GRAB_MODE_ASYNC)
+        err: ^Error
+        reply := xcb_grab_keyboard_reply(g_wm.conn, cookie, &err)
+        if err != nil {
+            free_libc(err)
+            return
+        }
+        if reply == nil { return }
+        success := reply.status == 0
+        free_libc(reply)
+        if !success { return }
+        g_wm.overview_active = true
+    }
+    overview_emit(direction < 0 ? "overview-previous" : "overview-next")
+}
+
+overview_end :: proc(commit: bool) {
+    if !g_wm.overview_active { return }
+    overview_emit(commit ? "overview-commit" : "overview-cancel")
+    g_wm.overview_active = false
+    xcb_ungrab_keyboard(g_wm.conn, CURRENT_TIME)
+    xcb_flush(g_wm.conn)
+}
+
+overview_keypress :: proc(ev: ^Key_Press_Event) {
+    if keycode_is(ev.detail, "Tab") {
+        if ev.state & MOD_MASK_SHIFT != 0 {
+            overview_emit("overview-previous")
+        } else {
+            overview_emit("overview-next")
+        }
+    } else if keycode_is(ev.detail, "Left") {
+        overview_emit("overview-workspace-previous")
+    } else if keycode_is(ev.detail, "Right") {
+        overview_emit("overview-workspace-next")
+    } else if keycode_is(ev.detail, "Up") {
+        overview_emit("overview-window-previous")
+    } else if keycode_is(ev.detail, "Down") {
+        overview_emit("overview-window-next")
+    } else if keycode_is(ev.detail, "Return") ||
+              keycode_is(ev.detail, "KP_Enter") ||
+              keycode_is(ev.detail, "space") {
+        overview_end(true)
+    } else if keycode_is(ev.detail, "Escape") {
+        overview_end(false)
+    }
+}
+
+on_keyrelease :: proc(ev: ^Key_Press_Event) {
+    if !g_wm.overview_active { return }
+    if keycode_is(ev.detail, "Alt_L") || keycode_is(ev.detail, "Alt_R") {
+        overview_end(true)
+    }
+}
+
 Action_Kind :: enum u8 {
     None,
     Spawn, // b.cmd — a shell command line to launch (no arg)
@@ -493,7 +569,8 @@ Action_Kind :: enum u8 {
     Move_Left, Move_Right, Move_Up, Move_Down,
     Toggle_Floating,
     Toggle_Fullscreen,
-    Layout_Tabbed, Layout_Stacked, Layout_Toggle,
+    Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
+    Overview_Next, Overview_Prev,
     Scratchpad_Toggle, Scratchpad_Toggle_Float, Scratchpad_Remove,
     Show_Bindings,
     Close,
@@ -556,13 +633,28 @@ dispatch_action :: proc(b: ^Binding) {
             raise_focused()
             reflow()
         }
+    case .Layout_Floating:
+        if m.Focused != nil && !m.Focused.Floating && c.Toggle_Floating(m) {
+            reflow()
+            ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
+        }
     case .Layout_Tabbed:
-        if c.Set_Column_Layout(m, .Tabbed) {
+        changed := false
+        if m.Focused != nil && m.Focused.Floating {
+            changed = c.Toggle_Floating(m)
+        }
+        changed = c.Set_Column_Layout(m, .Tabbed) || changed
+        if changed {
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
     case .Layout_Stacked:
-        if c.Set_Column_Layout(m, .Stacked) {
+        changed := false
+        if m.Focused != nil && m.Focused.Floating {
+            changed = c.Toggle_Floating(m)
+        }
+        changed = c.Set_Column_Layout(m, .Stacked) || changed
+        if changed {
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
@@ -571,6 +663,10 @@ dispatch_action :: proc(b: ^Binding) {
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
+    case .Overview_Next:
+        overview_begin(1)
+    case .Overview_Prev:
+        overview_begin(-1)
     case .Scratchpad_Toggle, .Scratchpad_Toggle_Float:
         if c.Scratchpad_Toggle_Register(m, b.arg, b.action == .Scratchpad_Toggle_Float) {
             raise_focused()

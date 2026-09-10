@@ -24,8 +24,8 @@ inner_gap : 8
 border_width : 2
 
 # Window border colours as #RRGGBB.
-norm_outer_border : #504D47
-sel_outer_border  : #FF5F00
+norm_outer_border : #705c6a
+sel_outer_border  : #7973ca
 
 # True (default): moving the pointer over a window focuses it.
 focus_follows_mouse : true
@@ -39,6 +39,8 @@ bind : mod + v : "qs ipc -n -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quicksh
 # Keep the generated Shift variant from arming tab placement for this
 # non-window IPC command.
 bind : mod + Shift + v : "qs ipc -n -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell call clipboard toggle"
+call : Alt + Tab : overview_next
+call : Alt + Shift + Tab : overview_prev
 # Every spawn binding automatically gets an otherwise-unbound Shift variant.
 # While a tabbed column is focused, mod+Shift+Return runs the same command and
 # puts its next window in that tab group. An explicit shifted binding overrides
@@ -51,7 +53,7 @@ autostart : "lxqt-policykit-agent"
 # first session, when Feh has not created ~/.fehbg yet.
 autostart : "if [ -f ~/.fehbg ]; then sh ~/.fehbg; else feh --bg-fill ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/wallpaper/hadrut_srcery.jpeg; fi"
 autostart : "dunst -config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/dunst/dunstrc"
-autostart : "picom --config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/picom/picom.conf -b"
+autostart : "picom --config ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/picom/picom.conf ${SKARWM_PICOM_ARGS:-} -b"
 autostart : "${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/scripts/clipboard-history daemon"
 autostart : "qs --no-duplicate -p ${SKARWM_EXTRA_DIR:-$HOME/.config/skarwm}/quickshell"
 autostart : "xss-lock -- betterlockscreen -l"

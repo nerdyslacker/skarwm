@@ -3,32 +3,42 @@ import Quickshell
 import Quickshell.Widgets
 import Quickshell.Services.SystemTray
 
-// StatusNotifierItem tray (SNI over DBus, works fine on X11).
-// Left click activates, right click opens the item's menu.
+// StatusNotifierItem tray (SNI over DBus, works fine on X11). Icons assigned
+// to overflow remain available from the trailing button.
 Rectangle {
     id: root
 
-    visible: BarVisibility.enabled("tray") && SystemTray.items.values.length > 0
-    implicitWidth: trayRow.implicitWidth + Math.round(14 * Theme.barScale)
-    implicitHeight: Theme.moduleHeight
+    readonly property var visibleItems: SystemTray.items.values.filter(
+        item => !TrayState.isHidden(item))
+
+    visible: BarVisibility.enabled("tray") && TrayState.ready
+        && SystemTray.items.values.length > 0
+    implicitWidth: BarVisibility.verticalBar ? Theme.moduleHeight
+        : trayRow.implicitWidth + Math.round(14 * Theme.barScale)
+    implicitHeight: BarVisibility.verticalBar
+        ? trayRow.implicitHeight + Math.round(8 * Theme.barScale)
+        : Theme.moduleHeight
     radius: 0
-    color: Qt.alpha(Theme.fg, 0.07)
+    color: Theme.barSurface(0.07)
     border.width: 1
     border.color: Theme.gray5
 
-    Row {
+    Grid {
         id: trayRow
         anchors.centerIn: parent
+        columns: BarVisibility.verticalBar ? 1
+            : Math.max(1, root.visibleItems.length + 2)
         spacing: 4
 
         Repeater {
-            model: SystemTray.items
+            model: root.visibleItems
 
             MouseArea {
                 id: trayItem
                 required property SystemTrayItem modelData
 
-                width: Math.round(20 * Theme.barScale)
+                width: BarVisibility.verticalBar
+                    ? Theme.moduleHeight : Math.round(20 * Theme.barScale)
                 height: Theme.moduleHeight
                 acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
 
@@ -46,14 +56,59 @@ Rectangle {
                 }
 
                 onClicked: m => {
-                    if (m.button === Qt.LeftButton)
-                        modelData.activate()
-                    else if (m.button === Qt.MiddleButton)
+                    if (m.button === Qt.LeftButton) {
+                        if (modelData.onlyMenu && modelData.hasMenu)
+                            menuAnchor.open()
+                        else
+                            modelData.activate()
+                    } else if (m.button === Qt.MiddleButton) {
                         modelData.secondaryActivate()
-                    else if (modelData.hasMenu)
+                    } else if (modelData.hasMenu) {
                         menuAnchor.open()
+                    }
                 }
             }
         }
+
+        Rectangle {
+            visible: root.visibleItems.length > 0
+            width: BarVisibility.verticalBar
+                ? Math.round(16 * Theme.barScale) : 1
+            height: BarVisibility.verticalBar
+                ? 1 : Math.round(16 * Theme.barScale)
+            color: Theme.gray5
+        }
+
+        MouseArea {
+            id: overflowButton
+            width: BarVisibility.verticalBar ? Theme.moduleHeight
+                : overflowLabel.implicitWidth + Math.round(8 * Theme.barScale)
+            height: Theme.moduleHeight
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton
+
+            Rectangle {
+                anchors.fill: parent
+                color: overflowButton.containsMouse ? Theme.gray3 : "transparent"
+            }
+
+            Text {
+                id: overflowLabel
+                anchors.centerIn: parent
+                text: BarVisibility.barPosition === "bottom" ? "󰅃"
+                    : BarVisibility.barPosition === "left" ? "󰅂"
+                    : BarVisibility.barPosition === "right" ? "󰅁" : "󰅀"
+                color: Theme.brightBlack
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSize
+            }
+
+            onClicked: overflowPopup.visible = !overflowPopup.visible
+        }
+    }
+
+    TrayPopup {
+        id: overflowPopup
+        anchorItem: overflowButton
     }
 }

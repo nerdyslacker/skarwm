@@ -21,8 +21,8 @@ The bar includes:
   and power controls.
 
 The panel and all cards are square. The panel has no outer margin and is
-anchored directly to the top, left, and right screen edges. Its EWMH strut is
-reserved automatically by skarwm.
+anchored directly to the selected screen edge. Its EWMH strut is reserved
+automatically by skarwm.
 
 ## Requirements
 
@@ -75,13 +75,16 @@ per-user install, or in `$SKARWM_STATE_DIR` when it is set:
 
 - `bar-height` — bar height in pixels, clamped to 28–80;
 - `bar-scale` — module scale, clamped to 0.7–2.0;
+- `bar-transparent` — bar-background opacity from `0` (transparent) to `1`
+  (opaque); module cards keep their normal colors;
 - `weather-location` — city, postal code, or other wttr.in location;
 - `weather-units` — `c` or `f`;
 - `pomodoro` — persisted timer end time and duration;
 - `keyboard-layout.json` — layouts, aligned variants, and XKB options saved by
   the keyboard settings popup;
 - `tags.json` — visible tag count and number/dot display preference.
-- `bar-widgets.json` — enabled/disabled state for individual bar widgets.
+- `bar-widgets.json` — enabled state, ordering, and top/bottom bar placement.
+- `tray-hidden.json` — tray application IDs assigned to the overflow popup.
 
 The keyboard module shows the active layout. Left-click it to select any
 configured layout; right-click it to search the system XKB language catalogue
@@ -121,15 +124,23 @@ controls for additional external displays.
 The rightmost command menu shows the current account name and avatar (from
 `~/.face` or AccountsService), followed by DND, pomodoro, and the session power
 buttons. Right-click the command module to choose which other widgets are
-visible on the bar. Microphone mute is controlled from the audio popup's input
-section; a compact warning appears beside Audio while the microphone is muted,
-and clicking it unmutes the input.
+visible on the bar, arrange their order, and place the bar on any screen edge.
+Left/right bars use compact upright buttons and treat the three layout groups
+as top/center/bottom. Popups always open inward from the selected edge.
+Microphone mute is controlled from the audio popup's input section; a compact
+warning appears beside Audio while the microphone is muted, and clicking it
+unmutes the input.
 
 The calendar reads renCal's configured Caldir path automatically. Set
 `CALDIR_DIR` only when you want to override that location.
 Left-click the clock for the month calendar and upcoming events. Clicking an
 event or a highlighted day opens that event in renCal; right-clicking the clock
 opens renCal directly.
+
+The system tray's trailing arrow opens its overflow popup. Click an application
+row to activate it, right-click for its native menu, or use Hide/Show to choose
+whether its icon occupies space on the bar. This placement persists across
+restarts.
 
 When skarwm has one or more numbered scratchpad registrations, a terminal icon
 appears beside the focused-window title. Click it to see the registered windows
@@ -141,6 +152,10 @@ Left-click the launcher icon, type to filter applications, use the arrow keys to
 select a result, and press Enter to launch it. The launcher can also be toggled
 with `qs -p /path/to/quickshell ipc call launcher toggle`.
 `Super+A` opens it centered on skarwm's currently focused monitor.
-Right-click the launcher icon to open the thumbnail picker, or middle-click it
-to apply a random image. Wallpaper changes do not alter the fixed Srcery
-palette.
+Right-click the layout icon to open the thumbnail picker, or middle-click it
+to apply a random image. Clicking a thumbnail applies it to every screen.
+Enable **Generate theme based on wallpaper** in the
+picker to immediately derive the Quickshell palette, accent choices, skarwm
+borders, Rofi, Dunst, and Kitty colors from the selected image. Switching back to **Use
+default theme** immediately restores Srcery everywhere, including the Srcery
+accent selected before wallpaper theming was enabled.

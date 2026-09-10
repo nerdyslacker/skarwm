@@ -911,7 +911,7 @@ test_dock_geometry_and_struts :: proc() {
     // a 24 px top panel: work area drops below it
     dock := add_dock(m, 300, c.Insets { Top = 24 }, c.Rect { X = 0, Y = 0, W = 1920, H = 24 })
     c.Arrange_All(m)
-    eq(a.Geom, c.Rect { X = 10, Y = 26, W = 1900, H = 1044 }, "tiled window starts below the top strut")
+    eq(a.Geom, c.Rect { X = 10, Y = 34, W = 1900, H = 1036 }, "tiled window keeps its outer gap below the top strut")
     eq(dock.Geom, c.Rect { X = 0, Y = 0, W = 1920, H = 24 }, "dock keeps its requested rect")
     eq(dock.Border, 0, "docks are borderless")
     o := c.Active_Output(m)
@@ -920,7 +920,7 @@ test_dock_geometry_and_struts :: proc() {
     // a second dock claims the bottom 28 px: both insets apply (per-side max)
     bdock := add_dock(m, 301, c.Insets { Bottom = 28 }, c.Rect { X = 0, Y = 1052, W = 1920, H = 28 })
     c.Arrange_All(m)
-    eq(a.Geom, c.Rect { X = 10, Y = 26, W = 1900, H = 1024 }, "bottom strut shortens the work area too")
+    eq(a.Geom, c.Rect { X = 10, Y = 34, W = 1900, H = 1008 }, "bottom strut keeps the outer gap too")
     eq(bdock.Geom, c.Rect { X = 0, Y = 1052, W = 1920, H = 28 }, "bottom dock sits at its rect")
     eq(o.Reserved, c.Insets { Top = 24, Bottom = 28 }, "per-side max across docks")
 
@@ -932,11 +932,11 @@ test_dock_geometry_and_struts :: proc() {
     // compute_params honours arbitrary reservations (3rd-arg plumbing)
     cfg := c.Default_Config()
     p := c.compute_params(cfg, GEOM, 1, c.Insets { Left = 200 })
-    eq(p.WorkX, 200, "left reservation overrides the outer gap")
-    eq(p.WorkW, 1712, "work width loses left reservation + right gap")
+    eq(p.WorkX, 208, "left reservation is followed by the outer gap")
+    eq(p.WorkW, 1704, "work width loses reservation and both outer gaps")
     p2 := c.compute_params(cfg, GEOM, 1, c.Insets { Right = 40 })
     eq(p2.WorkX, 8, "no left reservation -> outer gap as before")
-    eq(p2.WorkW, 1872, "right reservation trims the right edge")
+    eq(p2.WorkW, 1864, "right reservation retains both outer gaps")
     // zero reservation reproduces the plain gap inset exactly
     p3 := c.compute_params(cfg, GEOM, 1)
     eq(p3.WorkX, 8, "zero insets: WorkX = outer gap")
@@ -961,7 +961,7 @@ test_dock_sticky :: proc() {
 
     c.Switch_WS_Id(m, 1)
     c.Arrange_All(m)
-    eq(a.Geom, c.Rect { X = 10, Y = 26, W = 1900, H = 1044 }, "back on ws1 the window retiles below the dock")
+    eq(a.Geom, c.Rect { X = 10, Y = 34, W = 1900, H = 1036 }, "back on ws1 the window retiles below the dock")
     eq(ws1.ViewportX, 0, "dock does not disturb the viewport")
 }
 
@@ -991,7 +991,7 @@ test_dock_unmanage_restores :: proc() {
     a := add_tiled(m, 100)
     dock := add_dock(m, 300, c.Insets { Top = 24 }, c.Rect { X = 0, Y = 0, W = 1920, H = 24 })
     c.Arrange_All(m)
-    eq(a.Geom, c.Rect { X = 10, Y = 26, W = 1900, H = 1044 }, "reserved layout before unmanage")
+    eq(a.Geom, c.Rect { X = 10, Y = 34, W = 1900, H = 1036 }, "reserved layout before unmanage")
 
     nxt := c.Unmanage_Client(m, dock)
     ok(nxt == nil, "unmanaging a dock never yields a focus target")
@@ -1016,15 +1016,15 @@ test_dock_reserved_ensure_visible :: proc() {
     add_dock(m, 300, c.Insets { Left = 200 }, c.Rect { X = 0, Y = 0, W = 200, H = 1080 })
     add_tiled(m, 100)
     add_tiled(m, 101)
-    d := add_tiled(m, 102) // 3 columns over a 1712 px work width -> panning needed
+    d := add_tiled(m, 102) // 3 columns over a 1704 px work width -> panning needed
 
     c.Focus_Client(m, d)
     c.Ensure_Active_Focus_Visible(m)
-    // (1712 - 8) / 2 = 852 page width; total 3*852 + 2*8 = 2572; max vp = 2572 - 1712.
-    eq(ws.ViewportX, 860, "viewport pan accounts for the side reservation")
+    // (1704 - 8) / 2 = 848 page width; total 3*848 + 2*8 = 2560; max vp = 856.
+    eq(ws.ViewportX, 856, "viewport pan accounts for the side reservation")
     c.Arrange_All(m)
     ok(d.Geom.X + d.Geom.W <= 1920, "focused column fully on screen")
-    eq(d.Geom.X, 1062, "drawn at work_x 200 + strip 1720 - viewport 860 + border 2")
+    eq(d.Geom.X, 1066, "drawn at work_x 208 + strip 1712 - viewport 856 + border 2")
 }
 
 // ----------------------------------------------------------------------------
@@ -1328,6 +1328,14 @@ test_ipc_parse_command :: proc() {
     cmd, err, fine = c.ipc_parse_command(bytes_of(`focus left`))
     ok(fine && cmd.action == .Focus_Left, "focus left parsed")
     if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`focus window 4194309`))
+    ok(fine && cmd.action == .Focus_Window && cmd.arg == 4194309,
+       "focus window parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`focus window nope`))
+    ok(!fine, "focus window rejects non-numeric id")
+    eq(err, "focus window: expected a positive X11 window id", "focus window error")
+    if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`move workspace next`))
     ok(fine && cmd.action == .Move_To_Workspace_Next, "move workspace next parsed")
     if err != "" do delete(err)
@@ -1337,8 +1345,21 @@ test_ipc_parse_command :: proc() {
     cmd, err, fine = c.ipc_parse_command(bytes_of(`layout tabbed`))
     ok(fine && cmd.action == .Layout_Tabbed, "layout tabbed parsed")
     if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`layout floating`))
+    ok(fine && cmd.action == .Layout_Floating, "layout floating parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`layout tiling`))
+    ok(fine && cmd.action == .Layout_Stacked, "layout tiling alias parsed")
+    if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`layout stacking`))
     ok(fine && cmd.action == .Layout_Stacked, "layout stacking alias parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`gaps 16`))
+    ok(fine && cmd.action == .Set_Gaps && cmd.arg == 16, "runtime gaps parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`gaps 101`))
+    ok(!fine, "runtime gaps enforce upper bound")
+    eq(err, "gaps: expected a value from 0 to 100", "runtime gaps error")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`toggle-tabbed`))
     ok(fine && cmd.action == .Layout_Toggle, "toggle-tabbed parsed")

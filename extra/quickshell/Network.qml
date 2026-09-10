@@ -8,6 +8,11 @@ BarModule {
 
     icon: Sys.netIcon
     iconColor: Sys.vpnOn ? Theme.green : Sys.online ? Theme.cyan : Theme.red
+    label: Sys.bluetoothOn ? "󰂯" : ""
+    labelColor: Sys.bluetoothConnected ? Theme.green : Theme.cyan
+    labelPixelSize: Theme.iconSize
+    compactLabel: label
+    compactLabelPixelSize: Theme.iconSize
 
     onClicked: mouse => {
         if (mouse.button === Qt.RightButton)

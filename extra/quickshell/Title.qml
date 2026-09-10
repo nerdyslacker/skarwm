@@ -1,16 +1,14 @@
 import QtQuick
+import QtQuick.Controls
 
 // Focused window title, centered in the available space.
 Item {
     id: root
 
-    readonly property bool hasScratchpads: Wm.registeredScratchpads.length > 0
     readonly property bool hasTitle: Wm.title !== ""
-    readonly property int scratchButtonSize: Theme.moduleHeight
-    readonly property int scratchGap: Math.round(4 * Theme.barScale)
 
-    implicitWidth: (hasTitle ? titleText.implicitWidth + Math.round(18 * Theme.barScale) : 0)
-        + (hasScratchpads ? scratchButtonSize + scratchGap : 0)
+    implicitWidth: hasTitle ? (BarVisibility.verticalBar
+        ? Theme.moduleHeight : Math.round(220 * Theme.barScale)) : 0
     implicitHeight: Theme.moduleHeight
 
     Rectangle {
@@ -19,19 +17,20 @@ Item {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        width: root.hasTitle ? Math.max(0, parent.width - (root.hasScratchpads
-            ? root.scratchButtonSize + root.scratchGap : 0)) : 0
+        width: root.hasTitle ? parent.width : 0
         radius: 0
-        color: Qt.alpha(Theme.fg, 0.07)
+        color: Theme.barSurface(0.07)
         border.width: 1
         border.color: Theme.gray5
 
         Text {
             id: titleText
             anchors.fill: parent
-            anchors.leftMargin: Math.round(9 * Theme.barScale)
-            anchors.rightMargin: Math.round(9 * Theme.barScale)
-            text: Wm.title
+            anchors.leftMargin: BarVisibility.verticalBar
+                ? 0 : Math.round(9 * Theme.barScale)
+            anchors.rightMargin: BarVisibility.verticalBar
+                ? 0 : Math.round(9 * Theme.barScale)
+            text: BarVisibility.verticalBar ? "󰖯" : Wm.title
             color: Qt.alpha(Theme.fg, 0.75)
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize
@@ -40,39 +39,31 @@ Item {
             verticalAlignment: Text.AlignVCenter
             Behavior on color { ColorAnimation { duration: 250 } }
         }
-    }
-
-    Rectangle {
-        id: scratchButton
-        visible: root.hasScratchpads
-        width: root.scratchButtonSize
-        height: root.scratchButtonSize
-        anchors.left: titleBox.right
-        anchors.leftMargin: root.hasTitle ? root.scratchGap : 0
-        anchors.verticalCenter: parent.verticalCenter
-        color: scratchMouse.containsMouse
-            ? Qt.alpha(Theme.accent, 0.24) : Qt.alpha(Theme.accent, 0.10)
-        border.width: 1
-        border.color: scratchMouse.containsMouse ? Theme.accent : Theme.gray5
-
-        Text {
-            anchors.centerIn: parent
-            text: "󰆍"
-            color: Theme.accent
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.iconSize
-        }
 
         MouseArea {
-            id: scratchMouse
+            id: titleMouse
             anchors.fill: parent
             hoverEnabled: true
-            onClicked: scratchpads.visible = !scratchpads.visible
+            acceptedButtons: Qt.NoButton
+        }
+
+        ToolTip {
+            id: titleTooltip
+            parent: titleBox
+            visible: titleMouse.containsMouse && root.hasTitle
+                && (BarVisibility.verticalBar || titleText.truncated)
+            text: Wm.title
+            delay: 350
+            popupType: Popup.Window
+            x: BarVisibility.verticalBar
+                ? (BarVisibility.barPosition === "left"
+                    ? titleBox.width + 6 : -width - 6)
+                : (titleBox.width - width) / 2
+            y: BarVisibility.verticalBar
+                ? (titleBox.height - height) / 2
+                : BarVisibility.barPosition === "bottom"
+                    ? -height - 6 : titleBox.height + 6
         }
     }
 
-    ScratchpadsPopup {
-        id: scratchpads
-        anchorItem: scratchButton
-    }
 }

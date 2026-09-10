@@ -63,6 +63,10 @@ log_path=${TMPDIR:-/tmp}/skarwm-xephyr-$$.log
 xephyr_pid=
 state_dir=${SKARWM_XEPHYR_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/skarwm/xephyr}
 extra_dir=$(pwd)/extra
+# Picom's incremental XRender damage path can lose background-window repaint
+# regions behind ARGB popup windows when compositing inside Xephyr. A full
+# repaint is cheap on this fixed-size test display and avoids that nested-X bug.
+picom_args=${SKARWM_PICOM_ARGS:---no-use-damage}
 
 stop_quickshell_instance() {
     if command -v qs >/dev/null 2>&1; then
@@ -109,7 +113,7 @@ if DISPLAY="$nested_display" xwininfo -root >/dev/null 2>&1; then
 fi
 
 printf 'Starting Xephyr on %s (%s mode)\n' "$nested_display" "$mode"
-Xephyr "$nested_display" -screen 1280x800 -ac -br -noreset >"$log_path" 2>&1 &
+Xephyr "$nested_display" -screen 1600x900 -ac -br -noreset >"$log_path" 2>&1 &
 xephyr_pid=$!
 
 ready=false
@@ -139,10 +143,10 @@ if [ "$mode" = multi ]; then
         exit 1
     fi
     DISPLAY="$nested_display" xrandr \
-        --setmonitor LEFT 640/170x800/210+0+0 "$output"
+        --setmonitor LEFT 800/211x900/238+0+0 "$output"
     DISPLAY="$nested_display" xrandr \
-        --setmonitor RIGHT 640/170x800/210+640+0 none
-    printf 'Created RandR monitors LEFT and RIGHT (640x800 each)\n'
+        --setmonitor RIGHT 800/211x900/238+800+0 none
+    printf 'Created RandR monitors LEFT and RIGHT (960x1080 each)\n'
 fi
 
 printf 'Launching skarwm; close the Xephyr window or press Ctrl-C here to stop.\n'
@@ -152,5 +156,6 @@ mkdir -p "$state_dir"
 printf 'Persistent state: %s\n' "$state_dir"
 DISPLAY="$nested_display" SKARWM_SOCKET="$socket_path" \
     SKARWM_EXTRA_DIR="$extra_dir" SKARWM_STATE_DIR="$state_dir" \
+    SKARWM_PICOM_ARGS="$picom_args" \
     KITTY_CONFIG_DIRECTORY="$extra_dir/kitty" \
     ./build/skarwm "$@"

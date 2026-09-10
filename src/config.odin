@@ -318,6 +318,8 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: Binding, err: strin
     case "layout_stacked",
          "stacked":          base.action = .Layout_Stacked;    return base, ""
     case "toggle_tabbed":    base.action = .Layout_Toggle;     return base, ""
+    case "overview_next":    base.action = .Overview_Next;     return base, ""
+    case "overview_prev":    base.action = .Overview_Prev;     return base, ""
     case "scratchpad_toggle", "scratchpad":
         if rb.argk != .Num || rb.argi < 0 {
             return {}, fmt.aprintf("bind(%q): scratchpad register must be >= 0", rb.combo)
