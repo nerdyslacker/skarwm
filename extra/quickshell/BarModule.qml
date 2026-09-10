@@ -9,6 +9,7 @@ Rectangle {
     property color iconColor: Theme.accent
     property string compactIcon: icon
     property color compactIconColor: iconColor
+    property string compactLabel: ""
     // some glyphs (e.g. Font Logos ) are missing from JetBrainsMono NF here
     property string iconFont: Theme.fontFamily
     property string label: ""
@@ -29,7 +30,9 @@ Rectangle {
 
     default property alias extraContent: row.data
 
-    implicitHeight: Theme.moduleHeight
+    implicitHeight: BarVisibility.verticalBar && compactLabel !== ""
+        ? Theme.moduleHeight + Math.round(12 * Theme.barScale)
+        : Theme.moduleHeight
     implicitWidth: BarVisibility.verticalBar ? Theme.moduleHeight
         : row.implicitWidth + Math.round(18 * Theme.barScale)
     radius: 0
@@ -71,14 +74,31 @@ Rectangle {
         }
     }
 
-    Text {
-        visible: BarVisibility.verticalBar && root.compactIcon !== ""
+    Column {
+        visible: BarVisibility.verticalBar
+            && (root.compactIcon !== "" || root.compactLabel !== "")
         anchors.centerIn: parent
-        text: root.compactIcon
-        color: root.compactIconColor
-        font.family: root.iconFont
-        font.pixelSize: Theme.iconSize
-        Behavior on color { ColorAnimation { duration: 250 } }
+        spacing: Math.round(2 * Theme.barScale)
+
+        Text {
+            visible: root.compactIcon !== ""
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: root.compactIcon
+            color: root.compactIconColor
+            font.family: root.iconFont
+            font.pixelSize: Theme.iconSize
+            Behavior on color { ColorAnimation { duration: 250 } }
+        }
+
+        Text {
+            visible: root.compactLabel !== ""
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: root.compactLabel
+            color: root.labelColor
+            font.family: Theme.fontFamily
+            font.pixelSize: Math.max(8, Theme.fontSize - 2)
+            Behavior on color { ColorAnimation { duration: 250 } }
+        }
     }
 
     Rectangle {

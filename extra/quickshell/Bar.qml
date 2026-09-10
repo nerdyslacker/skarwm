@@ -54,6 +54,20 @@ PanelWindow {
         anchorItem: panel
     }
 
+    // Commands participates in the reorderable loaders, but its settings
+    // popup must outlive those delegates. This stable proxy is positioned on
+    // the Commands button whenever the popup opens.
+    Item {
+        id: barSettingsAnchor
+        width: Theme.moduleHeight
+        height: Theme.moduleHeight
+    }
+
+    BarSettingsPopup {
+        id: persistentBarSettings
+        anchorItem: barSettingsAnchor
+    }
+
     // Modules provide their own compact upright representation on side bars.
     component WidgetLoader: Item {
         id: widgetSlot
@@ -80,6 +94,12 @@ PanelWindow {
             source: root.widgetSources[widgetSlot.widgetKey] ?? ""
             width: widgetSlot.moduleWidth
             height: widgetSlot.naturalHeight
+            onLoaded: {
+                if (widgetSlot.widgetKey === "commands" && item) {
+                    item.barSettingsPopup = persistentBarSettings
+                    item.barSettingsAnchor = barSettingsAnchor
+                }
+            }
         }
     }
 

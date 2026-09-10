@@ -21,6 +21,8 @@ BarModule {
     property string userName: String(Quickshell.env("USER") ?? "user")
     property string displayName: userName
     property string avatarPath: ""
+    property var barSettingsPopup: null
+    property var barSettingsAnchor: null
 
     property int pomoMinutes: 25
     readonly property var pomoPresets: [15, 25, 45, 60]
@@ -33,11 +35,19 @@ BarModule {
     onClicked: mouse => {
         if (mouse.button === Qt.RightButton) {
             menu.visible = false
-            barSettings.visible = !barSettings.visible
+            if (barSettingsPopup && barSettingsAnchor) {
+                const point = root.mapToItem(barSettingsAnchor.parent, 0, 0)
+                barSettingsAnchor.x = point.x
+                barSettingsAnchor.y = point.y
+                barSettingsAnchor.width = root.width
+                barSettingsAnchor.height = root.height
+                barSettingsPopup.visible = !barSettingsPopup.visible
+            }
             return
         }
         if (mouse.button !== Qt.LeftButton) return
-        barSettings.visible = false
+        if (barSettingsPopup)
+            barSettingsPopup.visible = false
         pomoDone = false
         menu.visible = !menu.visible
     }
@@ -269,11 +279,6 @@ BarModule {
 
     NotifyPopup {
         id: notifHistory
-        anchorItem: root
-    }
-
-    BarSettingsPopup {
-        id: barSettings
         anchorItem: root
     }
 
