@@ -50,6 +50,8 @@ Wm :: struct {
     tab_spawn_target: u32,
     tab_spawn_started: time.Tick,
     overview_active: bool,
+    preview_hover_locked: bool,
+    preview_hover_target: u32,
 }
 
 g_wm: Wm
@@ -184,7 +186,7 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     // select events on the client so we see title changes, strut updates and
     // pointer hovers. (Child unmap/destroy/configure is already reported by the
     // root SUBSTRUCTURE_NOTIFY grab, so STRUCTURE_NOTIFY here is unnecessary.)
-    evmask := EVENT_MASK_PROPERTY_CHANGE | EVENT_MASK_ENTER_WINDOW
+    evmask := EVENT_MASK_PROPERTY_CHANGE | EVENT_MASK_ENTER_WINDOW | EVENT_MASK_POINTER_MOTION
     xcb_change_window_attributes(g_wm.conn, xid, CW_EVENT_MASK, &evmask)
     grab_client_buttons(xid)
 
@@ -606,6 +608,10 @@ dir_of :: proc(k: Action_Kind) -> c.Dir {
 dispatch_action :: proc(b: ^Binding) {
     m := g_wm.m
     old_focus := m.Focused
+    // Explicit keyboard input takes precedence and suppresses a hover retarget
+    // until pointer motion confirms it has left all preview zones.
+    g_wm.preview_hover_locked = true
+    g_wm.preview_hover_target = 0
     switch b.action {
     case .None:
         return
@@ -871,8 +877,9 @@ output_at_pointer :: proc() -> ^c.Output {
 }
 
 on_enter :: proc(ev: ^Enter_Notify_Event) {
-    if !g_wm.m.Cfg.FocusFollowsMouse { return }
     if ev.mode != NOTIFY_MODE_NORMAL { return } // ignore grabs / synthetic
+    if scroll_preview_hover(i32(ev.root_x), i32(ev.root_y)) { return }
+    if !g_wm.m.Cfg.FocusFollowsMouse { return }
     xid := ev.event
     if cl := g_wm.m.ByXid[xid]; cl != nil {
         // Docks have Ws == nil, so on_current_ws below is false for them and
@@ -885,6 +892,29 @@ on_enter :: proc(ev: ^Enter_Notify_Event) {
         xcb_flush(g_wm.conn)
         ipc_broadcast_focus_change(old, cl)
     }
+}
+
+// scroll_preview_hover is shared by EnterNotify and MotionNotify. Once a
+// preview triggers it remains locked while the pointer is over any preview;
+// this prevents the opposite edge created by the reveal from immediately
+// navigating back underneath a stationary pointer.
+scroll_preview_hover :: proc(x, y: i32) -> bool {
+    preview, over := c.Scroll_Preview_At_Point(g_wm.m, x, y)
+    if !over {
+        g_wm.preview_hover_locked = false
+        g_wm.preview_hover_target = 0
+        return false
+    }
+    if g_wm.mouse_client != nil { return true }
+    if g_wm.preview_hover_locked { return true }
+
+    old := g_wm.m.Focused
+    if !c.Reveal_Scroll_Client(g_wm.m, preview.Client) { return true }
+    g_wm.preview_hover_locked = true
+    g_wm.preview_hover_target = preview.Client.Xid
+    reflow_preserve_viewport()
+    ipc_broadcast_focus_change(old, preview.Client)
+    return true
 }
 
 grab_client_buttons :: proc(xid: u32) {
@@ -944,6 +974,10 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
 
     clean := ev.state & ~(g_wm.lock | g_wm.numlock)
     if g_wm.primary_mod != 0 && clean == g_wm.primary_mod && (ev.detail == 4 || ev.detail == 5) {
+        // Do not let geometry moving beneath this explicit wheel action turn
+        // the same stationary pointer into a second, implicit scroll.
+        g_wm.preview_hover_locked = true
+        g_wm.preview_hover_target = 0
         dir := -1
         if ev.detail == 5 { dir = 1 }
         output := c.Output_At_Point(g_wm.m, i32(ev.root_x), i32(ev.root_y))
@@ -991,7 +1025,10 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
 
 on_motion :: proc(ev: ^Motion_Notify_Event) {
     cl := g_wm.mouse_client
-    if cl == nil { return }
+    if cl == nil {
+        scroll_preview_hover(i32(ev.root_x), i32(ev.root_y))
+        return
+    }
     if g_wm.mouse_tiled_drag {
         drop_overlay_update(i32(ev.root_x), i32(ev.root_y))
         return

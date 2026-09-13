@@ -15,7 +15,8 @@ desktop UI are intentionally left to external programs such as
 Features include dynamic workspaces, stacked and tabbed columns, RandR
 multi-monitor support, independent workspaces per monitor, floating and
 fullscreen windows, native scratchpads, atomic rc reloads, window rules,
-EWMH/ICCCM interoperability, dock struts, and nonblocking Unix-socket IPC.
+edge previews with hover-to-reveal, EWMH/ICCCM interoperability, dock struts,
+and nonblocking Unix-socket IPC.
 
 > **Note:** skarwm was developed with AI assistance as a project for learning
 > Odin. It is a hobby project and my daily driver.
@@ -100,6 +101,7 @@ Default interaction highlights:
 - `Super+t`: toggle tabbed mode for the focused column;
 - `Super+/`: show all configured skarwm keybindings;
 - `Super`+wheel: scroll the workspace strip;
+- hover a narrow edge preview: reveal and focus the adjacent hidden window;
 - `Super+,/.`: focus the previous/next monitor;
 - `Super+Shift+,/.`: move the focused window between monitors;
 - middle-click: maximize/restore a managed window within its usable work area;

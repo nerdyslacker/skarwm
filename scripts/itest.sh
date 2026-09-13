@@ -21,13 +21,11 @@
 #   - one window alone            -> 1260x780+10+10   (fills the work width)
 #   - a two-window vertical stack -> 1260x384+10+10 / 1260x384+10+406
 #   - a column of a 2+ strip      -> 624x780+10+10 or 624x780+646+10 (col0/col1)
-# With a third (or later) column the strip overflows and the viewport pans; the
-# focused (newest) column then sits at client X 646 and off-page columns are
-# parked rather than allowed to spill onto another RandR output. Hidden,
-# off-page, and other-workspace windows are parked at X = -20000 with full-output
-# width 1280. Predicates below are therefore
-# width-agnostic within {1260,624} and treat "tiled" as any such window whose
-# X > -10000 (parked windows are 1280 wide, so they never match).
+# With a third (or later) column the strip overflows and the viewport pans.
+# Visible columns reflow to reserve each 20px edge preview and its 8px inner
+# gap: one preview yields 610px clients and two previews yield 596px clients.
+# Hidden, off-page, and other-workspace windows are parked at X = -20000 with
+# full-output width 1280, so they never match the tiled-width predicates below.
 
 set -u
 cd "$(dirname "$0")/.." || exit 2
@@ -58,12 +56,11 @@ xtops() {
 
 geom_of() { xtops | awk -v id="$1" '$1==id{print $2; exit}'; }
 
-# Tiled windows are 1260 or 624 px wide; parked (hidden) windows keep the full
-# output width (1280) and transient pre-layout windows are not tiled, so neither
-# matches. Panning never changes a column's width, so off-screen-left columns
-# (negative X) still count as tiled.
-count_tiled() { xtops | awk '$2 ~ /^(1260|624)x/{n++} END{print n+0}'; }
-first_tiled_id() { xtops | awk '$2 ~ /^(1260|624)x/{print $1; exit}'; }
+# Tiled windows use the ordinary 1260/624px widths or the 610/596px widths of
+# pages reserving one/two previews. Parked windows keep the full output width
+# (1280), and transient pre-layout windows are not tiled, so neither matches.
+count_tiled() { xtops | awk '$2 ~ /^(1260|624|610|596)x/{n++} END{print n+0}'; }
+first_tiled_id() { xtops | awk '$2 ~ /^(1260|624|610|596)x/{print $1; exit}'; }
 unnamed_children() { xwininfo -root -tree 2>/dev/null | grep -c '(has no name)' || true; }
 
 # geosplit <WxH+X+Y> sets $gw $gh $gx $gy
@@ -296,8 +293,9 @@ xdotool mousemove 640 795 >/dev/null 2>&1; sleep 0.3
 # Strip: page width (1264 - 8) / 2 = 628 tile / 624 client, step 636. Columns 0
 # and 1 fill the work area exactly; a 3rd column makes the strip 1900px wide and
 # each later spawn lands to the right of the focused (newest) column, panning the
-# viewport so the newest column sits at client X 646 and earlier columns are
-# parked off-screen. (4 columns -> strip 2536, max viewport 1272.)
+# viewport so the newest column is visible on the right and earlier columns are
+# parked off-screen. Preview pages reserve 20px of the neighboring window plus the usual 8px
+# inner gap. (4 columns -> strip 2536, max viewport 1272.)
 ok4=true
 scroll_ids=()
 for n in 1 2 3 4; do
@@ -315,18 +313,18 @@ right_id=${scroll_ids[3]}
 if wait_hidden_x "$left_id"; then pass "3rd+ spawn pans the strip (1st column parked)"; else fail "strip pan start"; fi
 
 # focus is the newest = rightmost column; viewport clamps at max so the last
-# column's right edge sits against the work-area right edge (client x = 646).
+# column's right edge sits inside the space reserved for the left preview.
 if wait_focus "$(printf '%d' "$right_id")"; then pass "newest column focused at far right"; else fail "far-right focus"; fi
-if wait_geom "$right_id" "624x780+646+10"; then pass "viewport clamps at strip max (right edge aligned)"; else fail "right clamp geometry"; fi
+if wait_geom "$right_id" "610x780+660+10"; then pass "viewport clamps at strip max with preview space reserved"; else fail "right clamp geometry"; fi
 
 # walk focus back three columns to the leftmost one: viewport must return to 0
 for _ in 1 2 3; do key super+h; done
 if wait_focus "$(printf '%d' "$left_id")"; then pass "focus left to the leftmost column"; else fail "focus left walk"; fi
-if wait_geom "$left_id" "624x780+10+10"; then pass "viewport returns to 0 at leftmost column"; else fail "left clamp geometry"; fi
+if wait_geom "$left_id" "610x780+10+10"; then pass "viewport returns to 0 at leftmost column"; else fail "left clamp geometry"; fi
 
 # an extra focus-left beyond the edge must be a no-op (no overscroll)
 key super+h
-if wait_geom "$left_id" "624x780+10+10" && [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$left_id")" ]; then
+if wait_geom "$left_id" "610x780+10+10" && [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$left_id")" ]; then
   pass "no overscroll past the leftmost column"
 else
   fail "overscrolled past leftmost"
@@ -337,19 +335,50 @@ fi
 xdotool keydown super >/dev/null 2>&1
 xdotool click 5 >/dev/null 2>&1
 xdotool keyup super >/dev/null 2>&1
-if wait_hidden_x "$left_id" && [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$left_id")" ]; then
-  pass "Mod+wheel down scrolls right without changing focus"
+if wait_geom "$left_id" "624x780+-598+10" && [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$left_id")" ]; then
+  pass "Mod+wheel down scrolls right without changing focus and leaves a preview"
 else
   fail "Mod+wheel down viewport scroll"
 fi
 xdotool keydown super >/dev/null 2>&1
 xdotool click 4 >/dev/null 2>&1
 xdotool keyup super >/dev/null 2>&1
-if wait_geom "$left_id" "624x780+10+10"; then
+if wait_geom "$left_id" "610x780+10+10"; then
   pass "Mod+wheel up scrolls left"
 else
   fail "Mod+wheel up viewport scroll"
 fi
+
+# Hover the exposed right edge: column 2 is revealed and focused. Keeping the
+# pointer stationary at the new right preview must not chain into column 3.
+xdotool mousemove --sync 900 400 >/dev/null 2>&1
+xdotool mousemove 1260 400 >/dev/null 2>&1
+hover_target=${scroll_ids[2]}
+if wait_focus "$(printf '%d' "$hover_target")" && wait_geom "$hover_target" "596x780+646+10"; then
+  pass "hovering right preview reveals and focuses its real client"
+else
+  fail "right preview hover reveal"
+fi
+sleep 0.8
+if [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$hover_target")" ]; then
+  pass "stationary pointer does not repeat or oscillate preview navigation"
+else
+  fail "preview hover lock"
+fi
+
+# Leaving every preview unlocks navigation. Entering the new left preview
+# returns to the previous page and focuses its nearest hidden client.
+xdotool mousemove --sync 640 795 >/dev/null 2>&1; sleep 0.6
+xdotool mousemove --sync 15 400 >/dev/null 2>&1
+if wait_focus "$(printf '%d' "$left_id")" && wait_geom "$left_id" "610x780+10+10"; then
+  pass "leaving preview and hovering the opposite edge reveals left neighbor"
+else
+  fail "left preview hover after unlock"
+fi
+
+# Restore the left-focused fixture expected by the workspace tests below.
+xdotool mousemove 640 795 >/dev/null 2>&1
+wait_focus "$(printf '%d' "$left_id")" || fail "restore focus after preview hover checks"
 
 # ---- 11. dynamic workspaces ------------------------------------------------------
 # ws1 holds the 4 columns; the focused (leftmost) window moves to a fresh ws2.
@@ -367,7 +396,7 @@ else
 fi
 
 key super+1
-if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "624x780+10+10"; then
+if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "610x780+10+10"; then
   pass "ws1 restores its 3 remaining columns"
 else
   fail "ws1 restore after move"
@@ -377,7 +406,7 @@ fi
 key super+n
 if wait_geom "$moved_hex" "1260x780+10+10"; then pass "workspace next (super+n) lands on ws2"; else fail "workspace next"; fi
 key super+p
-if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "624x780+10+10"; then
+if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "610x780+10+10"; then
   pass "workspace prev (super+p) returns to ws1"
 else
   fail "workspace prev"
@@ -387,7 +416,7 @@ fi
 key super+9
 if wait_for zero_tiled; then pass "goto fresh workspace 9 (created empty on demand)"; else fail "workspace 9 create"; fi
 key super+1
-if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "624x780+10+10"; then
+if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "610x780+10+10"; then
   pass "back to ws1"
 else
   fail "back to ws1"

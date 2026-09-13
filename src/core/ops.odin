@@ -844,6 +844,24 @@ Scroll_Viewport :: proc(m: ^Manager, dir: int) -> bool {
     return Scroll_Output_Viewport(m, Active_Output(m), dir)
 }
 
+// Reveal_Scroll_Client focuses a preview target and aligns its column fully in
+// the owning output's viewport. The X layer handles rendering and notifications.
+Reveal_Scroll_Client :: proc(m: ^Manager, cl: ^Client) -> bool {
+    if m == nil || cl == nil || cl.Ws == nil || cl.Out == nil || cl.Floating || cl.Fullscreen || cl.Maximized {
+        return false
+    }
+    ws := cl.Ws
+    if cl.Out.Current != ws { return false }
+    ci, col, _ := column_of(ws, cl)
+    if col == nil { return false }
+    p := compute_params(m.Cfg, cl.Out.Geom, len(ws.Cols), cl.Out.Reserved)
+    next := ensure_workspace_col_visible(ws.ViewportX, ws, p, ci)
+    changed := next != ws.ViewportX || m.Focused != cl
+    ws.ViewportX = next
+    Focus_Client(m, cl)
+    return changed
+}
+
 // ----------------------------------------------------------------------------
 // Unmanage
 // ----------------------------------------------------------------------------

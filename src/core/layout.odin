@@ -32,6 +32,7 @@ package core
 HIDE_X :: -20000 // park off-screen windows here (kept within X int16 range)
 PAGE_COLS :: 2 // columns that fit on screen before the strip starts scrolling
 TAB_BAR_HEIGHT :: i32(24)
+SCROLL_PREVIEW_WIDTH :: i32(20)
 
 Layout_Params :: struct {
     WorkX, WorkY: i32,
@@ -140,6 +141,124 @@ ensure_workspace_col_visible :: proc(vp: i32, ws: ^Workspace, p: Layout_Params, 
     return clamp_workspace_viewport(next, ws, p)
 }
 
+Scroll_Preview_Side :: enum u8 { None, Left, Right }
+
+Scroll_Preview :: struct {
+    Side:   Scroll_Preview_Side,
+    Client: ^Client,
+    Geom:   Rect,
+}
+
+// scroll_preview_columns finds the nearest completely hidden column on each
+// side of the current viewport. Previews belong only to the overflowing tiled
+// strip; fullscreen and maximize deliberately suppress them.
+scroll_preview_columns :: proc(ws: ^Workspace, p: Layout_Params) -> (left, right: int) {
+    left, right = -1, -1
+    if ws == nil || len(ws.Cols) == 0 || workspace_strip_total(ws, p) <= p.WorkW { return }
+    if ws.Focus != nil && ws.Focus.Fullscreen { return }
+    for col in ws.Cols { if column_has_maximized(col) { return } }
+
+    work_left := p.WorkX
+    work_right := p.WorkX + p.WorkW
+    for col, ci in ws.Cols {
+        x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, ci)
+        w := column_width(p, col)
+        if x + w <= work_left {
+            left = ci
+        } else if x >= work_right && right < 0 {
+            right = ci
+        }
+    }
+    return
+}
+
+// scroll_normal_col_rect reserves the exposed edge of one neighboring window
+// plus the normal inner gap
+// at each occupied edge, then fits the fully visible page columns into the
+// remaining center area. Logical strip widths and ViewportX stay unchanged;
+// this is only the rendered page rectangle.
+scroll_normal_col_rect :: proc(ws: ^Workspace, p: Layout_Params, wanted: int) -> (x, w: i32, visible: bool) {
+    if ws == nil || wanted < 0 || wanted >= len(ws.Cols) { return 0, 0, false }
+    left_preview, right_preview := scroll_preview_columns(ws, p)
+    main_x := p.WorkX
+    main_w := p.WorkW
+    if left_preview >= 0 {
+        reserve := min(SCROLL_PREVIEW_WIDTH, column_width(p, ws.Cols[left_preview])) + p.Inner
+        main_x += reserve
+        main_w -= reserve
+    }
+    if right_preview >= 0 {
+        reserve := min(SCROLL_PREVIEW_WIDTH, column_width(p, ws.Cols[right_preview])) + p.Inner
+        main_w -= reserve
+    }
+    if main_w <= 0 { return 0, 0, false }
+
+    work_right := p.WorkX + p.WorkW
+    count, ordinal := 0, -1
+    for col, ci in ws.Cols {
+        logical_x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, ci)
+        logical_w := column_width(p, col)
+        if logical_x < p.WorkX || logical_x + logical_w > work_right { continue }
+        if ci == wanted { ordinal = count }
+        count += 1
+    }
+    if ordinal < 0 || count == 0 { return 0, 0, false }
+    w = Resolve_Page_Width(main_w, p.Inner, count)
+    x = main_x + i32(ordinal) * (w + p.Inner)
+    return x, w, true
+}
+
+// Scroll_Previews returns the exposed edge regions of the actual neighboring
+// clients produced by the most recent Arrange_All pass. Stacked columns yield
+// one hit zone per visible row; tabbed columns yield only their active client.
+Scroll_Previews :: proc(m: ^Manager, o: ^Output) -> [dynamic]Scroll_Preview {
+    result := make([dynamic]Scroll_Preview, 0, 4)
+    if m == nil || o == nil || o.Current == nil { return result }
+    ws := o.Current
+    p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+    left, right := scroll_preview_columns(ws, p)
+    indices := [2]int{left, right}
+    for ci in indices {
+        if ci < 0 { continue }
+        side := Scroll_Preview_Side.Left
+        zone_x := p.WorkX
+        if ci == right {
+            side = .Right
+            zone_x = p.WorkX + p.WorkW - SCROLL_PREVIEW_WIDTH
+        }
+        zone_w := min(SCROLL_PREVIEW_WIDTH, column_width(p, ws.Cols[ci]))
+        for cl in ws.Cols[ci].Wins {
+            if cl.Geom.X <= HIDE_X { continue }
+            top := max(p.WorkY, cl.Geom.Y - cl.Border)
+            bottom := min(p.WorkY + p.WorkH, cl.Geom.Y + cl.Geom.H + cl.Border)
+            if bottom <= top { continue }
+            append(&result, Scroll_Preview{
+                Side = side,
+                Client = cl,
+                Geom = Rect{X = zone_x, Y = top, W = zone_w, H = bottom - top},
+            })
+        }
+    }
+    return result
+}
+
+Scroll_Preview_At_Point :: proc(m: ^Manager, x, y: i32) -> (preview: Scroll_Preview, ok: bool) {
+    if m == nil { return {}, false }
+    for o in m.Outputs {
+        previews := Scroll_Previews(m, o)
+        for p in previews {
+            r := p.Geom
+            if x >= r.X && x < r.X + r.W && y >= r.Y && y < r.Y + r.H {
+                preview = p
+                delete(previews)
+                return preview, true
+            }
+        }
+        delete(previews)
+    }
+    return {}, false
+}
+
 // Tab_Bar_Rect returns the root-coordinate strip reserved above a tabbed
 // column. The X layer uses it to draw decorations without duplicating layout
 // calculations.
@@ -151,6 +270,12 @@ Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) ->
     if p.ColW <= 0 || p.WorkH <= 1 { return {}, false }
     col_w := column_width(p, ws.Cols[col_index])
     x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, col_index)
+    preview_left, preview_right := scroll_preview_columns(ws, p)
+    if (preview_left >= 0 || preview_right >= 0) && !column_has_maximized(ws.Cols[col_index]) {
+        if rendered_x, rendered_w, visible := scroll_normal_col_rect(ws, p, col_index); visible {
+            x, col_w = rendered_x, rendered_w
+        }
+    }
     // Top-level X windows cannot be clipped to an individual RandR output.
     // Do not create a decoration for a column parked outside its own output,
     // otherwise that decoration can appear on an adjacent monitor.
@@ -352,12 +477,29 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
     if n_cols > 0 && p.ColW > 0 && p.WorkH > 0 {
         base_x := p.WorkX - ws.ViewportX
         hide := Rect { X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H }
+        preview_left, preview_right := scroll_preview_columns(ws, p)
         for ci in 0 ..< n_cols {
             col := ws.Cols[ci]
             nw := len(col.Wins)
             if nw == 0 { continue }
             col_w := column_width(p, col)
             col_left := base_x + workspace_col_left(ws, p, ci)
+            is_preview := ci == preview_left || ci == preview_right
+            if ci == preview_left {
+                col_left = p.WorkX + min(SCROLL_PREVIEW_WIDTH, col_w) - col_w
+            } else if ci == preview_right {
+                col_left = p.WorkX + p.WorkW - min(SCROLL_PREVIEW_WIDTH, col_w)
+            } else if (preview_left >= 0 || preview_right >= 0) && !column_has_maximized(col) {
+                rendered_x, rendered_w, visible := scroll_normal_col_rect(ws, p, ci)
+                if !visible {
+                    for cl in col.Wins {
+                        cl.Geom = hide
+                        cl.Border = p.Border
+                    }
+                    continue
+                }
+                col_left, col_w = rendered_x, rendered_w
+            }
 
             // A maximized column is one full page. While scrolling between it
             // and a neighbor, translate the complete maximized rectangle: the
@@ -383,7 +525,7 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             // RandR outputs share one root window, so a normal column outside
             // this output would otherwise remain visible on a neighbouring one.
             // Park normal columns unless their complete tile belongs to this page.
-            if col_left < p.WorkX || col_left + col_w > p.WorkX + p.WorkW {
+            if !is_preview && (col_left < p.WorkX || col_left + col_w > p.WorkX + p.WorkW) {
                 for cl in col.Wins {
                     cl.Geom = hide
                     cl.Border = p.Border

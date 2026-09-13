@@ -91,7 +91,9 @@ wm_startup :: proc() -> bool {
         EVENT_MASK_SUBSTRUCTURE_NOTIFY |
         EVENT_MASK_STRUCTURE_NOTIFY |
         EVENT_MASK_KEY_PRESS |
-        EVENT_MASK_KEY_RELEASE,
+        EVENT_MASK_KEY_RELEASE |
+        EVENT_MASK_POINTER_MOTION |
+        EVENT_MASK_ENTER_WINDOW,
     )
     cookie := xcb_change_window_attributes_checked(g_wm.conn, g_wm.root, CW_EVENT_MASK, &mask)
     if err := xcb_request_check(g_wm.conn, cookie); err != nil {

@@ -53,6 +53,7 @@ main :: proc() {
     test_multi_output_scrolling()
     test_layout_geometry()
     test_scrolling()
+    test_scroll_previews()
     test_two_columns_fit()
     test_arrange_hidden()
     test_move_to_ws()
@@ -741,8 +742,8 @@ test_multi_output_scrolling :: proc() {
     right_third := add_tiled(m, 202)
 
     c.Arrange_All(m)
-    eq(left_third.Geom.X, left.Geom.X + c.HIDE_X, "left overflow column cannot spill onto right output")
-    eq(right_third.Geom.X, right.Geom.X + c.HIDE_X, "right overflow column is parked off-screen")
+    eq(left_third.Geom.X, -26, "left output exposes the edge of its right neighbor")
+    eq(right_third.Geom.X, 1894, "right output exposes the edge of its right neighbor")
     ok(right_first.Geom.X >= right.Geom.X, "visible right column stays on its own output")
 
     eq(left.Current.ViewportX, 0, "left viewport starts independently at zero")
@@ -752,7 +753,7 @@ test_multi_output_scrolling :: proc() {
     eq(right.Current.ViewportX, 0, "right output viewport remains unchanged")
     eq(c.Active_Output(m), right, "pointer scrolling does not steal active output")
     c.Arrange_All(m)
-    eq(left_first.Geom.X, left.Geom.X + c.HIDE_X, "scrolled-away left column cannot appear on another output")
+    eq(left_first.Geom.X, -1878, "left output exposes its left neighbor after scrolling")
     ok(left_third.Geom.X >= left.Geom.X && left_third.Geom.X < left.Geom.X + left.Geom.W,
        "newly visible left column stays within its output")
 }
@@ -826,10 +827,71 @@ test_scrolling :: proc() {
     c.Focus_Client(m, d)
     c.Ensure_Active_Focus_Visible(m)
     c.Arrange_All(m)
-    eq(d.Geom.X, 966, "right column drawn at work_x + strip_x - viewport + border")
-    eq(a.Geom.X, c.HIDE_X, "scrolled-off column is parked instead of leaking beyond the output")
+    eq(d.Geom.X, 980, "right column leaves a normal gap beside the left preview")
+    eq(a.Geom.X, -918, "scrolled-off column leaves a narrow left preview")
     _, first_bar_visible := c.Tab_Bar_Rect(m, c.Active_Output(m), ws, 0)
     ok(!first_bar_visible, "scrolled-off column does not expose a tab decoration")
+}
+
+test_scroll_previews :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    a := add_tiled(m, 100)
+    b := add_tiled(m, 101)
+    d := add_tiled(m, 102)
+
+    c.Arrange_All(m)
+    previews := c.Scroll_Previews(m, c.Active_Output(m))
+    eq(len(previews), 1, "first strip page has one right preview")
+    if len(previews) == 1 {
+        eq(previews[0].Side, c.Scroll_Preview_Side.Right, "preview points right")
+        eq(previews[0].Client, d, "right preview targets nearest hidden client")
+        eq(previews[0].Geom, c.Rect{X = 1892, Y = 8, W = 20, H = 1064}, "right preview uses actual workarea edge")
+        eq(d.Geom.W, i32(944), "right neighbor keeps its full window width")
+        ok(d.Geom.X + d.Geom.W > 1920, "right neighbor continues naturally beyond the screen")
+    }
+    delete(previews)
+
+    preview, hit := c.Scroll_Preview_At_Point(m, 1900, 500)
+    ok(hit && preview.Client == d, "point on exposed right edge resolves preview target")
+    ok(c.Reveal_Scroll_Client(m, d), "reveal focuses and scrolls to right preview target")
+    eq(m.Focused, d, "revealed preview target becomes focused")
+    eq(ws.ViewportX, 956, "revealed target aligns the next strip page")
+    c.Arrange_All(m)
+    previews = c.Scroll_Previews(m, c.Active_Output(m))
+    eq(len(previews), 1, "last strip page has one left preview")
+    if len(previews) == 1 {
+        eq(previews[0].Side, c.Scroll_Preview_Side.Left, "preview points left")
+        eq(previews[0].Client, a, "left preview targets nearest hidden client")
+        eq(previews[0].Geom, c.Rect{X = 8, Y = 8, W = 20, H = 1064}, "left preview uses actual workarea edge")
+        eq(a.Geom.W, i32(944), "left neighbor keeps its full window width")
+        ok(a.Geom.X < 0, "left neighbor continues naturally beyond the screen")
+    }
+    delete(previews)
+
+    // A page with hidden columns on both sides reserves both preview strips.
+    // The visible tiles reflow between them and retain the configured inner
+    // gap instead of being covered by either preview.
+    e := add_tiled(m, 103)
+    c.Arrange_All(m)
+    previews = c.Scroll_Previews(m, c.Active_Output(m))
+    eq(len(previews), 2, "middle strip page exposes previews on both sides")
+    if len(previews) == 2 {
+        eq(previews[0].Client, a, "left preview still targets nearest hidden client")
+        eq(previews[1].Client, e, "right preview targets nearest hidden client")
+        eq(b.Geom.X - b.Border - (previews[0].Geom.X + previews[0].Geom.W), i32(8), "left preview keeps the normal inner gap")
+        eq(previews[1].Geom.X - (d.Geom.X + d.Geom.W + d.Border), i32(8), "right preview keeps the normal inner gap")
+    }
+    delete(previews)
+
+    c.Focus_Client(m, d)
+    d.Fullscreen = true
+    c.Arrange_All(m)
+    previews = c.Scroll_Previews(m, c.Active_Output(m))
+    eq(len(previews), 0, "fullscreen suppresses scroll previews")
+    delete(previews)
 }
 
 // two columns fit on screen exactly, so the viewport never pans
@@ -1116,7 +1178,7 @@ test_dock_reserved_ensure_visible :: proc() {
     eq(ws.ViewportX, 856, "viewport pan accounts for the side reservation")
     c.Arrange_All(m)
     ok(d.Geom.X + d.Geom.W <= 1920, "focused column fully on screen")
-    eq(d.Geom.X, 1066, "drawn at work_x 208 + strip 1712 - viewport 856 + border 2")
+    eq(d.Geom.X, 1080, "drawn after reserving a left preview and its normal gap")
 }
 
 // ----------------------------------------------------------------------------
