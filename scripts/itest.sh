@@ -148,6 +148,29 @@ if wait_tiled_n 2; then pass "spawn second terminal -> 2 columns"; else fail "sp
 # fill-up-to-2: both columns fit on screen together and the viewport never pans
 if wait_for two_side_by_side; then pass "two columns tile side-by-side on screen (no scroll)"; else fail "two side-by-side"; fi
 
+# Button2 over the left managed client maximizes to the work area, advertises
+# both EWMH maximize atoms, then restores the exact two-column layout.
+xdotool mousemove 300 400 click 2 >/dev/null 2>&1
+if wait_geom "$first" "1260x780+10+10"; then pass "middle click maximizes a tiled client"; else fail "middle-click maximize"; fi
+max_state=$(xprop -id "$first" _NET_WM_STATE 2>/dev/null)
+if [[ $max_state == *"_NET_WM_STATE_MAXIMIZED_VERT"* && $max_state == *"_NET_WM_STATE_MAXIMIZED_HORZ"* ]]; then
+  pass "middle-click maximize publishes both EWMH atoms"
+else
+  fail "middle-click maximize EWMH state ($max_state)"
+fi
+# The maximized column is a full-width strip page, not an overlay. Scrolling
+# right parks it and exposes the following normal-width column.
+xdotool keydown super click 5 keyup super >/dev/null 2>&1
+if wait_geom "$first" "1260x780+-626+10" && xtops | grep -q '624x780+646+10'; then
+  pass "scroll shows the maximized page beside its displaced neighbor"
+else
+  fail "scroll past maximized page"
+fi
+xdotool keydown super click 4 keyup super >/dev/null 2>&1
+wait_geom "$first" "1260x780+10+10" || fail "scroll back to maximized page"
+xdotool click 2 >/dev/null 2>&1
+if wait_for two_side_by_side; then pass "second middle click restores tiled geometry"; else fail "middle-click restore"; fi
+
 # ---- 2b. tiled Super+drag shows four zones and drops vertically --------------
 before_overlay=$(unnamed_children)
 xdotool mousemove 950 400 keydown Super_L mousedown 1 >/dev/null 2>&1
@@ -484,7 +507,9 @@ fi
 sup=$(xprop -root _NET_SUPPORTED 2>/dev/null)
 if [ -n "$sup" ] && echo "$sup" | grep -q _NET_CLIENT_LIST \
    && echo "$sup" | grep -q _NET_ACTIVE_WINDOW \
-   && echo "$sup" | grep -q _NET_WM_STATE_FULLSCREEN; then
+   && echo "$sup" | grep -q _NET_WM_STATE_FULLSCREEN \
+   && echo "$sup" | grep -q _NET_WM_STATE_MAXIMIZED_VERT \
+   && echo "$sup" | grep -q _NET_WM_STATE_MAXIMIZED_HORZ; then
   pass "ewmh: _NET_SUPPORTED claims the implemented subset"
 else
   fail "ewmh: _NET_SUPPORTED subset"

@@ -47,6 +47,7 @@ main :: proc() {
     test_unmanage()
     test_floating()
     test_fullscreen()
+    test_maximize()
     test_tabbed_layout()
     test_multi_output()
     test_multi_output_scrolling()
@@ -495,6 +496,97 @@ test_fullscreen :: proc() {
     ok(b.Fullscreen, "b fullscreen again")
     ok(!c.Focus_Dir(m, .Left), "no focus nav out of fullscreen")
     ok(!c.Move_Dir(m, .Left), "no move out of fullscreen")
+}
+
+test_maximize :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+
+    a := add_tiled(m, 100)
+    b := add_tiled(m, 101)
+    c.Arrange_All(m)
+    original := a.Geom
+    c.Focus_Client(m, a)
+    ok(c.Toggle_Maximized(a), "maximize tiled client")
+    ok(a.Maximized, "tiled client records maximized state")
+    ok(!a.Floating, "maximize preserves tiled membership")
+    eq(a.MaxRestoreGeom, original, "maximize snapshots tiled geometry")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 1900, H = 1060}, "maximized tiled client fills usable area")
+    ok(m.ByXid[101].Geom.X <= c.HIDE_X, "maximized tiled column displaces its neighbor off-screen")
+    ok(c.Scroll_Viewport(m, 1), "neighbor remains reachable by scrolling")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = -946, Y = 10, W = 1900, H = 1060}, "scrolling translates but does not resize the maximized column")
+    ok(m.ByXid[101].Geom.X >= 0, "scrolling reveals the displaced neighbor")
+    ok(c.Scroll_Viewport(m, -1), "scroll back to maximized column")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 1900, H = 1060}, "layout reflow preserves maximize override")
+    ok(c.Toggle_Maximized(a), "restore tiled client")
+    c.Arrange_All(m)
+    eq(a.Geom, original, "tiled client restores exact layout geometry")
+
+    c.Focus_Client(m, b)
+    ok(c.Set_Maximized(b, true), "maximize right tiled client")
+    c.Ensure_Active_Focus_Visible(m)
+    c.Arrange_All(m)
+    eq(b.Geom, c.Rect{X = 10, Y = 10, W = 1900, H = 1060}, "right maximized column expands left to fill its page")
+    ok(c.Scroll_Viewport(m, -1), "scroll left from right maximized column")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 944, H = 1060}, "left neighbor remains visible beside right maximized page")
+    eq(b.Geom, c.Rect{X = 966, Y = 10, W = 1900, H = 1060}, "right maximized page stays full-width while partially visible")
+    c.Set_Maximized(b, false)
+    ws.ViewportX = 0
+    c.Focus_Client(m, a)
+
+    c.Set_Floating(m, a, true)
+    a.FloatingRect = c.Rect{X = 123, Y = 87, W = 701, H = 509}
+    c.Arrange_All(m)
+    float_original := a.Geom
+    ok(c.Set_Maximized(a, true), "maximize floating client")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 1900, H = 1060}, "maximized floater fills usable area")
+    a.FloatingRect = c.Rect{X = 1, Y = 2, W = 3, H = 4}
+    ok(c.Set_Maximized(a, false), "restore floating client")
+    c.Arrange_All(m)
+    eq(a.FloatingRect, c.Rect{X = 123, Y = 87, W = 701, H = 509}, "floating restore preserves exact user rect")
+    eq(a.Geom, float_original, "floating client restores exact visible geometry")
+
+    a.Fullscreen = true
+    ok(!c.Toggle_Maximized(a), "fullscreen blocks maximize toggle")
+    ok(!a.Maximized, "fullscreen remains distinct from maximized")
+    a.Fullscreen = false
+
+    dock := add_dock(m, 300, c.Insets{Top = 24, Left = 40}, c.Rect{X = 0, Y = 0, W = 1920, H = 24})
+    _ = dock
+    ok(c.Set_Maximized(a, true), "maximize with reserved work area")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 50, Y = 34, W = 1860, H = 1036}, "maximize respects gaps, borders, and dock struts")
+
+    c.Switch_WS_Id(m, 2)
+    c.Arrange_All(m)
+    ok(a.Geom.X <= c.HIDE_X, "maximized client is hidden with its workspace")
+    c.Switch_WS_Id(m, 1)
+    c.Arrange_All(m)
+    ok(a.Maximized, "maximize state survives workspace switch")
+    eq(a.Geom, c.Rect{X = 50, Y = 34, W = 1860, H = 1036}, "maximized geometry returns with workspace")
+    eq(a.Ws, ws, "maximize does not change workspace ownership")
+
+    multi := c.New_Manager()
+    defer c.Destroy_Manager(multi)
+    specs := []c.Output_Spec{
+        {Name = "left", Geom = c.Rect{X = 0, Y = 0, W = 1920, H = 1080}, Primary = true},
+        {Name = "right", Geom = c.Rect{X = 1920, Y = 0, W = 1280, H = 1024}},
+    }
+    c.Reconcile_Outputs(multi, specs)
+    moved := add_tiled(multi, 400)
+    c.Arrange_All(multi)
+    c.Set_Maximized(moved, true)
+    ok(c.Move_Focused_To_Output_Rel(multi, 1), "move maximized client to another output")
+    c.Arrange_All(multi)
+    ok(moved.Maximized, "maximize state survives output move")
+    eq(moved.Geom, c.Rect{X = 1930, Y = 10, W = 1260, H = 1004}, "maximize recomputes destination output geometry")
 }
 
 test_tabbed_layout :: proc() {

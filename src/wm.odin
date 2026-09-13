@@ -203,8 +203,6 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
         return
     }
 
-    adopt_pre_fullscreen(cl) // inherit _NET_WM_STATE_FULLSCREEN set before mapping
-
     // A MapRequest has no coordinates of its own. Its caller queries the root
     // pointer and supplies the output so normal clients open where the pointer
     // is. Docks retain their geometry-based placement path above.
@@ -225,6 +223,7 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
         floating = floating || fl
     }
     c.Add_Managed(m, ws, cl, floating, tab_target)
+    adopt_pre_wm_state(cl) // inherit fullscreen/maximize set before mapping
     ewmh_client_managed(cl) // _NET_CLIENT_LIST + _NET_WM_DESKTOP
     reflow()
     raise_docks() // the new window mapped on top of the stack — docks go above
@@ -414,8 +413,7 @@ unmanage :: proc(cl: ^c.Client) {
 // key handling
 // ---------------------------------------------------------------------------
 
-// grab_all_keys (re)installs the root grabs for every binding. The four
-// lock/numlock variants follow the recipe in docs/REFERENCE_NOTES.md §2/§3.
+// grab_all_keys (re)installs the root grabs for every binding.
 grab_all_keys :: proc() {
     xcb_ungrab_key(g_wm.conn, 0, g_wm.root, MOD_MASK_ANY) // keycode 0 == AnyKey
     // Resolve first so explicit combinations can take precedence over the
@@ -893,7 +891,20 @@ grab_client_buttons :: proc(xid: u32) {
     mask := u16(EVENT_MASK_BUTTON_PRESS | EVENT_MASK_BUTTON_RELEASE | EVENT_MASK_POINTER_MOTION)
     xcb_ungrab_button(g_wm.conn, 0, xid, MOD_MASK_ANY)
     xcb_grab_button(g_wm.conn, 0, xid, mask, GRAB_MODE_SYNC, GRAB_MODE_ASYNC, 0, 0, 1, MOD_MASK_ANY)
+    xcb_grab_button(g_wm.conn, 0, xid, mask, GRAB_MODE_SYNC, GRAB_MODE_ASYNC, 0, 0, 2, MOD_MASK_ANY)
     xcb_grab_button(g_wm.conn, 0, xid, mask, GRAB_MODE_SYNC, GRAB_MODE_ASYNC, 0, 0, 3, MOD_MASK_ANY)
+}
+
+toggle_client_maximized :: proc(cl: ^c.Client) -> bool {
+    if cl == nil || cl.Dock || cl.Fullscreen || !on_current_ws(cl) { return false }
+    old := g_wm.m.Focused
+    if old != cl { c.Focus_Client(g_wm.m, cl) }
+    if !c.Toggle_Maximized(cl) { return false }
+    reflow()
+    raise_focused()
+    ipc_broadcast_focus_change(old, cl)
+    ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
+    return true
 }
 
 regrab_client_buttons :: proc() {
@@ -919,6 +930,10 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
         return
     }
     if tab := tab_client(ev.event); tab != nil {
+        if ev.detail == 2 {
+            toggle_client_maximized(tab)
+            return
+        }
         old := g_wm.m.Focused
         c.Focus_Client(g_wm.m, tab)
         raise_focused()
@@ -941,6 +956,15 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
         xcb_allow_events(g_wm.conn, ALLOW_REPLAY_POINTER, ev.time)
         return
     }
+    if ev.detail == 2 {
+        if toggle_client_maximized(cl) {
+            xcb_allow_events(g_wm.conn, ALLOW_ASYNC_POINTER, ev.time)
+        } else {
+            xcb_allow_events(g_wm.conn, ALLOW_REPLAY_POINTER, ev.time)
+        }
+        xcb_flush(g_wm.conn)
+        return
+    }
     old := g_wm.m.Focused
     if on_current_ws(cl) && old != cl {
         c.Focus_Client(g_wm.m, cl)
@@ -948,7 +972,7 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
         ipc_broadcast_focus_change(old, cl)
     }
     modified := g_wm.primary_mod != 0 && clean & g_wm.primary_mod == g_wm.primary_mod
-    floating_drag := modified && cl.Floating && (ev.detail == 1 || ev.detail == 3)
+    floating_drag := modified && cl.Floating && !cl.Maximized && (ev.detail == 1 || ev.detail == 3)
     tiled_drag := modified && !cl.Floating && ev.detail == 1
     if floating_drag || tiled_drag {
         g_wm.mouse_client = cl

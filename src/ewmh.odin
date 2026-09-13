@@ -17,13 +17,13 @@ package main
 //
 //   Client properties (written by the WM):
 //     _NET_WM_DESKTOP             owning workspace, 0-based
-//     _NET_WM_STATE               FULLSCREEN while the client is fullscreen
+//     _NET_WM_STATE               FULLSCREEN and/or MAXIMIZED_{VERT,HORZ}
 //     WM_STATE                    Normal once mapped, Withdrawn on unmanage
 //
 //   Client messages accepted (sent to the root, EWMH convention; the target
 //   window travels in the message's window field):
 //     _NET_ACTIVE_WINDOW          focus request from pagers/launchers/tools
-//     _NET_WM_STATE               fullscreen add/remove/toggle (mpv, browsers…)
+//     _NET_WM_STATE               fullscreen/maximize add/remove/toggle
 //     _NET_CURRENT_DESKTOP        workspace switch from pagers/wmctrl
 //     _NET_CLOSE_WINDOW           polite close request
 //
@@ -33,7 +33,7 @@ package main
 // Not implemented (deliberately): _NET_CLIENT_LIST_STACKING (we do not track a
 // global z-order), desktop names, icon geometry, property-change driven state
 // flips (EWMH mandates the ClientMessage).
-// Struts and the dock window type ARE read (see docs/REFERENCE_NOTES.md §10):
+// Struts and the dock window type ARE read:
 // only _NET_WM_WINDOW_TYPE_DOCK windows contribute, only their struts
 // (_NET_WM_STRUT_PARTIAL preferred) shrink the work area, and the partial
 // form's begin/end edge ranges are ignored on our single full-screen output.
@@ -53,7 +53,7 @@ Ewmh_State :: struct {
     last_desktop: i32, // current desktop index advertised (-1 = unset)
     last_count:   i32, // _NET_NUMBER_OF_DESKTOPS advertised (-1 = unset)
     win_desktop: map[u32]u32, // xid -> last _NET_WM_DESKTOP written
-    win_fs:       map[u32]bool, // xid -> fullscreen state last written
+    win_state:    map[u32]u8, // xid -> fullscreen/maximized state bits last written
     win_mapped:   map[u32]bool, // xid -> WM_STATE Normal has been written
     workarea:   []u32, // last _NET_WORKAREA written (nil = never)
 }
@@ -78,7 +78,7 @@ ewmh_init :: proc() {
     st.last_desktop = -1
     st.last_count = -1
     st.win_desktop = make(map[u32]u32)
-    st.win_fs = make(map[u32]bool)
+    st.win_state = make(map[u32]u8)
     st.win_mapped = make(map[u32]bool)
 
     // _NET_SUPPORTING_WM_CHECK child: a tiny, unmapped InputOutput window that
@@ -116,6 +116,8 @@ ewmh_init :: proc() {
         atom("_NET_WM_DESKTOP"),
         atom("_NET_WM_STATE"),
         atom("_NET_WM_STATE_FULLSCREEN"),
+        atom("_NET_WM_STATE_MAXIMIZED_VERT"),
+        atom("_NET_WM_STATE_MAXIMIZED_HORZ"),
         atom("_NET_WM_WINDOW_TYPE"),
         atom("_NET_WM_WINDOW_TYPE_DOCK"),
         atom("_NET_WM_STRUT"),
@@ -144,7 +146,7 @@ ewmh_free :: proc() {
         st.check_win = 0
     }
     if st.win_desktop != nil do delete(st.win_desktop)
-    if st.win_fs != nil do delete(st.win_fs)
+    if st.win_state != nil do delete(st.win_state)
     if st.win_mapped != nil do delete(st.win_mapped)
     if st.workarea != nil do delete(st.workarea)
     st.last_active = 0
@@ -254,20 +256,28 @@ ewmh_push_client :: proc(cl: ^c.Client) {
     set_prop32(g_wm.conn, cl.Xid, atom("_NET_WM_DESKTOP"), atom("CARDINAL"), []u32{idx})
 }
 
-// ewmh_push_fs mirrors the model's fullscreen flag into the client's
-// _NET_WM_STATE (an empty replace removes the property, per EWMH).
-ewmh_push_fs :: proc(cl: ^c.Client) {
+// ewmh_push_state mirrors fullscreen and maximize into one composited
+// _NET_WM_STATE property. Both maximize atoms are always published together.
+ewmh_push_state :: proc(cl: ^c.Client) {
     st := &g_wm.ewmh
     if cl == nil { return }
-    if cached, ok := st.win_fs[cl.Xid]; ok && cached == cl.Fullscreen { return }
-    st.win_fs[cl.Xid] = cl.Fullscreen
+    bits := u8(0)
+    if cl.Fullscreen { bits |= 1 }
+    if cl.Maximized { bits |= 2 }
+    if cached, ok := st.win_state[cl.Xid]; ok && cached == bits { return }
+    st.win_state[cl.Xid] = bits
+    states: [3]u32
+    n := 0
     if cl.Fullscreen {
-        fs := [1]u32{atom("_NET_WM_STATE_FULLSCREEN")}
-        set_prop32(g_wm.conn, cl.Xid, atom("_NET_WM_STATE"), atom("ATOM"), fs[:])
-    } else {
-        // remove: an empty slice makes set_prop32 delete the property
-        set_prop32(g_wm.conn, cl.Xid, atom("_NET_WM_STATE"), atom("ATOM"), []u32{})
+        states[n] = atom("_NET_WM_STATE_FULLSCREEN")
+        n += 1
     }
+    if cl.Maximized {
+        states[n] = atom("_NET_WM_STATE_MAXIMIZED_VERT")
+        states[n + 1] = atom("_NET_WM_STATE_MAXIMIZED_HORZ")
+        n += 2
+    }
+    set_prop32(g_wm.conn, cl.Xid, atom("_NET_WM_STATE"), atom("ATOM"), states[:n])
 }
 
 // ewmh_set_wm_state writes ICCCM WM_STATE (Normal/Withdrawn + no icon window).
@@ -298,7 +308,7 @@ ewmh_client_unmanaged :: proc(cl: ^c.Client) {
         ewmh_set_wm_state(cl, WM_STATE_WITHDRAWN)
     }
     delete_key(&st.win_desktop, cl.Xid)
-    delete_key(&st.win_fs, cl.Xid)
+    delete_key(&st.win_state, cl.Xid)
     delete_key(&st.win_mapped, cl.Xid)
     ewmh_push_client_list()
 }
@@ -320,7 +330,7 @@ ewmh_pulse :: proc() {
     ewmh_push_workarea()
     for cl in m.Clients {
         ewmh_push_client(cl)
-        ewmh_push_fs(cl)
+        ewmh_push_state(cl)
     }
 }
 
@@ -410,45 +420,41 @@ ewmh_activate_popup :: proc(xid: u32) {
     xcb_flush(g_wm.conn)
 }
 
-// ewmh_state_request applies a _NET_WM_STATE add/remove/toggle for fullscreen.
-// Other state atoms (maximized, hidden, …) are ignored — claiming them in
-// _NET_SUPPORTED would only set expectations we do not keep.
+// ewmh_state_request applies fullscreen and paired maximize requests. Maximize
+// may be requested for an inactive workspace; fullscreen retains skarwm's
+// visible-focused-window invariant.
 ewmh_state_request :: proc(ev: ^Client_Message_Event) {
     m := g_wm.m
     cl := m.ByXid[ev.window]
     if cl == nil { return }
-    if cl.Out == nil || cl.Ws != cl.Out.Current {
-        // Fullscreen geometry only exists for the visible workspace's focus;
-        // a request for a hidden window has no meaning here.
-        return
-    }
-
     action := ev.data.data32[0]
+    if action > 2 { return }
     prop1 := ev.data.data32[1]
     prop2 := ev.data.data32[2]
     fs := atom("_NET_WM_STATE_FULLSCREEN")
-    if prop1 != fs && prop2 != fs { return }
+    max_v := atom("_NET_WM_STATE_MAXIMIZED_VERT")
+    max_h := atom("_NET_WM_STATE_MAXIMIZED_HORZ")
+    requests_fs := prop1 == fs || prop2 == fs
+    requests_max := prop1 == max_v || prop2 == max_v || prop1 == max_h || prop2 == max_h
+    if !requests_fs && !requests_max { return }
 
-    want: bool
-    switch action {
-    case 0: // _NET_WM_STATE_REMOVE
-        want = false
-    case 1: // _NET_WM_STATE_ADD
-        want = true
-    case 2: // _NET_WM_STATE_TOGGLE
-        want = !cl.Fullscreen
-    case:
-        return
-    }
-    if want == cl.Fullscreen { return }
-
-    // Invariant: while shown, the fullscreen window is the workspace focus.
+    changed := false
     old_focus := m.Focused
-    if want && m.Focused != cl {
-        c.Focus_Client(m, cl)
+    if requests_max {
+        want_max := action == 1 || (action == 2 && !cl.Maximized)
+        changed = c.Set_Maximized(cl, want_max) || changed
     }
-    cl.Fullscreen = want
-    if want { raise_focused() }
+    if requests_fs && cl.Out != nil && cl.Ws == cl.Out.Current {
+        want_fs := action == 1 || (action == 2 && !cl.Fullscreen)
+        if want_fs != cl.Fullscreen {
+            // Invariant: while shown, the fullscreen window is workspace focus.
+            if want_fs && m.Focused != cl { c.Focus_Client(m, cl) }
+            cl.Fullscreen = want_fs
+            changed = true
+        }
+    }
+    if !changed { return }
+    if cl.Fullscreen { raise_focused() }
     reflow()
     ipc_broadcast_focus_change(old_focus, m.Focused)
 }
@@ -493,20 +499,23 @@ ewmh_announce_take_focus :: proc(cl: ^c.Client) {
     send_client_message(cl.Xid, atom("WM_PROTOCOLS"), atom("WM_TAKE_FOCUS"), CURRENT_TIME)
 }
 
-// adopt_pre_fullscreen lets manage() inherit a client that was already
-// fullscreen when we met it (WM restart with a fullscreen app, or an app that
-// set _NET_WM_STATE before its first map).
-adopt_pre_fullscreen :: proc(cl: ^c.Client) {
+// adopt_pre_wm_state inherits fullscreen/maximize state present before manage
+// (for example across a WM restart).
+adopt_pre_wm_state :: proc(cl: ^c.Client) {
     fs := atom("_NET_WM_STATE_FULLSCREEN")
+    max_v := atom("_NET_WM_STATE_MAXIMIZED_VERT")
+    max_h := atom("_NET_WM_STATE_MAXIMIZED_HORZ")
     data, ok := get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_STATE"), atom("ATOM"))
     if !ok { return }
     defer delete(data)
     if len(data) % 4 != 0 { return }
     vals := ([^]u32)(raw_data(data))[:len(data) / 4]
+    has_fs, has_v, has_h := false, false, false
     for v in vals {
-        if v == fs {
-            cl.Fullscreen = true
-            return
-        }
+        if v == fs { has_fs = true }
+        if v == max_v { has_v = true }
+        if v == max_h { has_h = true }
     }
+    if has_v && has_h { c.Set_Maximized(cl, true) }
+    cl.Fullscreen = has_fs
 }

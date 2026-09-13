@@ -2,10 +2,10 @@ package main
 
 // Atom interning + property read helpers over the raw xcb layer.
 //
-// libxcb's icccm/ewmh helper headers are not installed on the target (see
-// docs/REFERENCE_NOTES.md §5), so property access is done by hand with
-// xcb_intern_atom / xcb_get_property / xcb_change_property. This file wraps
-// those raw calls behind small, safe procedures used by the WM core.
+// libxcb's icccm/ewmh helper headers are not installed on the target,
+// so property access is done by hand with xcb_intern_atom / xcb_get_property
+// / xcb_change_property. This file wraps those raw calls behind small,
+// safe procedures used by the WM core.
 
 // intern_atom resolves (and caches in wm.atoms) the atom id for `name`.
 // `only_if_exists = 0` tells the server to create the atom if unknown.

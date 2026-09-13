@@ -690,10 +690,43 @@ Scratchpad_Toggle_Target :: proc(m: ^Manager, field: Scratchpad_Match_Field, val
 // Floating / fullscreen
 // ----------------------------------------------------------------------------
 
+// Set_Maximized enables/disables the work-area geometry override without
+// changing the client's tiled/floating membership. Fullscreen is deliberately
+// stronger and blocks a new maximize request; a window that was already
+// maximized may pass through fullscreen and returns to maximized afterwards.
+Set_Maximized :: proc(cl: ^Client, on: bool) -> bool {
+    if cl == nil || cl.Dock || cl.Ws == nil || cl.Stashed { return false }
+    if on == cl.Maximized { return false }
+    if on {
+        if cl.Fullscreen { return false }
+        cl.MaxRestoreGeom = cl.Geom
+        cl.MaxRestoreFloatRect = cl.FloatingRect
+        cl.MaxRestoreFloating = cl.Floating
+        cl.Maximized = true
+    } else {
+        cl.Maximized = false
+        // FloatingRect is authoritative for floating layout and may otherwise
+        // have been changed by a configure request while maximized.
+        if cl.MaxRestoreFloating {
+            cl.FloatingRect = cl.MaxRestoreFloatRect
+        }
+        cl.Geom = cl.MaxRestoreGeom
+    }
+    return true
+}
+
+Toggle_Maximized :: proc(cl: ^Client) -> bool {
+    if cl == nil { return false }
+    return Set_Maximized(cl, !cl.Maximized)
+}
+
 // Set_Floating moves cl into or out of the workspace's floating list. A window
 // being tiled again becomes its own new column to the right of the focus.
 Set_Floating :: proc(m: ^Manager, cl: ^Client, on: bool) {
     if cl == nil || cl.Ws == nil { return }
+    // Changing layout mode is an explicit replacement for maximize. Restore
+    // the saved base state before moving between structural containers.
+    if cl.Maximized { Set_Maximized(cl, false) }
     ws := cl.Ws
 
     if on && !cl.Floating {
@@ -799,7 +832,7 @@ Scroll_Output_Viewport :: proc(m: ^Manager, o: ^Output, dir: int) -> bool {
     _, step := strip_geometry(p, len(ws.Cols))
     if step <= 0 { return false }
     sign := i32(dir / abs(dir))
-    next := clamp_viewport(ws.ViewportX + step * sign, p, len(ws.Cols))
+    next := clamp_workspace_viewport(ws.ViewportX + step * sign, ws, p)
     if next == ws.ViewportX { return false }
     ws.ViewportX = next
     return true
@@ -904,5 +937,5 @@ Ensure_Active_Focus_Visible :: proc(m: ^Manager) {
     o := Active_Output(m)
     if o == nil { return }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
-    ws.ViewportX = ensure_col_visible(ws.ViewportX, p, len(ws.Cols), col_left_px(p, ci))
+    ws.ViewportX = ensure_workspace_col_visible(ws.ViewportX, ws, p, ci)
 }

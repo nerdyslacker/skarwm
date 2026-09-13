@@ -16,13 +16,14 @@ package core
 //     work_h = geom.H - outer*2 - res.top - res.bottom
 // A zero `res` reproduces the plain outer-gap inset.
 //
-// Columns are uniform width derived per workspace (see Resolve_Page_Width):
-// fewer columns than a screen page (PAGE_COLS) expand to fill the work width;
-// with PAGE_COLS or more each column is one page width so exactly PAGE_COLS fit
-// on screen and further columns overflow to the right and scroll. Windows in a
-// stacked column divide the column height minus `inner` gaps. A tabbed column
-// gives its full rectangle to the active tab and parks its sibling tabs off
-// screen while keeping them mapped.
+// Normal columns use a uniform width derived per workspace (see
+// Resolve_Page_Width): fewer columns than a screen page (PAGE_COLS) expand to
+// fill the work width; with PAGE_COLS or more exactly PAGE_COLS fit on screen.
+// A column containing a maximized client temporarily occupies a complete work
+// area page, so following columns move right and remain reachable by scrolling.
+// Windows in a stacked column divide the column height minus `inner` gaps. A
+// tabbed column gives its full rectangle to the active tab and parks its sibling
+// tabs off screen while keeping them mapped.
 //
 // Each window's `Geom` is the *client* box inset by its border, so the X border
 // ring lies strictly inside its tile and never overlaps neighbours:
@@ -35,7 +36,7 @@ TAB_BAR_HEIGHT :: i32(24)
 Layout_Params :: struct {
     WorkX, WorkY: i32,
     WorkW, WorkH: i32,
-    ColW: i32, // width of every column (uniform)
+    ColW: i32, // width of every normal (non-maximized) column
     Inner: i32, // gap between columns and between windows in a column
     Border: i32, // per-window X border
 }
@@ -87,6 +88,58 @@ col_left_px :: proc(p: Layout_Params, idx: int) -> i32 {
     return i32(idx) * (p.ColW + p.Inner)
 }
 
+// A maximized tiled client expands its whole column to one work-area page.
+// The extra width participates in strip geometry, pushing later columns right
+// instead of drawing the maximized client over them.
+column_has_maximized :: proc(col: ^Column) -> bool {
+    if col == nil { return false }
+    for cl in col.Wins { if cl.Maximized { return true } }
+    return false
+}
+
+column_width :: proc(p: Layout_Params, col: ^Column) -> i32 {
+    if column_has_maximized(col) { return p.WorkW }
+    return p.ColW
+}
+
+workspace_col_left :: proc(ws: ^Workspace, p: Layout_Params, idx: int) -> i32 {
+    x := i32(0)
+    if ws == nil { return x }
+    for i in 0 ..< min(idx, len(ws.Cols)) {
+        x += column_width(p, ws.Cols[i]) + p.Inner
+    }
+    return x
+}
+
+workspace_strip_total :: proc(ws: ^Workspace, p: Layout_Params) -> i32 {
+    if ws == nil || len(ws.Cols) == 0 { return 0 }
+    total := i32(0)
+    for col, i in ws.Cols {
+        total += column_width(p, col)
+        if i + 1 < len(ws.Cols) { total += p.Inner }
+    }
+    return total
+}
+
+clamp_workspace_viewport :: proc(vp: i32, ws: ^Workspace, p: Layout_Params) -> i32 {
+    max_vp := workspace_strip_total(ws, p) - p.WorkW
+    if max_vp < 0 { max_vp = 0 }
+    return clamp(vp, i32(0), max_vp)
+}
+
+ensure_workspace_col_visible :: proc(vp: i32, ws: ^Workspace, p: Layout_Params, idx: int) -> i32 {
+    if ws == nil || idx < 0 || idx >= len(ws.Cols) { return 0 }
+    left := workspace_col_left(ws, p, idx)
+    right := left + column_width(p, ws.Cols[idx])
+    next := vp
+    if left < next {
+        next = left
+    } else if right > next + p.WorkW {
+        next = right - p.WorkW
+    }
+    return clamp_workspace_viewport(next, ws, p)
+}
+
 // Tab_Bar_Rect returns the root-coordinate strip reserved above a tabbed
 // column. The X layer uses it to draw decorations without duplicating layout
 // calculations.
@@ -96,16 +149,17 @@ Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) ->
     }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
     if p.ColW <= 0 || p.WorkH <= 1 { return {}, false }
-    x := p.WorkX - ws.ViewportX + col_left_px(p, col_index)
+    col_w := column_width(p, ws.Cols[col_index])
+    x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, col_index)
     // Top-level X windows cannot be clipped to an individual RandR output.
     // Do not create a decoration for a column parked outside its own output,
     // otherwise that decoration can appear on an adjacent monitor.
-    if x < p.WorkX || x + p.ColW > p.WorkX + p.WorkW { return {}, false }
+    if x < p.WorkX || x + col_w > p.WorkX + p.WorkW || column_has_maximized(ws.Cols[col_index]) { return {}, false }
     h := min(TAB_BAR_HEIGHT, p.WorkH - 1)
     return Rect {
         X = x,
         Y = p.WorkY,
-        W = p.ColW,
+        W = col_w,
         H = h,
     }, true
 }
@@ -302,13 +356,34 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             col := ws.Cols[ci]
             nw := len(col.Wins)
             if nw == 0 { continue }
-            col_left := base_x + col_left_px(p, ci)
+            col_w := column_width(p, col)
+            col_left := base_x + workspace_col_left(ws, p, ci)
 
-            // RandR outputs share one root window, so a column outside this
-            // output would otherwise remain visible on a neighbouring one.
-            // Viewport movement is column-aligned; park every off-page column
-            // until it belongs to the visible page again.
-            if col_left < p.WorkX || col_left + p.ColW > p.WorkX + p.WorkW {
+            // A maximized column is one full page. While scrolling between it
+            // and a neighbor, translate the complete maximized rectangle: the
+            // root viewport naturally reveals only the on-screen portion, but
+            // the client remains maximized and the following column stays
+            // directly adjacent in strip coordinates.
+            if column_has_maximized(col) {
+                if col_left + col_w <= p.WorkX || col_left >= p.WorkX + p.WorkW {
+                    for cl in col.Wins {
+                        cl.Geom = hide
+                        cl.Border = p.Border
+                    }
+                    continue
+                }
+                tile := Rect{X = col_left, Y = p.WorkY, W = col_w, H = p.WorkH}
+                for cl in col.Wins {
+                    cl.Border = p.Border
+                    if cl.Maximized { cl.Geom = inset_rect(tile, p.Border) } else { cl.Geom = hide }
+                }
+                continue
+            }
+
+            // RandR outputs share one root window, so a normal column outside
+            // this output would otherwise remain visible on a neighbouring one.
+            // Park normal columns unless their complete tile belongs to this page.
+            if col_left < p.WorkX || col_left + col_w > p.WorkX + p.WorkW {
                 for cl in col.Wins {
                     cl.Geom = hide
                     cl.Border = p.Border
@@ -323,7 +398,7 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
                     col.Focus = active
                 }
                 tab_h := min(TAB_BAR_HEIGHT, max(i32(0), p.WorkH - 1))
-                tile := Rect { X = col_left, Y = p.WorkY + tab_h, W = p.ColW, H = p.WorkH - tab_h }
+                tile := Rect { X = col_left, Y = p.WorkY + tab_h, W = col_w, H = p.WorkH - tab_h }
                 for cl in col.Wins {
                     cl.Border = p.Border
                     if cl == active {
@@ -345,7 +420,7 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             for i in 0 ..< nw {
                 h := base_h
                 if i32(i) < rem { h += 1 }
-                tile := Rect { X = col_left, Y = y, W = p.ColW, H = h }
+                tile := Rect { X = col_left, Y = y, W = col_w, H = h }
                 cl := col.Wins[i]
                 cl.Geom = inset_rect(tile, p.Border)
                 cl.Border = p.Border
@@ -361,6 +436,16 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
         if rect_empty(r) { r = default_float_rect(p, geom) }
         r = clamp_float_rect(r, geom)
         fl.Geom = inset_rect(r, p.Border)
+    }
+
+    // 4) maximized floaters temporarily override their saved floating geometry.
+    // Tiled maximize is handled as a full-width strip column above so it
+    // displaces, rather than overlaps, neighboring columns.
+    for cl in ws.Floaters {
+        if cl.Maximized {
+            cl.Border = p.Border
+            cl.Geom = inset_rect(Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}, p.Border)
+        }
     }
 }
 

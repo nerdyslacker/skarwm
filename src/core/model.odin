@@ -55,6 +55,13 @@ Client :: struct {
 
     Floating:   bool, // participates in floating layout (in ws.Floaters)
     Fullscreen: bool, // covers the whole output while its workspace is current
+    // Maximized is a work-area layout override, distinct from fullscreen and
+    // from structural tiled/floating membership.  The restore snapshot lets
+    // the pointer action undo the transition without losing session geometry.
+    Maximized:          bool,
+    MaxRestoreGeom:     Rect,
+    MaxRestoreFloatRect: Rect,
+    MaxRestoreFloating: bool,
     Urgent:     bool, // ICCCM WM_HINTS urgency flag
     Mapped:     bool, // the X layer has MapWindow'ed it
     Border:     i32, // border width to apply (0 while fullscreen), set by arrange
