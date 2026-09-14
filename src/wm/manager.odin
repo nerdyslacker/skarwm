@@ -1220,6 +1220,9 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
     } else if g_wm.mouse_tiled_drag {
         ui.Hide_Drop(&g_wm.ui)
     } else if cl != nil && g_wm.tiled_resize.Active {
+        if g_wm.tiled_resize.Upper != nil {
+            c.Normalize_Stack_For_Client(g_wm.tiled_resize.Upper)
+        }
         ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
     }
     cancel_pointer_operation()

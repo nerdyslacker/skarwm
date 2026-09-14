@@ -255,6 +255,76 @@ test_resize_math :: proc() {
     c.Arrange_All(stacked)
     eq(sa.Geom.W, i32(696), "lone resized stack does not expand to full screen")
     eq(sb.Geom.W, i32(696), "all windows follow the retained column width")
+
+    new_after_resize := mk_man()
+    defer c.Destroy_Manager(new_after_resize)
+    c.Activate_WS(new_after_resize, c.Ensure_WS(new_after_resize, 1))
+    na := add_tiled(new_after_resize, 341)
+    nws := c.Current_WS(new_after_resize)
+    nws.Cols[0].Width = 700
+    nb := add_tiled(new_after_resize, 342)
+    no := c.Active_Output(new_after_resize)
+    work_w := no.Geom.W - 2 * new_after_resize.Cfg.OuterGap - no.Reserved.Left - no.Reserved.Right
+    placed_w := c.Column_Width_At(new_after_resize, no, nws, 0) +
+        new_after_resize.Cfg.InnerGap + c.Column_Width_At(new_after_resize, no, nws, 1)
+    eq(placed_w, work_w, "new column complements a lone resized column without empty space")
+    _ = na
+    _ = nb
+
+    close_after_resize := mk_man()
+    defer c.Destroy_Manager(close_after_resize)
+    c.Activate_WS(close_after_resize, c.Ensure_WS(close_after_resize, 1))
+    ca := add_tiled(close_after_resize, 351)
+    cb := add_tiled(close_after_resize, 352)
+    cc := add_tiled(close_after_resize, 353)
+    cws := c.Current_WS(close_after_resize)
+    cws.Cols[0].Width = 700
+    cws.Cols[1].Width = 1196
+    c.Unmanage_Client(close_after_resize, cb)
+    co := c.Active_Output(close_after_resize)
+    cwork_w := co.Geom.W - 2 * close_after_resize.Cfg.OuterGap - co.Reserved.Left - co.Reserved.Right
+    eq(cws.Cols[0].Width + close_after_resize.Cfg.InnerGap + cws.Cols[1].Width,
+       cwork_w, "closing a resized column rebalances the survivors to one exact page")
+    ok(cws.Cols[0].Width < cws.Cols[1].Width,
+       "column rebalance retains the prior resized proportion")
+    _ = ca
+    _ = cc
+
+    rows_after_resize := mk_man()
+    defer c.Destroy_Manager(rows_after_resize)
+    c.Activate_WS(rows_after_resize, c.Ensure_WS(rows_after_resize, 1))
+    va := add_tiled(rows_after_resize, 361)
+    vb := add_tiled(rows_after_resize, 362)
+    ok(c.Move_Dir(rows_after_resize, .Left), "row reset fixture creates a stack")
+    va.TileWeight, vb.TileWeight = 800, 200
+    vc := add_tiled(rows_after_resize, 363)
+    ok(c.Move_Dir(rows_after_resize, .Left), "new window joins the resized stack")
+    vws := c.Current_WS(rows_after_resize)
+    weight_sum := va.TileWeight + vb.TileWeight + vc.TileWeight
+    ok(abs(weight_sum - 1) < 0.000001, "stack membership change normalizes resize weights")
+    ok(vc.TileWeight > 0.25, "new row receives a useful share instead of pixel weight one")
+    c.Arrange_All(rows_after_resize)
+    vb_gap := (vb.Geom.Y - vb.Border) - (va.Geom.Y + va.Geom.H + va.Border)
+    vc_gap := (vc.Geom.Y - vc.Border) - (vb.Geom.Y + vb.Geom.H + vb.Border)
+    eq(vb_gap, rows_after_resize.Cfg.InnerGap, "existing and inserted rows retain the normal gap")
+    eq(vc_gap, rows_after_resize.Cfg.InnerGap, "new row aligns with the same normal gap")
+    va.TileWeight, vb.TileWeight, vc.TileWeight = 600, 300, 100
+    c.Focus_Client(rows_after_resize, vc)
+    ok(c.Move_Dir(rows_after_resize, .Up), "resized row can be reordered")
+    ok(abs(vws.Cols[0].Wins[0].TileWeight - 0.6) < 0.000001,
+       "row reorder preserves the first size slot")
+    ok(abs(vws.Cols[0].Wins[1].TileWeight - 0.3) < 0.000001,
+       "reordered row takes the destination size slot")
+    ok(abs(vws.Cols[0].Wins[2].TileWeight - 0.1) < 0.000001,
+       "displaced row takes the source size slot")
+    va.TileWeight, vb.TileWeight, vc.TileWeight = 600, 300, 100
+    c.Unmanage_Client(rows_after_resize, vc)
+    c.Arrange_All(rows_after_resize)
+    ok(abs(va.TileWeight + vb.TileWeight - 1) < 0.000001,
+       "closing a resized row renormalizes the surviving proportions")
+    remaining_gap := (vb.Geom.Y - vb.Border) - (va.Geom.Y + va.Geom.H + va.Border)
+    eq(remaining_gap, rows_after_resize.Cfg.InnerGap,
+       "rows retain the normal gap after closing a resized neighbor")
 }
 
 // ----------------------------------------------------------------------------
