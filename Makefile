@@ -41,9 +41,9 @@ debug: build/skarwm-debug
 install: build/skarwm build/skarwm-msg
 	install -Dm755 build/skarwm $(DESTDIR)$(PREFIX)/bin/skarwm
 	install -Dm755 build/skarwm-msg $(DESTDIR)$(PREFIX)/bin/skarwm-msg
-	install -Dm755 config/skarwm-session $(DESTDIR)$(PREFIX)/bin/skarwm-session
-	install -Dm644 config/skarwm.desktop $(DESTDIR)$(PREFIX)/share/xsessions/skarwm.desktop
-	install -Dm644 config/example.rc $(DESTDIR)$(PREFIX)/share/skarwm/config.rc.example
+	install -Dm755 assets/skarwm-session $(DESTDIR)$(PREFIX)/bin/skarwm-session
+	install -Dm644 assets/skarwm.desktop $(DESTDIR)$(PREFIX)/share/xsessions/skarwm.desktop
+	install -Dm644 assets/example.rc $(DESTDIR)$(PREFIX)/share/skarwm/config.rc.example
 
 test: build/skarwm build/skarwm-msg
 	odin run tests/core_tests

@@ -21,7 +21,7 @@ esac
 # An explicit -c/--config supplied after the mode takes precedence.
 has_config=false
 expect_config_path=false
-config_path=config/example.rc
+config_path=assets/example.rc
 for arg in "$@"; do
     if [ "$expect_config_path" = true ]; then
         config_path=$arg
@@ -38,7 +38,7 @@ if [ "$expect_config_path" = true ]; then
     exit 2
 fi
 if [ "$has_config" = false ]; then
-    set -- -c config/example.rc "$@"
+    set -- -c assets/example.rc "$@"
 fi
 
 for tool in Xephyr xwininfo; do

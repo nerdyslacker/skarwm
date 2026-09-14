@@ -50,8 +50,8 @@ src/
     └── outputs.odin            monitor discovery and reconciliation
 ```
 
-Outside `src/`, `cmd/skarwm-msg/` is the standalone IPC client, `config/`
-contains installable session/config examples, `scripts/` contains nested-X
+Outside `src/`, `cmd/skarwm-msg/` is the standalone IPC client, `assets/`
+contains installable session/config files, `scripts/` contains nested-X
 integration tooling, and `tests/core_tests/` exercises the pure core package.
 
 The local package dependency direction is:
