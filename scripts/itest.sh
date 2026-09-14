@@ -796,7 +796,7 @@ fi
 # ---- 13. docks and struts ------------------------------------------------------
 # An EWMH dock (panel) window fabricated with python-xlib (scripts/xdock.py):
 # classified by _NET_WM_WINDOW_TYPE, never focused, visible on every workspace,
-# stacked above windows (fullscreen included), and its _NET_WM_STRUT_PARTIAL
+# stacked above ordinary windows but below fullscreen, and its _NET_WM_STRUT_PARTIAL
 # shrinks the tiling work area live. Work-area numbers below assume the built-in
 # defaults (outer 8 / border 2): baseline client 1260x780+10+10; a 24 px top
 # strut pushes it to 1260x756+10+34; a 48 px strut to 1260x732+10+58; the root
@@ -900,17 +900,17 @@ fi
 key super+1
 if wait_geom "$xt" "1260x756+10+34"; then pass "dock: back on ws1 the window retiles below"; else fail "dock: ws1 restore"; fi
 
-# fullscreen covers the output; the panel stays visible and stacked above
+# fullscreen covers the output and is stacked above the panel
 key super+f
 if wait_geom "$xt" "1280x800+0+0"; then pass "dock: window fullscreens over the work area"; else fail "dock: fullscreen"; fi
 if wait_abs_geom "$DOCK" "1280x24+0+0"; then
-  pass "dock: panel survives fullscreen"
+  pass "dock: panel keeps its geometry under fullscreen"
 else
-  fail "dock: panel hidden by fullscreen"
+  fail "dock: panel geometry changed during fullscreen"
 fi
 dp=$(tree_pos "$DOCK"); xp=$(tree_pos "$xt")
-if [ -n "$dp" ] && [ -n "$xp" ] && [ "$dp" -lt "$xp" ]; then
-  pass "dock: stacked above the fullscreen window"
+if [ -n "$dp" ] && [ -n "$xp" ] && [ "$xp" -lt "$dp" ]; then
+  pass "dock: fullscreen window stacked above panel"
 else
   fail "dock: stacking order (dock line $dp vs window line $xp)"
 fi

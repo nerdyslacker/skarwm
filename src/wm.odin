@@ -156,20 +156,23 @@ raise_focused :: proc() {
         stack := STACK_MODE_ABOVE
         xcb_configure_window(g_wm.conn, f.Xid, CW_STACK_MODE, &stack)
     }
-    raise_docks() // docks stay stacked above the focused window (fullscreen included)
+    raise_docks()
 }
 
-// raise_docks stacks every dock of the active output on top. This only needs
-// to happen
-// where a dock can overlap something: after raising/focusing a window (toggled
-// fullscreen, ws switches) and after mapping a new window (the server maps it
-// on top of the stack).
+// raise_docks restores the normal panel layer, then puts an active fullscreen
+// client above it. This is called anywhere a newly mapped or focused window can
+// disturb stacking, so docks remain above ordinary windows without covering a
+// real fullscreen client.
 raise_docks :: proc() {
     for o in g_wm.m.Outputs {
         for d in o.Docks {
             stack := STACK_MODE_ABOVE
             xcb_configure_window(g_wm.conn, d.Xid, CW_STACK_MODE, &stack)
         }
+    }
+    if f := g_wm.m.Focused; f != nil && f.Fullscreen {
+        stack := STACK_MODE_ABOVE
+        xcb_configure_window(g_wm.conn, f.Xid, CW_STACK_MODE, &stack)
     }
 }
 
@@ -214,7 +217,7 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
         c.Add_Dock_To_Output(m, c.Output_At_Rect(m, cl.FloatingRect), cl)
         ewmh_client_managed(cl) // _NET_CLIENT_LIST (no _NET_WM_DESKTOP: Ws == nil)
         reflow() // arranges the dock and maps it (push_geoms)
-        raise_docks() // a fresh map lands on top of the stack — put the dock there
+        raise_docks() // keep the dock below an active fullscreen client
         ipc_broadcast_window_event(c.IPC_WINDOW_NEW, cl)
         return
     }
@@ -242,7 +245,7 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     adopt_pre_wm_state(cl) // inherit fullscreen/maximize set before mapping
     ewmh_client_managed(cl) // _NET_CLIENT_LIST + _NET_WM_DESKTOP
     reflow()
-    raise_docks() // the new window mapped on top of the stack — docks go above
+    raise_docks() // restore normal dock order (or fullscreen above all)
     ipc_broadcast_window_event(c.IPC_WINDOW_NEW, cl)
     ipc_broadcast_focus_change(old_focus, m.Focused)
 }

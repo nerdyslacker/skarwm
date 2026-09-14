@@ -1313,7 +1313,7 @@ test_dock_sticky :: proc() {
     eq(ws1.ViewportX, 0, "dock does not disturb the viewport")
 }
 
-// Fullscreen covers the output; docks remain drawn above it.
+// Fullscreen covers the output while the dock retains its geometry underneath.
 test_dock_fullscreen_coexists :: proc() {
     m := mk_man()
     defer c.Destroy_Manager(m)

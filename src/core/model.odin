@@ -78,8 +78,8 @@ Client :: struct {
     TileWeight: f64, // relative height inside a stacked column; 0 means default
 
     // Dock is an output-level panel window (_NET_WM_WINDOW_TYPE_DOCK). A dock
-    // has Ws == nil and lives in Output.Docks: never tiled, never focused,
-    // never hidden on a workspace switch, kept above fullscreen windows.
+    // has Ws == nil and lives in Output.Docks: never tiled, never focused, and
+    // never hidden on a workspace switch. Active fullscreen clients cover it.
     Dock: bool,
     // Stashed scratchpads remain managed by X but are detached from every
     // workspace and parked off-screen until summoned.

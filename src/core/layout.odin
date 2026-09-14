@@ -758,8 +758,9 @@ clamp_float_rect :: proc(r: Rect, geom: Rect) -> Rect {
 }
 
 // Arrange_All recomputes every window rect: the current workspace on screen,
-// all others hidden, docks on top of the output. Call after any structural or
-// viewport change, then hand the resulting rects to the X layer.
+// all others hidden, and output docks at their requested geometry. X stacking
+// keeps docks above normal windows and below fullscreen. Call after any
+// structural or viewport change, then hand the resulting rects to the X layer.
 Arrange_All :: proc(m: ^Manager) {
     for o in m.Outputs {
         cur := o.Current
