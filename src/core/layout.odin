@@ -104,6 +104,50 @@ column_width :: proc(p: Layout_Params, col: ^Column) -> i32 {
     return p.ColW
 }
 
+workspace_has_custom_widths :: proc(ws: ^Workspace) -> bool {
+    if ws == nil { return false }
+    for col in ws.Cols { if col.Width > 0 { return true } }
+    return false
+}
+
+// custom_partial_columns reports full-size custom columns whose natural strip
+// geometry already crosses a work-area edge. Those intersections are the best
+// previews: no column needs to be scaled or relocated.
+custom_partial_columns :: proc(ws: ^Workspace, p: Layout_Params) -> (left, right: int) {
+    left, right = -1, -1
+    if ws == nil { return }
+    work_right := p.WorkX + p.WorkW
+    for col, ci in ws.Cols {
+        x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, ci)
+        w := column_width(p, col)
+        if x < p.WorkX && x + w > p.WorkX { left = ci }
+        if right < 0 && x < work_right && x + w > work_right { right = ci }
+    }
+    return
+}
+
+// If a custom-width strip naturally intersects one edge but leaves the next
+// column just outside the opposite edge, shift the viewport enough to expose a
+// real preview plus its normal gap. This preserves full column widths and
+// avoids placing a synthetic preview over an already visible window.
+expose_missing_custom_preview :: proc(ws: ^Workspace, p: Layout_Params) {
+    if ws == nil || !workspace_has_custom_widths(ws) { return }
+    partial_left, partial_right := custom_partial_columns(ws, p)
+    hidden_left, hidden_right := scroll_preview_columns(ws, p)
+    next := ws.ViewportX
+    if partial_left >= 0 && partial_right < 0 && hidden_right >= 0 {
+        hidden_x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, hidden_right)
+        desired_x := p.WorkX + p.WorkW - SCROLL_PREVIEW_WIDTH
+        if hidden_x > desired_x { next += hidden_x - desired_x }
+    } else if partial_right >= 0 && partial_left < 0 && hidden_left >= 0 {
+        hidden_x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, hidden_left)
+        hidden_right_x := hidden_x + column_width(p, ws.Cols[hidden_left])
+        desired_right := p.WorkX + SCROLL_PREVIEW_WIDTH
+        if hidden_right_x < desired_right { next -= desired_right - hidden_right_x }
+    }
+    ws.ViewportX = clamp_workspace_viewport(next, ws, p)
+}
+
 Column_Width_At :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, index: int) -> i32 {
     if m == nil || o == nil || ws == nil || index < 0 || index >= len(ws.Cols) { return 0 }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
@@ -238,6 +282,46 @@ Scroll_Previews :: proc(m: ^Manager, o: ^Output) -> [dynamic]Scroll_Preview {
     if m == nil || o == nil || o.Current == nil { return result }
     ws := o.Current
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+    partial_left, partial_right := custom_partial_columns(ws, p)
+    if workspace_has_custom_widths(ws) && (partial_left >= 0 || partial_right >= 0) {
+        hidden_left, hidden_right := scroll_preview_columns(ws, p)
+        work_right := p.WorkX + p.WorkW
+        indices := [2]int{
+            partial_left if partial_left >= 0 else hidden_left,
+            partial_right if partial_right >= 0 else hidden_right,
+        }
+        for ci, edge in indices {
+            if ci < 0 { continue }
+            if edge == 1 && ci == indices[0] { continue }
+            col := ws.Cols[ci]
+            col_left := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, ci)
+            col_right := col_left + column_width(p, col)
+            side := Scroll_Preview_Side.Left if edge == 0 else .Right
+            zone_x, zone_w := i32(0), i32(0)
+            if edge == 0 && partial_left >= 0 {
+                zone_x = p.WorkX
+                zone_w = min(SCROLL_PREVIEW_WIDTH, col_right - p.WorkX)
+            } else if edge == 1 && partial_right >= 0 {
+                zone_w = min(SCROLL_PREVIEW_WIDTH, work_right - col_left)
+                zone_x = work_right - zone_w
+            } else {
+                zone_w = min(SCROLL_PREVIEW_WIDTH, column_width(p, col))
+                zone_x = p.WorkX if edge == 0 else work_right - zone_w
+            }
+            if zone_w <= 0 { continue }
+            for cl in col.Wins {
+                if cl.Geom.X <= HIDE_X { continue }
+                top := max(p.WorkY, cl.Geom.Y - cl.Border)
+                bottom := min(p.WorkY + p.WorkH, cl.Geom.Y + cl.Geom.H + cl.Border)
+                if bottom <= top { continue }
+                append(&result, Scroll_Preview{
+                    Side = side, Client = cl,
+                    Geom = Rect{X = zone_x, Y = top, W = zone_w, H = bottom - top},
+                })
+            }
+        }
+        return result
+    }
     left, right := scroll_preview_columns(ws, p)
     indices := [2]int{left, right}
     for ci in indices {
@@ -293,7 +377,11 @@ Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) ->
     col_w := column_width(p, ws.Cols[col_index])
     x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, col_index)
     preview_left, preview_right := scroll_preview_columns(ws, p)
-    if (preview_left >= 0 || preview_right >= 0) && !column_has_maximized(ws.Cols[col_index]) {
+    custom_partial_left, custom_partial_right := custom_partial_columns(ws, p)
+    contiguous_custom := workspace_has_custom_widths(ws) &&
+        (custom_partial_left >= 0 || custom_partial_right >= 0)
+    if !contiguous_custom &&
+       (preview_left >= 0 || preview_right >= 0) && !column_has_maximized(ws.Cols[col_index]) {
         if rendered_x, rendered_w, visible := scroll_normal_col_rect(ws, p, col_index); visible {
             x, col_w = rendered_x, rendered_w
         }
@@ -333,10 +421,117 @@ Drop_Target :: struct {
     Out: ^Output,
     Ws: ^Workspace,
     Col: ^Column,
+    Target: ^Client, // client beneath/nearest the pointer
     Insert_Index: int,
     Row_Index: int,
     Geom: Rect,    // visual/final directional target
     HitGeom: Rect, // edge activation region
+}
+
+client_outer_rect :: proc(cl: ^Client) -> Rect {
+    if cl == nil { return {} }
+    border := max(i32(0), cl.Border)
+    return Rect{
+        X = cl.Geom.X - border,
+        Y = cl.Geom.Y - border,
+        W = cl.Geom.W + 2 * border,
+        H = cl.Geom.H + 2 * border,
+    }
+}
+
+// drop_target_at_point: The window beneath the pointer (or the nearest visible tiled window)
+// is the anchor, and the closest half of that window becomes the drop area. Left/right insert
+// a column beside it; top/bottom insert a row beside it.
+drop_target_at_point :: proc(m: ^Manager, x, y: i32, dragged: ^Client) -> Drop_Target {
+    o := Output_At_Point(m, x, y)
+    if o == nil || o.Current == nil { return {} }
+    ws := o.Current
+    closest: ^Client
+    closest_distance := i64(max(i32)) * i64(max(i32))
+    for col in ws.Cols {
+        for win in col.Wins {
+            if win == dragged || win.Floating || win.Fullscreen || win.Maximized { continue }
+            r := client_outer_rect(win)
+            if r.W <= 0 || r.H <= 0 ||
+               r.X + r.W <= o.Geom.X || r.X >= o.Geom.X + o.Geom.W ||
+               r.Y + r.H <= o.Geom.Y || r.Y >= o.Geom.Y + o.Geom.H {
+                continue
+            }
+            if drop_rect_contains(r, x, y) {
+                closest = win
+                closest_distance = -1
+                break
+            }
+            dx := i64(r.X + r.W / 2 - x)
+            dy := i64(r.Y + r.H / 2 - y)
+            distance := dx * dx + dy * dy
+            if distance < closest_distance {
+                closest, closest_distance = win, distance
+            }
+        }
+        if closest_distance < 0 { break }
+    }
+
+    if closest == nil {
+        // Preserve cross-output drops onto an empty workspace. Dropping the
+        // only client back onto its own empty target is intentionally a no-op.
+        if dragged == nil || dragged.Out == o { return {} }
+        p := compute_params(m.Cfg, o.Geom, 0, o.Reserved)
+        r := Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}
+        if rect_empty(r) { return {} }
+        zone := Drop_Zone.Left
+        distances := [4]i32{abs(x-r.X), abs(r.X+r.W-x), abs(y-r.Y), abs(r.Y+r.H-y)}
+        best := distances[0]
+        zones := [4]Drop_Zone{.Left, .Right, .Top, .Bottom}
+        for distance, i in distances { if distance < best { best, zone = distance, zones[i] } }
+        geom := r
+        switch zone {
+        case .Left:   geom.W /= 2
+        case .Right:  geom.W /= 2; geom.X = r.X + r.W - geom.W
+        case .Top:    geom.H /= 2
+        case .Bottom: geom.H /= 2; geom.Y = r.Y + r.H - geom.H
+        case .None:
+        }
+        return Drop_Target{Kind = .New_Column, Zone = zone, Out = o, Ws = ws, Insert_Index = 0, Geom = geom, HitGeom = r}
+    }
+
+    ci, col, row := column_of(ws, closest)
+    if col == nil { return {} }
+    r := client_outer_rect(closest)
+    left_distance := abs(x - r.X)
+    right_distance := abs(r.X + r.W - x)
+    top_distance := abs(y - r.Y)
+    bottom_distance := abs(r.Y + r.H - y)
+    zone := Drop_Zone.Left
+    best := left_distance
+    if right_distance < best { zone, best = .Right, right_distance }
+    if top_distance < best { zone, best = .Top, top_distance }
+    if bottom_distance < best { zone = .Bottom }
+
+    target := Drop_Target{Zone = zone, Out = o, Ws = ws, Col = col, Target = closest, HitGeom = r}
+    target.Geom = r
+    switch zone {
+    case .Left:
+        target.Kind = .New_Column
+        target.Insert_Index = ci
+        target.Geom.W /= 2
+    case .Right:
+        target.Kind = .New_Column
+        target.Insert_Index = ci + 1
+        target.Geom.W /= 2
+        target.Geom.X = r.X + r.W - target.Geom.W
+    case .Top:
+        target.Kind = .Into_Column
+        target.Row_Index = row
+        target.Geom.H /= 2
+    case .Bottom:
+        target.Kind = .Into_Column
+        target.Row_Index = row + 1
+        target.Geom.H /= 2
+        target.Geom.Y = r.Y + r.H - target.Geom.H
+    case .None:
+    }
+    return target
 }
 
 drop_focus_column :: proc(ws: ^Workspace, dragged: ^Client) -> ^Column {
@@ -381,10 +576,10 @@ drop_column_index :: proc(ws: ^Workspace, wanted: ^Column) -> int {
     return -1
 }
 
-// Drop_Targets creates exactly four targets per output, independent of its
-// window count. Top/bottom insert into the selected column at the corresponding
-// vertical edge; left/right create a column relative to a neighboring column.
-// On an empty output every target creates its first column.
+// Drop_Targets provides the four work-area targets used by non-drag callers
+// and compatibility helpers. Active tiled drags pass their client to
+// Drop_Target_At_Point and use per-window targets above.
+// On an empty output every work-area target creates its first column.
 Drop_Targets :: proc(m: ^Manager, dragged: ^Client = nil) -> [dynamic]Drop_Target {
     if m == nil { return make([dynamic]Drop_Target, 0) }
     targets := make([dynamic]Drop_Target, 0, max(1, len(m.Outputs) * 4))
@@ -468,6 +663,7 @@ Drop_Target_At_Point :: proc(
     dragged: ^Client = nil,
     current: Drop_Target = {},
 ) -> Drop_Target {
+    if dragged != nil { return drop_target_at_point(m, x, y, dragged) }
     targets := Drop_Targets(m, dragged)
     defer delete(targets)
 
@@ -548,6 +744,15 @@ inset_rect :: proc(tile: Rect, border: i32) -> Rect {
     }
 }
 
+// Only the workspace focus owns the configured X border. Expanding every
+// other client to the complete tile keeps outer geometry and gaps unchanged.
+place_client_in_tile :: proc(ws: ^Workspace, cl: ^Client, tile: Rect, border: i32) {
+    if cl == nil { return }
+    cl.Border = 0
+    if ws != nil && ws.Focus == cl { cl.Border = border }
+    cl.Geom = inset_rect(tile, cl.Border)
+}
+
 // ----------------------------------------------------------------------------
 // Arrange
 // ----------------------------------------------------------------------------
@@ -568,13 +773,19 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
     if !on_screen {
         hide := Rect { X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H }
         for col in ws.Cols {
-            for cl in col.Wins { cl.Geom = hide; cl.Border = p.Border }
+            for cl in col.Wins { cl.Geom = hide; cl.Border = 0 }
         }
-        for cl in ws.Floaters { cl.Geom = hide; cl.Border = p.Border }
+        for cl in ws.Floaters { cl.Geom = hide; cl.Border = 0 }
         return
     }
 
     // Active workspace.
+    // Structural changes can shorten the strip while retaining its old
+    // viewport. Pull the complete strip back against the nearest edge so a
+    // hidden neighbor fills any newly exposed space without changing width.
+    ws.ViewportX = clamp_workspace_viewport(ws.ViewportX, ws, p)
+    expose_missing_custom_preview(ws, p)
+
     // 1) fullscreen cover
     if ws.Focus != nil && ws.Focus.Fullscreen && find_client_in_ws(ws, ws.Focus.Xid) != nil {
         fs := ws.Focus
@@ -583,11 +794,11 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
         hide := Rect { X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H }
         for col in ws.Cols {
             for cl in col.Wins {
-                if cl != fs { cl.Geom = hide; cl.Border = p.Border }
+                if cl != fs { cl.Geom = hide; cl.Border = 0 }
             }
         }
         for cl in ws.Floaters {
-            if cl != fs { cl.Geom = hide; cl.Border = p.Border }
+            if cl != fs { cl.Geom = hide; cl.Border = 0 }
         }
         return
     }
@@ -596,7 +807,15 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
     if n_cols > 0 && p.ColW > 0 && p.WorkH > 0 {
         base_x := p.WorkX - ws.ViewportX
         hide := Rect { X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H }
-        preview_left, preview_right := scroll_preview_columns(ws, p)
+        custom_widths := workspace_has_custom_widths(ws)
+        custom_partial_left, custom_partial_right := custom_partial_columns(ws, p)
+        contiguous_custom := custom_widths &&
+            (custom_partial_left >= 0 || custom_partial_right >= 0)
+        preview_left, preview_right := -1, -1
+        hidden_left, hidden_right := scroll_preview_columns(ws, p)
+        if !contiguous_custom {
+            preview_left, preview_right = hidden_left, hidden_right
+        }
         for ci in 0 ..< n_cols {
             col := ws.Cols[ci]
             nw := len(col.Wins)
@@ -604,7 +823,18 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             col_w := column_width(p, col)
             col_left := base_x + workspace_col_left(ws, p, ci)
             is_preview := ci == preview_left || ci == preview_right
-            if ci == preview_left {
+            if contiguous_custom {
+                // Keep the resized strip contiguous. Intersecting columns stay
+                // at full size and the root/output edge reveals only the part
+                // that actually fits in the available area.
+                if col_left + col_w <= p.WorkX || col_left >= p.WorkX + p.WorkW {
+                    for cl in col.Wins {
+                        cl.Geom = hide
+                        cl.Border = 0
+                    }
+                    continue
+                }
+            } else if ci == preview_left {
                 col_left = p.WorkX + min(SCROLL_PREVIEW_WIDTH, col_w) - col_w
             } else if ci == preview_right {
                 col_left = p.WorkX + p.WorkW - min(SCROLL_PREVIEW_WIDTH, col_w)
@@ -613,7 +843,7 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
                 if !visible {
                     for cl in col.Wins {
                         cl.Geom = hide
-                        cl.Border = p.Border
+                        cl.Border = 0
                     }
                     continue
                 }
@@ -629,14 +859,18 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
                 if col_left + col_w <= p.WorkX || col_left >= p.WorkX + p.WorkW {
                     for cl in col.Wins {
                         cl.Geom = hide
-                        cl.Border = p.Border
+                        cl.Border = 0
                     }
                     continue
                 }
                 tile := Rect{X = col_left, Y = p.WorkY, W = col_w, H = p.WorkH}
                 for cl in col.Wins {
-                    cl.Border = p.Border
-                    if cl.Maximized { cl.Geom = inset_rect(tile, p.Border) } else { cl.Geom = hide }
+                    if cl.Maximized {
+                        place_client_in_tile(ws, cl, tile, p.Border)
+                    } else {
+                        cl.Geom = hide
+                        cl.Border = 0
+                    }
                 }
                 continue
             }
@@ -644,10 +878,11 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             // RandR outputs share one root window, so a normal column outside
             // this output would otherwise remain visible on a neighbouring one.
             // Park normal columns unless their complete tile belongs to this page.
-            if !is_preview && (col_left < p.WorkX || col_left + col_w > p.WorkX + p.WorkW) {
+            if !contiguous_custom && !is_preview &&
+               (col_left < p.WorkX || col_left + col_w > p.WorkX + p.WorkW) {
                 for cl in col.Wins {
                     cl.Geom = hide
-                    cl.Border = p.Border
+                    cl.Border = 0
                 }
                 continue
             }
@@ -661,11 +896,11 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
                 tab_h := min(TAB_BAR_HEIGHT, max(i32(0), p.WorkH - 1))
                 tile := Rect { X = col_left, Y = p.WorkY + tab_h, W = col_w, H = p.WorkH - tab_h }
                 for cl in col.Wins {
-                    cl.Border = p.Border
                     if cl == active {
-                        cl.Geom = inset_rect(tile, p.Border)
+                        place_client_in_tile(ws, cl, tile, p.Border)
                     } else {
                         cl.Geom = hide
+                        cl.Border = 0
                     }
                 }
                 continue
@@ -711,8 +946,7 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
                 h := heights[i]
                 tile := Rect { X = col_left, Y = y, W = col_w, H = h }
                 cl := col.Wins[i]
-                cl.Geom = inset_rect(tile, p.Border)
-                cl.Border = p.Border
+                place_client_in_tile(ws, cl, tile, p.Border)
                 y += h + p.Inner
             }
             delete(heights)
@@ -721,11 +955,10 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
 
     // 3) floating windows keep their own geometry
     for fl in ws.Floaters {
-        fl.Border = p.Border
         r := fl.FloatingRect
         if rect_empty(r) { r = default_float_rect(p, geom) }
         r = clamp_float_rect(r, geom)
-        fl.Geom = inset_rect(r, p.Border)
+        place_client_in_tile(ws, fl, r, p.Border)
     }
 
     // 4) maximized floaters temporarily override their saved floating geometry.
@@ -733,8 +966,7 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
     // displaces, rather than overlaps, neighboring columns.
     for cl in ws.Floaters {
         if cl.Maximized {
-            cl.Border = p.Border
-            cl.Geom = inset_rect(Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}, p.Border)
+            place_client_in_tile(ws, cl, Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}, p.Border)
         }
     }
 }

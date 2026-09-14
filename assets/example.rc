@@ -20,13 +20,15 @@ mod_key : super
 # Pixels of empty space around the work area / between tiled windows.
 outer_gap : 8
 inner_gap : 8
-# `gap : N` seeds both outer_gap and inner_gap at once.
+# `gap : N` seeds both outer_gap and inner_gap at once. Only the focused
+# window draws a border; unfocused windows still occupy the complete tile.
 border_width : 2
 # Rounded client corners in pixels. Set to 0 for square windows. Fullscreen
 # windows and bars remain square.
 corner_radius : 0
 
-# Window border colours as #RRGGBB.
+# Window border colours as #RRGGBB. The normal colour remains accepted for
+# config compatibility; unfocused windows currently have no border.
 norm_outer_border : #504D47
 sel_outer_border  : #FF5F00
 
@@ -44,6 +46,8 @@ animation_easing : ease_out_cubic
 
 # bind: run a shell command. Combo = modifier tokens + one key.
 bind : mod + Return : "xterm"
+# Optional terminal replacement:
+# bind : mod + Return : "kitty"
 # Every spawn binding automatically gets an otherwise-unbound Shift variant.
 # While a tabbed column is focused, mod+Shift+Return runs the same command and
 # puts its next window in that tab group. An explicit shifted binding overrides
@@ -52,8 +56,16 @@ bind : mod + Return : "xterm"
 # autostart: run once at startup (not re-run on reload).
 autostart : "xsetroot -solid '#202020'"
 
+# Optional desktop companions. Uncomment only installed programs. Paths shown
+# here are examples and may be replaced with your own configuration/assets.
+# picom enables shadows, fades, and true transparency for the drop overlay.
+# autostart : "picom --config ~/.config/picom/picom.conf -b"
+# autostart : "dunst -config ~/.config/dunst/dunstrc"
+# autostart : "feh --bg-fill ~/Pictures/wallpaper.jpg"
+
 # ---- key actions (call) ---------------------------------------------------------
-# Action tokens: focusleft/right/up/down moveleft/right/up/down ws_up ws_down
+# Action tokens: focusleft/right/up/down resizeleft/right/up/down
+# moveleft/right/up/down ws_up ws_down
 # ws_next ws_prev togglefloating togglefullscreen layout_tabbed layout_stacked
 # toggle_tabbed show_bindings focus_output_next/prev move_to_output_next/prev
 # scratchpad_toggle N scratchpad_toggle_float N scratchpad_remove N
@@ -63,6 +75,14 @@ call : mod + h : focusleft
 call : mod + j : focusdown
 call : mod + k : focusup
 call : mod + l : focusright
+
+# Resize steps: left/up make the focused tile narrower/shorter;
+# right/down make it wider/taller. Other columns keep their widths, while the
+# remaining rows in a vertical stack share the leftover height proportionally.
+call : mod + Control + h : resizeleft
+call : mod + Control + j : resizedown
+call : mod + Control + k : resizeup
+call : mod + Control + l : resizeright
 
 call : mod + Shift + h : moveleft
 call : mod + Shift + j : movedown
@@ -79,6 +99,24 @@ call : mod + slash : show_bindings
 # Toggling tabs off splits them back into separate horizontal columns.
 call : mod + Shift + q : close_window
 call : mod + Shift + r : reload_config
+
+# Optional lock command. Initialize its cached image separately first, for
+# example: betterlockscreen -u ~/Pictures/wallpaper.jpg
+# bind : mod + Shift + x : "betterlockscreen -l"
+
+# Optional brightness media keys.
+# bind : XF86MonBrightnessUp   : "brightnessctl set +5%"
+# bind : XF86MonBrightnessDown : "brightnessctl set 5%-"
+
+# Optional PipeWire/WirePlumber volume keys.
+# bind : XF86AudioRaiseVolume : "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+"
+# bind : XF86AudioLowerVolume : "wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"
+# bind : XF86AudioMute        : "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+
+# PulseAudio alternatives; use these instead of the three PipeWire bindings.
+# bind : XF86AudioRaiseVolume : "pactl set-sink-volume @DEFAULT_SINK@ +5%"
+# bind : XF86AudioLowerVolume : "pactl set-sink-volume @DEFAULT_SINK@ -5%"
+# bind : XF86AudioMute        : "pactl set-sink-mute @DEFAULT_SINK@ toggle"
 
 # Numbered scratchpads are session-only. The first toggle assigns the focused
 # window without moving it; later toggles hide it or summon it onto the active
@@ -103,12 +141,12 @@ call : mod + Shift + period : move_to_output_next
 # Hovering the exposed edge of an off-screen tiled window reveals and focuses it.
 # Mod+wheel up/down scrolls the workspace strip under the pointer.
 # Mod+left-drag moves floating windows or drops tiled windows; both work across
-# monitors. A tiled drag shows only the direction near the pointer: top/bottom
-# insert vertically in the selected column, while left/right create a horizontal
-# column immediately before/after a neighboring column. The accent fill is translucent
-# when an X compositor is running and falls back to an outline without one.
-# Mod+right-drag resizes floaters. On tiled windows it moves the nearest column
-# and/or stacked-row boundary; every window sharing that split follows.
+# monitors. A tiled drag targets the window under or nearest the
+# pointer: left/right inserts a column beside it, while top/bottom inserts a row
+# immediately above/below it. The active half-window overlay is translucent
+# with a compositor and falls back to an outline without one.
+# Mod+right-drag resizes floaters. On tiled windows, dragging outward from the
+# starting side grows its column/row and dragging inward shrinks it.
 
 # ---- dynamic workspaces --------------------------------------------------------
 # A workspace is created on demand the first time it is shown, so ids are not

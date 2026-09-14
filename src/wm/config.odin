@@ -315,6 +315,10 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
     case "moveright":  base.action = .Move_Right;  return base, ""
     case "moveup":     base.action = .Move_Up;     return base, ""
     case "movedown":   base.action = .Move_Down;   return base, ""
+    case "resizeleft":  base.action = .Resize_Left;  return base, ""
+    case "resizeright": base.action = .Resize_Right; return base, ""
+    case "resizeup":    base.action = .Resize_Up;    return base, ""
+    case "resizedown":  base.action = .Resize_Down;  return base, ""
 
     case "ws_up":    base.action = .WS_Next; return base, ""
     case "ws_down":  base.action = .WS_Prev; return base, ""
@@ -930,6 +934,11 @@ cfg_apply_default :: proc() {
     add_bind_def(sc, "Mod4+Shift+l", "moveright", "")
     add_bind_def(sc, "Mod4+Shift+j", "movedown", "")
     add_bind_def(sc, "Mod4+Shift+k", "moveup", "")
+
+    add_bind_def(sc, "Mod4+Control+h", "resizeleft", "")
+    add_bind_def(sc, "Mod4+Control+l", "resizeright", "")
+    add_bind_def(sc, "Mod4+Control+j", "resizedown", "")
+    add_bind_def(sc, "Mod4+Control+k", "resizeup", "")
 
     add_bind_def(sc, "Mod4+space", "togglefloating", "")
     add_bind_def(sc, "Mod4+f", "togglefullscreen", "")

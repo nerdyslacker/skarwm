@@ -17,13 +17,8 @@ import "core:time"
 
 Tiled_Resize_State :: struct {
     Active: bool,
-    Left, Right: ^c.Column,
-    Upper, Lower: ^c.Client,
-    Left_Start, Right_Start: i32,
-    Default_Column_Width: i32,
-    Upper_Start, Lower_Start: i32,
-    Left_Min, Right_Min, Left_Max, Right_Max: i32,
-    Upper_Min, Lower_Min, Upper_Max, Lower_Max: i32,
+    Resize_Width, Resize_Height: bool,
+    From_Left, From_Top: bool,
 }
 
 // Border colours come from Config.FocusedBorder / Config.UnfocusedBorder
@@ -64,6 +59,8 @@ Wm :: struct {
 }
 
 g_wm: Wm
+
+TILED_DRAG_PREVIEW_SIZE :: i32(300)
 
 // ---------------------------------------------------------------------------
 // atoms used by the WM core
@@ -606,10 +603,10 @@ on_keyrelease :: proc(ev: ^x11.Key_Press_Event) {
 
 dir_of :: proc(k: input.Action_Kind) -> c.Dir {
     #partial switch k {
-    case .Focus_Left, .Move_Left:   return .Left
-    case .Focus_Right, .Move_Right: return .Right
-    case .Focus_Up, .Move_Up:       return .Up
-    case .Focus_Down, .Move_Down:   return .Down
+    case .Focus_Left, .Move_Left, .Resize_Left:    return .Left
+    case .Focus_Right, .Move_Right, .Resize_Right: return .Right
+    case .Focus_Up, .Move_Up, .Resize_Up:          return .Up
+    case .Focus_Down, .Move_Down, .Resize_Down:    return .Down
     }
     return .Left
 }
@@ -639,6 +636,11 @@ dispatch_action :: proc(b: ^input.Binding) {
         }
     case .Move_Left, .Move_Right, .Move_Up, .Move_Down:
         if c.Move_Dir(m, dir_of(b.action)) {
+            reflow()
+            ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
+        }
+    case .Resize_Left, .Resize_Right, .Resize_Up, .Resize_Down:
+        if c.Resize_Focused(m, dir_of(b.action)) {
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
@@ -900,8 +902,7 @@ on_enter :: proc(ev: ^x11.Enter_Notify_Event) {
         if cl == g_wm.m.Focused { return }
         old := g_wm.m.Focused
         c.Focus_Client(g_wm.m, cl)
-        render_focus()
-        x11.xcb_flush(g_wm.conn)
+        reflow()
         ipc_broadcast_focus_change(old, cl)
     }
 }
@@ -966,89 +967,21 @@ regrab_client_buttons :: proc() {
     for cl in g_wm.m.Clients { if !cl.Dock { grab_client_buttons(cl.Xid) } }
 }
 
-column_resize_limits :: proc(col: ^c.Column) -> (minimum, maximum: i32) {
-    minimum = 60
-    if col == nil { return }
-    for cl in col.Wins {
-        minimum = max(minimum, cl.SizeHints.MinW + 2 * max(i32(0), cl.Border))
-        if cl.SizeHints.MaxW > 0 {
-            outer_max := cl.SizeHints.MaxW + 2 * max(i32(0), cl.Border)
-            if maximum == 0 || outer_max < maximum { maximum = outer_max }
-        }
-    }
-    return
-}
-
-row_resize_limits :: proc(cl: ^c.Client) -> (minimum, maximum: i32) {
-    minimum = 40
-    if cl == nil { return }
-    b := 2 * max(i32(0), cl.Border)
-    minimum = max(minimum, cl.SizeHints.MinH + b)
-    if cl.SizeHints.MaxH > 0 { maximum = cl.SizeHints.MaxH + b }
-    return
-}
-
-column_is_maximized :: proc(col: ^c.Column) -> bool {
-    if col == nil { return false }
-    for cl in col.Wins { if cl.Maximized { return true } }
-    return false
-}
-
 begin_tiled_resize :: proc(cl: ^c.Client, root_x, root_y: i32) -> bool {
     if cl == nil || cl.Floating || cl.Fullscreen || cl.Maximized || !on_current_ws(cl) { return false }
-    ci, col, row := c.Column_Of(cl)
+    _, col, _ := c.Column_Of(cl)
     if col == nil { return false }
 
     // Finish any layout transition first so the drag snapshot matches the
     // geometry beneath the pointer exactly.
     reflow_immediate()
-    state := Tiled_Resize_State{}
-
-    if len(cl.Ws.Cols) > 1 {
-        left_index, right_index := -1, -1
-        midpoint := cl.Geom.X + cl.Geom.W / 2
-        if root_x < midpoint && ci > 0 {
-            left_index, right_index = ci - 1, ci
-        } else if root_x >= midpoint && ci + 1 < len(cl.Ws.Cols) {
-            left_index, right_index = ci, ci + 1
-        }
-        if left_index >= 0 {
-            left, right := cl.Ws.Cols[left_index], cl.Ws.Cols[right_index]
-            if !column_is_maximized(left) && !column_is_maximized(right) {
-                state.Left, state.Right = left, right
-                state.Left_Start = c.Column_Width_At(g_wm.m, cl.Out, cl.Ws, left_index)
-                state.Right_Start = c.Column_Width_At(g_wm.m, cl.Out, cl.Ws, right_index)
-                state.Default_Column_Width = c.Default_Column_Width(g_wm.m, cl.Out, cl.Ws)
-                state.Left_Min, state.Left_Max = column_resize_limits(left)
-                state.Right_Min, state.Right_Max = column_resize_limits(right)
-            }
-        }
+    state := Tiled_Resize_State{
+        Active = true,
+        Resize_Width = true,
+        Resize_Height = col.Layout == .Stacked && len(col.Wins) > 1,
+        From_Left = root_x < cl.Geom.X + cl.Geom.W / 2,
+        From_Top = root_y < cl.Geom.Y + cl.Geom.H / 2,
     }
-
-    if col.Layout == .Stacked && len(col.Wins) > 1 {
-        upper_index, lower_index := -1, -1
-        midpoint := cl.Geom.Y + cl.Geom.H / 2
-        if root_y < midpoint && row > 0 {
-            upper_index, lower_index = row - 1, row
-        } else if root_y >= midpoint && row + 1 < len(col.Wins) {
-            upper_index, lower_index = row, row + 1
-        }
-        if upper_index >= 0 {
-            // Preserve every row's current share; only the selected boundary
-            // changes while the rest of the stack remains stable.
-            for win in col.Wins {
-                win.TileWeight = f64(win.Geom.H + 2 * max(i32(0), win.Border))
-            }
-            state.Upper, state.Lower = col.Wins[upper_index], col.Wins[lower_index]
-            state.Upper_Start = i32(state.Upper.TileWeight)
-            state.Lower_Start = i32(state.Lower.TileWeight)
-            state.Upper_Min, state.Upper_Max = row_resize_limits(state.Upper)
-            state.Lower_Min, state.Lower_Max = row_resize_limits(state.Lower)
-        }
-    }
-
-    state.Active = state.Left != nil || state.Upper != nil
-    if !state.Active { return false }
     g_wm.tiled_resize = state
     g_wm.mouse_client = cl
     g_wm.mouse_root_x = i16(root_x)
@@ -1056,30 +989,41 @@ begin_tiled_resize :: proc(cl: ^c.Client, root_x, root_y: i32) -> bool {
     return true
 }
 
+// Temporarily presents a tiled drag as a small window following the pointer.
+// Keep the model untouched until drop; the next reflow restores or places
+// the real tiled geometry atomically.
+show_tiled_drag_preview :: proc(cl: ^c.Client, root_x, root_y: i32) {
+    if cl == nil { return }
+    size := TILED_DRAG_PREVIEW_SIZE
+    if cl.SizeHints.MinW > 0 { size = max(size, cl.SizeHints.MinW) }
+    if cl.SizeHints.MinH > 0 { size = max(size, cl.SizeHints.MinH) }
+    width, height := size, size
+    if cl.SizeHints.MaxW > 0 { width = min(width, cl.SizeHints.MaxW) }
+    if cl.SizeHints.MaxH > 0 { height = min(height, cl.SizeHints.MaxH) }
+    rendering.Preview_Client(
+        &g_wm.rendering, g_wm.conn, g_wm.m, cl,
+        c.Rect{
+            X = root_x - width / 2,
+            Y = root_y - height / 2,
+            W = max(i32(1), width),
+            H = max(i32(1), height),
+        },
+    )
+}
+
 tiled_resize_motion :: proc(root_x, root_y: i32) {
     state := &g_wm.tiled_resize
-    if !state.Active { return }
-    if state.Left != nil && state.Right != nil {
-        left, right := c.Resize_Pair(
-            state.Left_Start, state.Right_Start,
-            root_x - i32(g_wm.mouse_root_x),
-            state.Left_Min, state.Right_Min, state.Left_Max, state.Right_Max,
-        )
-        // Returning a boundary to the layout's natural split clears the
-        // override. Such a column can expand normally if it later stands
-        // alone, while a genuinely resized column keeps its explicit width.
-        state.Left.Width = left if left != state.Default_Column_Width else 0
-        state.Right.Width = right if right != state.Default_Column_Width else 0
-    }
-    if state.Upper != nil && state.Lower != nil {
-        upper, lower := c.Resize_Pair(
-            state.Upper_Start, state.Lower_Start,
-            root_y - i32(g_wm.mouse_root_y),
-            state.Upper_Min, state.Lower_Min, state.Upper_Max, state.Lower_Max,
-        )
-        state.Upper.TileWeight, state.Lower.TileWeight = f64(upper), f64(lower)
-    }
-    reflow_immediate()
+    cl := g_wm.mouse_client
+    if !state.Active || cl == nil { return }
+    dx := root_x - i32(g_wm.mouse_root_x)
+    dy := root_y - i32(g_wm.mouse_root_y)
+    if state.From_Left { dx = -dx }
+    if state.From_Top { dy = -dy }
+    if !state.Resize_Width { dx = 0 }
+    if !state.Resize_Height { dy = 0 }
+    if c.Resize_Tiled_Client(g_wm.m, cl, dx, dy) { reflow_immediate() }
+    g_wm.mouse_root_x = i16(root_x)
+    g_wm.mouse_root_y = i16(root_y)
 }
 
 on_button_press :: proc(ev: ^x11.Button_Press_Event) {
@@ -1130,7 +1074,7 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
     old := g_wm.m.Focused
     if on_current_ws(cl) && old != cl {
         c.Focus_Client(g_wm.m, cl)
-        render_focus()
+        reflow_immediate()
         ipc_broadcast_focus_change(old, cl)
     }
     modified := g_wm.primary_mod != 0 && clean & g_wm.primary_mod == g_wm.primary_mod
@@ -1153,7 +1097,11 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
         g_wm.mouse_root_x = ev.root_x
         g_wm.mouse_root_y = ev.root_y
         g_wm.mouse_start = cl.FloatingRect
-        if tiled_drag { ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y)) }
+        if tiled_drag {
+            show_tiled_drag_preview(cl, i32(ev.root_x), i32(ev.root_y))
+            raise_focused()
+            ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+        }
         x11.xcb_allow_events(g_wm.conn, x11.ALLOW_ASYNC_POINTER, ev.time)
     } else {
         x11.xcb_allow_events(g_wm.conn, x11.ALLOW_REPLAY_POINTER, ev.time)
@@ -1168,6 +1116,7 @@ on_motion :: proc(ev: ^x11.Motion_Notify_Event) {
         return
     }
     if g_wm.mouse_tiled_drag {
+        show_tiled_drag_preview(cl, i32(ev.root_x), i32(ev.root_y))
         ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
         return
     }
@@ -1220,9 +1169,6 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
     } else if g_wm.mouse_tiled_drag {
         ui.Hide_Drop(&g_wm.ui)
     } else if cl != nil && g_wm.tiled_resize.Active {
-        if g_wm.tiled_resize.Upper != nil {
-            c.Normalize_Stack_For_Client(g_wm.tiled_resize.Upper)
-        }
         ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
     }
     cancel_pointer_operation()

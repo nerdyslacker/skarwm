@@ -19,11 +19,12 @@ activated.
 
 ## Drag and drop
 
-Hold `Super` and left-drag a tiled window. Crossing an edge target shows one
-contextual overlay:
+Hold `Super` and left-drag a tiled window. The tiled window under the pointer—or
+the nearest visible one—becomes the drop anchor. An overlay covers the active half
+of that target:
 
-- Left/right creates or reorders a horizontal column at that position.
-- Top/bottom inserts the window at the corresponding end of the selected
+- Left/right inserts a horizontal column immediately before/after the target.
+- Top/bottom inserts the window immediately above/below the target in its
   vertical column.
 - A drop can cross outputs; the destination output and workspace receive focus.
 
@@ -31,3 +32,7 @@ The overlay uses a translucent fill when a compositor is available and an
 opaque outline otherwise. Resized column widths are retained when reordered.
 
 For floating windows, `Super`+left-drag moves and `Super`+right-drag resizes.
+On tiled windows, `Super`+right-drag resizes the focused column and stacked row
+from the side where the drag began. Moving outward grows that dimension;
+moving inward shrinks it. Other columns keep their independent widths, while
+the remaining stacked rows share the leftover height proportionally.

@@ -17,7 +17,10 @@ animation_easing : ease_out_cubic
 ```
 
 `outer_gap` surrounds the work area and `inner_gap` separates windows. `gap`
-sets both at once. Border colours are `#RRGGBB` values.
+sets both at once. Only the focused window draws `border_width`; unfocused
+windows expand into the same outer tile, so focus changes never alter gaps.
+`sel_outer_border` is its `#RRGGBB` colour. `norm_outer_border` remains accepted
+for configuration compatibility.
 
 A positive `corner_radius` shapes normal client windows and keeps the border
 thickness consistent around the curve. `0` restores square windows. Fullscreen
