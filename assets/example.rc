@@ -1,8 +1,8 @@
 # skarwm example configuration (plain text — no Lua).
 #
-# Install this file as ~/.config/skarwm/config.rc, set SKARWM_CONFIG to its
-# path, or pass it with `skarwm -c FILE`. When no file is found skarwm falls
-# back to these built-in defaults. Reload the running config with Mod+Shift+r
+# Install this file as ~/.config/skarwm/config.rc or /etc/skarwm/config.rc,
+# set SKARWM_CONFIG to its path, or pass it with `skarwm -c FILE`. When no file
+# is found skarwm falls back to built-in defaults. Reload with Mod+Shift+r
 # (call : mod + Shift + r : reload); the reload is atomic — if a line is
 # malformed skarwm keeps the previous settings and logs the error.
 #
@@ -45,7 +45,7 @@ animation_easing : ease_out_cubic
 # ---- launching ----------------------------------------------------------------
 
 # bind: run a shell command. Combo = modifier tokens + one key.
-bind : mod + Return : "xterm"
+bind : mod + Return : "st"
 # Optional terminal replacement:
 # bind : mod + Return : "kitty"
 # Every spawn binding automatically gets an otherwise-unbound Shift variant.

@@ -6,6 +6,7 @@ skarwm loads the first existing configuration in this order:
 2. `$SKARWM_CONFIG`
 3. `$XDG_CONFIG_HOME/skarwm/config.rc`
 4. `~/.config/skarwm/config.rc`
+5. `/etc/skarwm/config.rc`
 
 Without a file, built-in settings and bindings are used. Copy
 [`assets/example.rc`](../assets/example.rc) for a complete starting point.

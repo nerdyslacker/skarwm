@@ -870,8 +870,9 @@ join_exists :: proc(base, tail: string) -> string {
 }
 
 // cfg_discover_path resolves the config file: -c FILE wins, followed by
-// $SKARWM_CONFIG, $XDG_CONFIG_HOME/skarwm/config.rc, and
-// ~/.config/skarwm/config.rc. Returns "" when no file exists.
+// $SKARWM_CONFIG, $XDG_CONFIG_HOME/skarwm/config.rc,
+// ~/.config/skarwm/config.rc, and finally /etc/skarwm/config.rc.
+// Returns "" when no file exists.
 cfg_discover_path :: proc() -> string {
     if g_cfg_flag != "" {
         if os.exists(g_cfg_flag) {
@@ -895,6 +896,9 @@ cfg_discover_path :: proc() -> string {
     hb: [1024]byte
     if home := os.get_env_buf(hb[:], "HOME"); home != "" {
         if p := join_exists(home, ".config/skarwm/config.rc"); p != "" { return p }
+    }
+    if os.exists("/etc/skarwm/config.rc") {
+        return strings.clone("/etc/skarwm/config.rc")
     }
     return ""
 }

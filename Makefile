@@ -20,6 +20,12 @@ XEPHYR_DISPLAY ?= :2
 
 ODIN_SRCS := $(shell find src -name '*.odin')
 
+BINDIR := $(PREFIX)/bin
+DATADIR := $(PREFIX)/share
+SESSIONDIR := $(DATADIR)/xsessions
+SYSCONFDIR ?= /etc
+SKARWMDIR := $(SYSCONFDIR)/skarwm
+
 all: build/skarwm build/skarwm-msg
 
 # release build
@@ -39,11 +45,11 @@ build/skarwm-debug: $(ODIN_SRCS)
 debug: build/skarwm-debug
 
 install: build/skarwm build/skarwm-msg
-	install -Dm755 build/skarwm $(DESTDIR)$(PREFIX)/bin/skarwm
-	install -Dm755 build/skarwm-msg $(DESTDIR)$(PREFIX)/bin/skarwm-msg
-	install -Dm755 assets/skarwm-session $(DESTDIR)$(PREFIX)/bin/skarwm-session
-	install -Dm644 assets/skarwm.desktop $(DESTDIR)$(PREFIX)/share/xsessions/skarwm.desktop
-	install -Dm644 assets/example.rc $(DESTDIR)$(PREFIX)/share/skarwm/config.rc.example
+	install -Dm755 build/skarwm $(DESTDIR)$(BINDIR)/skarwm
+	install -Dm755 build/skarwm-msg $(DESTDIR)$(BINDIR)/skarwm-msg
+	install -Dm755 assets/skarwm-session $(DESTDIR)$(BINDIR)/skarwm-session
+	install -Dm644 assets/skarwm.desktop $(DESTDIR)$(SESSIONDIR)/skarwm.desktop
+	install -Dm644 assets/example.rc $(DESTDIR)$(SKARWMDIR)/config.rc
 
 test: build/skarwm build/skarwm-msg
 	odin run tests/core_tests
