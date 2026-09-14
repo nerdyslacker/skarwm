@@ -4,7 +4,7 @@ package core
 // the rc configuration layer (src/config.odin). It lives in `core` so layout
 // math can be tested without X or the config parser.
 //
-// `Gap` / `OuterGap` / `InnerGap` / `BorderWidth` are in pixels; the two
+// `Gap` / `OuterGap` / `InnerGap` / `BorderWidth` / `CornerRadius` are in pixels; the two
 // `*Border` fields are X pixel values (0xRRGGBB). Column widths are *not*
 // configurable: they are derived per workspace from its column count (see
 // Resolve_Page_Width in layout.odin).
@@ -13,6 +13,7 @@ Config :: struct {
     OuterGap: i32,
     InnerGap: i32,
     BorderWidth: i32,
+    CornerRadius: i32, // 0 disables X Shape rounded corners
     FocusFollowsMouse: bool,
     Animations: bool,
     AnimationDurationMs: i32,
@@ -28,6 +29,7 @@ Default_Config :: proc() -> Config {
         OuterGap          = 8,
         InnerGap          = 8,
         BorderWidth       = 2,
+        CornerRadius      = 0,
         FocusFollowsMouse = true,
         Animations        = true,
         AnimationDurationMs = 180,

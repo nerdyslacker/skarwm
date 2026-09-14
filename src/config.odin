@@ -24,7 +24,7 @@ package main
 //     directive with extra `:` fields. Settings are collected during a single
 //     scan and directives resolved afterwards, so `mod_key` may appear anywhere.
 //   - settings: mod_key (alias modkey), inner_gap, outer_gap, gap (seeds both),
-//     border_width, norm_outer_border (unfocused colour), sel_outer_border
+//     border_width, corner_radius, norm_outer_border (unfocused colour), sel_outer_border
 //     (focused colour), focus_follows_mouse, animations,
 //     animation_duration_ms, animation_fps, animation_easing. Legacy decorative/titlebar keys
 //     are accepted and ignored; an unknown setting logs one warning.
@@ -92,12 +92,12 @@ Load_Scratch :: struct {
     mod_key:     string,
     mod_key_set: bool,
     // numeric / boolean / colour config overrides (defaults applied at build)
-    gap, outer_gap, inner_gap, border: i32,
+    gap, outer_gap, inner_gap, border, corner_radius: i32,
     ffm, animations: bool,
     animation_duration_ms, animation_fps: i32,
     animation_easing: c.Animation_Easing,
     focused, unfocused: u32,
-    gap_set, outer_set, inner_set, border_set, ffm_set: bool,
+    gap_set, outer_set, inner_set, border_set, corner_radius_set, ffm_set: bool,
     animations_set, animation_duration_set, animation_fps_set, animation_easing_set: bool,
     focused_set, unfocused_set: bool,
     // directives
@@ -415,6 +415,7 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.outer_set   { r.cfg.OuterGap = sc.outer_gap }
     if sc.inner_set   { r.cfg.InnerGap = sc.inner_gap }
     if sc.border_set  { r.cfg.BorderWidth = sc.border }
+    if sc.corner_radius_set { r.cfg.CornerRadius = sc.corner_radius }
     if sc.ffm_set     { r.cfg.FocusFollowsMouse = sc.ffm }
     if sc.animations_set { r.cfg.Animations = sc.animations }
     if sc.animation_duration_set { r.cfg.AnimationDurationMs = sc.animation_duration_ms }
@@ -510,6 +511,14 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         n, ok := parse_i32_value(value)
         if !ok { append(errs, fmt.aprintf("border_width: bad number %q", value)); return false }
         sc.border = n; sc.border_set = true
+        return true
+    case "corner_radius":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 0 || n > 4096 {
+            append(errs, fmt.aprintf("corner_radius: expected 0..4096, got %q", value))
+            return false
+        }
+        sc.corner_radius = n; sc.corner_radius_set = true
         return true
 
     case "sel_outer_border":

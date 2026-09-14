@@ -19,6 +19,7 @@ configure_client_geometry :: proc(cl: ^c.Client, geom: c.Rect, border: i32) {
         g_wm.conn, cl.Xid,
         CW_X | CW_Y | CW_WIDTH | CW_HEIGHT | CW_BORDER_WIDTH, &vals[0],
     )
+    shape_client(cl, geom, border)
 }
 
 animation_sample :: proc(st: ^Client_Animation, now: time.Tick) {
@@ -164,6 +165,7 @@ animation_run_due_frame :: proc() {
 animation_forget :: proc(xid: u32) {
     if st := g_wm.animations[xid]; st != nil { free(st) }
     delete_key(&g_wm.animations, xid)
+    shape_forget(xid)
 }
 
 animation_shutdown :: proc() {

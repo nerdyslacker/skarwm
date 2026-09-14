@@ -82,6 +82,7 @@ wm_startup :: proc() -> bool {
     g_wm.ran_startups = make([dynamic]string, 0, 4)
     g_wm.tabs = make([dynamic]Tab_Decoration, 0, 8)
     g_wm.animations = make(map[u32]^Client_Animation)
+    g_wm.window_shapes = make(map[u32]Window_Shape_State)
     g_wm.lock = MOD_MASK_LOCK
 
     // Claim the screen. If a WM already has a SubstructureRedirect grab on the
@@ -114,6 +115,7 @@ wm_startup :: proc() -> bool {
     g_wm.mm = mm
     g_wm.numlock = modifier_mask_for_keysym(&g_wm.kb, &g_wm.mm, keysym_from_name("Num_Lock"))
 
+    shape_init()
     g_wm.terminal = detect_terminal()
     if g_wm.terminal == "" {
         log_warn("no terminal emulator found; Super+Return will do nothing")
@@ -135,6 +137,7 @@ cleanup_all :: proc() {
     }
     if g_cfg_flag != "" { delete(g_cfg_flag) }
     animation_shutdown()
+    shape_shutdown()
     if g_wm.m != nil do c.Destroy_Manager(g_wm.m)
     ewmh_free() // destroy the check window, drop EWMH caches
     if g_wm.atoms != nil do delete(g_wm.atoms)

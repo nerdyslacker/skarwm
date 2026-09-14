@@ -24,6 +24,11 @@ Client_Animation :: struct {
     Active: bool,
 }
 
+Window_Shape_State :: struct {
+    Width, Height, Border, Radius: i32,
+    Rounded: bool,
+}
+
 Tiled_Resize_State :: struct {
     Active: bool,
     Left, Right: ^c.Column,
@@ -76,6 +81,8 @@ Wm :: struct {
     preview_hover_locked: bool,
     preview_hover_target: u32,
     animations: map[u32]^Client_Animation,
+    window_shapes: map[u32]Window_Shape_State,
+    shape_available: bool,
     animations_active: bool,
     animation_next_frame: time.Tick,
 }

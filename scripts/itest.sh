@@ -553,6 +553,7 @@ mod_key : super
 inner_gap : 8
 outer_gap : 8
 border_width : 2
+corner_radius : 0
 focus_follows_mouse : true
 animations : false
 animation_duration_ms : 180
@@ -581,6 +582,11 @@ key super+Return
 if wait_tiled_n 1; then pass "rc config: spawn tiles under -c file"; else fail "rc spawn"; fi
 rcwin=$(first_tiled_id)
 if wait_geom "$rcwin" "1260x780+10+10"; then pass "rc config: single window geometry (outer 8 / border 2)"; else fail "rc geometry"; fi
+if xwininfo -id "$rcwin" -shape 2>/dev/null | grep -q "No window shape defined"; then
+  pass "rc config: corner_radius 0 keeps windows square"
+else
+  fail "rc config: zero-radius window unexpectedly shaped"
+fi
 
 # reload with a changed outer_gap/border_width reflows the *existing* window
 cat > "$RC" <<'RC'
@@ -588,6 +594,7 @@ mod_key : super
 outer_gap : 20
 inner_gap : 8
 border_width : 4
+corner_radius : 12
 animations : true
 animation_duration_ms : 120
 animation_fps : 75
@@ -604,6 +611,11 @@ workspace : mod + 2 : view 2
 RC
 key super+shift+r
 if wait_geom "$rcwin" "1232x752+24+24"; then pass "rc config: atomic reload reflows to outer 20 / border 4"; else fail "rc reload geometry"; fi
+if wait_for sh -c "xwininfo -id '$rcwin' -shape 2>/dev/null | grep -q 'Window shape extents'"; then
+  pass "rc config: positive corner_radius reshapes existing window"
+else
+  fail "rc config: rounded shape not applied after reload"
+fi
 
 # malformed rc (unknown action token) -> previous config kept, WM alive
 printf 'call : mod + x : no_such_action\n' >> "$RC"

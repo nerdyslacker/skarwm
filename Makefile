@@ -1,6 +1,6 @@
 # skarwm build.
 #
-# Required at *runtime*:   libxcb + libxcb-randr
+# Required at *runtime*:   libxcb + libxcb-randr + libxcb-shape
 # Required at *build* time: odin
 #
 # Configuration is a plain-text rc file — there is no embedded

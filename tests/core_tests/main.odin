@@ -122,6 +122,7 @@ test_config :: proc() {
     eq(cfg.OuterGap, 8, "default outer gap")
     eq(cfg.InnerGap, 8, "default inner gap")
     eq(cfg.BorderWidth, 2, "default border")
+    eq(cfg.CornerRadius, 0, "rounded corners disabled by default")
     ok(cfg.FocusFollowsMouse, "default focus-follows-mouse")
     ok(cfg.Animations, "animations enabled by default")
     eq(cfg.AnimationDurationMs, i32(180), "default animation duration")

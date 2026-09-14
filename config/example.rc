@@ -22,6 +22,9 @@ outer_gap : 8
 inner_gap : 8
 # `gap : N` seeds both outer_gap and inner_gap at once.
 border_width : 2
+# Rounded client corners in pixels. Set to 0 for square windows. Fullscreen
+# windows and bars remain square.
+corner_radius : 0
 
 # Window border colours as #RRGGBB.
 norm_outer_border : #504D47

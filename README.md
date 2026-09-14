@@ -53,7 +53,8 @@ sudo xbps-install -S tigervnc xterm xdotool xwininfo xrandr xprop \
   python3-xlib wmctrl xorg-server-xephyr
 ```
 
-No shell, bar, compositor, or notification daemon is required by skarwm.
+At runtime skarwm links libxcb plus its RandR and Shape extensions. No shell,
+bar, compositor, or notification daemon is required.
 
 ## Build and install
 
@@ -86,7 +87,9 @@ cp config/example.rc ~/.config/skarwm/config.rc
 skarwm
 ```
 
-Layout transitions are enabled by default (`animations : true`) with a 180 ms
+Client corners can be rounded with `corner_radius : N`; `0` keeps them square,
+and fullscreen windows and bars are never clipped. Layout transitions are
+enabled by default (`animations : true`) with a 180 ms
 ease-out-cubic curve at a 60 FPS target. `animation_duration_ms`,
 `animation_fps`, and `animation_easing` (`linear` or `ease_out_cubic`) are
 reloadable; disabling animations applies geometry immediately and schedules no
