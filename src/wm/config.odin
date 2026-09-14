@@ -1,4 +1,11 @@
-package main
+package wm
+
+import process "../process"
+import ui "../ui"
+import logger "../log"
+import input "../input"
+import c "../core"
+import x11 "../x11"
 
 // rc configuration pipeline (no embedded scripting language).
 //
@@ -49,8 +56,6 @@ import "core:os"
 import "core:strconv"
 import "core:strings"
 
-import c "core"
-
 // ----------------------------------------------------------------------------
 // Types
 // ----------------------------------------------------------------------------
@@ -79,7 +84,7 @@ Raw_Rule :: struct {
 Config_Result :: struct {
     cfg:       c.Config,
     primary_mod: u16,
-    bindings:  [dynamic]Binding,
+    bindings:  [dynamic]input.Binding,
     rules:     [dynamic]Raw_Rule,
     startups:  [dynamic]string,
 }
@@ -139,9 +144,9 @@ scratch_destroy :: proc(sc: ^Load_Scratch) {
     free(sc)
 }
 
-// release_bindings frees every Binding.cmd string and the dynamic array itself,
+// release_bindings frees every input.Binding.cmd string and the dynamic array itself,
 // leaving *b zeroed. Safe to call on a moved-out (zero) dynamic array.
-release_bindings :: proc(b: ^[dynamic]Binding) {
+release_bindings :: proc(b: ^[dynamic]input.Binding) {
     for &x in b {
         if x.cmd != "" { delete(x.cmd) }
         if x.combo != "" { delete(x.combo) }
@@ -257,12 +262,12 @@ parse_combo :: proc(combo, mod_key: string) -> (mods: u16, ks: u32, ok: bool, er
         t := strings.trim_space(p)
         if t == "" { continue }
         if t == "mod" {
-            m := canonical_mods_for_name(mod_key, &g_wm.kb, &g_wm.mm)
-            if m == 0 { m = MOD_MASK_MOD4 }
+            m := input.canonical_mods_for_name(mod_key, &g_wm.kb, &g_wm.mm)
+            if m == 0 { m = x11.MOD_MASK_MOD4 }
             mods |= m
             continue
         }
-        if m := canonical_mods_for_name(t, &g_wm.kb, &g_wm.mm); m != 0 {
+        if m := input.canonical_mods_for_name(t, &g_wm.kb, &g_wm.mm); m != 0 {
             mods |= m
             continue
         }
@@ -275,23 +280,23 @@ parse_combo :: proc(combo, mod_key: string) -> (mods: u16, ks: u32, ok: bool, er
         return 0, 0, false, fmt.aprintf("combo %q names no key", combo)
     }
     if mods == 0 {
-        m := canonical_mods_for_name(mod_key, &g_wm.kb, &g_wm.mm)
-        if m == 0 { m = MOD_MASK_MOD4 }
+        m := input.canonical_mods_for_name(mod_key, &g_wm.kb, &g_wm.mm)
+        if m == 0 { m = x11.MOD_MASK_MOD4 }
         mods = m
     }
-    ks = keysym_from_name(ks_name)
+    ks = input.keysym_from_name(ks_name)
     if ks == 0 {
         return 0, 0, false, fmt.aprintf("combo %q: unknown keysym %q", combo, ks_name)
     }
     return mods, ks, true, ""
 }
 
-// resolve_bind turns a Raw_Bind into a concrete Binding, or returns an error
-// string. It allocates nothing that outlives the returned Binding.cmd.
-resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: Binding, err: string) {
+// resolve_bind turns a Raw_Bind into a concrete input.Binding, or returns an error
+// string. It allocates nothing that outlives the returned input.Binding.cmd.
+resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err: string) {
     mods, ks, ok, e := parse_combo(rb.combo, mod_key)
     if !ok { return {}, e }
-    base := Binding { mods = mods, keysym = ks }
+    base := input.Binding { mods = mods, keysym = ks }
 
     switch rb.action {
     case "spawn":
@@ -427,12 +432,12 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
 
     mod_key := "Mod4"
     if sc.mod_key_set && sc.mod_key != "" { mod_key = sc.mod_key }
-    r.primary_mod = canonical_mods_for_name(mod_key, &g_wm.kb, &g_wm.mm)
+    r.primary_mod = input.canonical_mods_for_name(mod_key, &g_wm.kb, &g_wm.mm)
 
-    r.bindings = make([dynamic]Binding, 0, 48)
+    r.bindings = make([dynamic]input.Binding, 0, 48)
     for rb in sc.binds {
         if unimplemented_action(rb.action) {
-            log_warn("ignoring unsupported action:", rb.action,
+            logger.Warn("ignoring unsupported action:", rb.action,
                 "(key", rb.combo, ")")
             continue
         }
@@ -475,7 +480,7 @@ warn_once :: proc(sc: ^Load_Scratch, key: string) {
         if w == key { return }
     }
     append(&sc.warned, strings.clone(key))
-    log_warn("unknown setting ignored:", key)
+    logger.Warn("unknown setting ignored:", key)
 }
 
 // parse_setting handles a `key : value` line. Hard value errors are appended to
@@ -484,7 +489,7 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
     switch key {
     case "mod_key", "modkey":
         v := strings.trim_space(value)
-        if v == "" || canonical_mods_for_name(v, &g_wm.kb, &g_wm.mm) == 0 {
+        if v == "" || input.canonical_mods_for_name(v, &g_wm.kb, &g_wm.mm) == 0 {
             append(errs, fmt.aprintf("mod_key: unknown modifier %q", v))
             return false
         }
@@ -588,7 +593,7 @@ parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]st
         return true
 
     case "mousebind":
-        log_warn("ignoring mousebind (no mouse-action system yet):", rest)
+        logger.Warn("ignoring mousebind (no mouse-action system yet):", rest)
         return true
 
     case "bind", "call", "workspace":
@@ -819,7 +824,7 @@ cfg_apply :: proc(r: ^Config_Result, label: string) {
     if g_wm.m != nil { g_wm.m.Cfg = r.cfg }
     g_wm.primary_mod = r.primary_mod
 
-    help_hide()
+    ui.Hide_Help(&g_wm.ui)
     release_bindings(&g_wm.bindings)
     g_wm.bindings = r.bindings
     r.bindings = {}
@@ -832,7 +837,7 @@ cfg_apply :: proc(r: ^Config_Result, label: string) {
     // programs the running config already started.
     for s in r.startups {
         if !startup_ran(s) {
-            spawn_sh(s)
+            process.Spawn(s)
             append(&g_wm.ran_startups, strings.clone(s))
         }
         delete(s)
@@ -843,8 +848,8 @@ cfg_apply :: proc(r: ^Config_Result, label: string) {
     grab_all_keys()
     regrab_client_buttons()
     reflow()
-    xcb_flush(g_wm.conn)
-    log_info("config applied:", label)
+    x11.xcb_flush(g_wm.conn)
+    logger.Info("config applied:", label)
 }
 
 // ----------------------------------------------------------------------------
@@ -868,7 +873,7 @@ cfg_discover_path :: proc() -> string {
         if os.exists(g_cfg_flag) {
             return strings.clone(g_cfg_flag)
         }
-        log_error("config file not found:", g_cfg_flag)
+        logger.Error("config file not found:", g_cfg_flag)
         return ""
     }
     eb: [1024]byte
@@ -876,7 +881,7 @@ cfg_discover_path :: proc() -> string {
         if os.exists(configured) {
             return strings.clone(configured)
         }
-        log_error("SKARWM_CONFIG file not found:", configured)
+        logger.Error("SKARWM_CONFIG file not found:", configured)
         return ""
     }
     xb: [1024]byte
@@ -959,8 +964,8 @@ cfg_apply_default :: proc() {
     defer free_errors(&errs)
     r := build_result(sc, &errs)
     if len(errs) > 0 {
-        log_error("internal: built-in config failed:")
-        for e in errs { log_error("  ", e) }
+        logger.Error("internal: built-in config failed:")
+        for e in errs { logger.Error("  ", e) }
         destroy_result(&r)
         return
     }
@@ -972,8 +977,8 @@ cfg_apply_default :: proc() {
 load_config_path :: proc(path, verb: string) {
     r, errs, ok := cfg_file_result(path)
     if !ok {
-        log_error("could not", verb, "config — keeping current settings:")
-        for e in errs { log_error("  ", e) }
+        logger.Error("could not", verb, "config — keeping current settings:")
+        for e in errs { logger.Error("  ", e) }
         free_errors(&errs)
         return
     }

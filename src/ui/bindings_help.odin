@@ -1,10 +1,14 @@
-package main
+package ui
+
+import logger "../log"
+import input "../input"
+import c "../core"
+import x11 "../x11"
 
 // A small WM-owned overlay listing the bindings from the active configuration.
 // It is override-redirect so it never enters the managed client model.
 
 import "core:fmt"
-import c "core"
 
 HELP_MARGIN   :: i32(20)
 HELP_TOP      :: i32(42)
@@ -13,7 +17,7 @@ HELP_LINE_H   :: i32(18)
 HELP_COL_MIN  :: i32(260)
 HELP_COL_WANT :: i32(330)
 
-binding_description :: proc(b: ^Binding) -> string {
+binding_description :: proc(b: ^input.Binding) -> string {
     switch b.action {
     case .Spawn:               return fmt.aprintf("launch %s", b.cmd)
     case .Focus_Left:          return fmt.aprintf("focus left")
@@ -54,9 +58,9 @@ binding_description :: proc(b: ^Binding) -> string {
     return fmt.aprintf("unknown action")
 }
 
-binding_lines :: proc() -> [dynamic]string {
-    lines := make([dynamic]string, 0, len(g_wm.bindings) + 4)
-    for &b in g_wm.bindings {
+binding_lines :: proc(bindings: []input.Binding) -> [dynamic]string {
+    lines := make([dynamic]string, 0, len(bindings) + 4)
+    for &b in bindings {
         description := binding_description(&b)
         append(&lines, fmt.aprintf("%s  -  %s", b.combo, description))
         delete(description)
@@ -64,11 +68,11 @@ binding_lines :: proc() -> [dynamic]string {
 
     // Shift variants of launcher bindings are real passive grabs too, unless
     // an explicit binding already owns that combination.
-    for &b in g_wm.bindings {
-        if b.action != .Spawn || b.effective_mods & MOD_MASK_SHIFT != 0 { continue }
-        derived := b.effective_mods | MOD_MASK_SHIFT
+    for &b in bindings {
+        if b.action != .Spawn || b.effective_mods & x11.MOD_MASK_SHIFT != 0 { continue }
+        derived := b.effective_mods | x11.MOD_MASK_SHIFT
         claimed := false
-        for &other in g_wm.bindings {
+        for &other in bindings {
             if other.keycode == b.keycode && other.effective_mods == derived {
                 claimed = true
                 break
@@ -87,9 +91,9 @@ free_binding_lines :: proc(lines: ^[dynamic]string) {
     lines^ = nil
 }
 
-help_geometry :: proc(line_count: int) -> (rect: c.Rect, columns, rows, capacity: int) {
-    output := c.Active_Output(g_wm.m)
-    area := c.Rect{X = 0, Y = 0, W = g_wm.scr_w, H = g_wm.scr_h}
+help_geometry :: proc(m: ^c.Manager, screen_w, screen_h: i32, line_count: int) -> (rect: c.Rect, columns, rows, capacity: int) {
+    output := c.Active_Output(m)
+    area := c.Rect{X = 0, Y = 0, W = screen_w, H = screen_h}
     if output != nil { area = output.Geom }
 
     avail_w := max(i32(240), area.W - HELP_MARGIN * 2)
@@ -112,24 +116,24 @@ help_geometry :: proc(line_count: int) -> (rect: c.Rect, columns, rows, capacity
     return
 }
 
-help_text :: proc(text: string, x, y: i16) {
+help_text :: proc(state: ^State, text: string, x, y: i16) {
     n := min(len(text), 255)
     if n > 0 {
-        xcb_image_text_8(g_wm.conn, u8(n), g_wm.help_window, g_wm.tab_gc,
+        x11.xcb_image_text_8(state.Conn, u8(n), state.HelpWindow, state.TabGC,
                         x, y, cstring(raw_data(text)))
     }
 }
 
-help_draw :: proc() {
-    if g_wm.help_window == 0 { return }
-    lines := binding_lines()
+Draw_Help :: proc(state: ^State, m: ^c.Manager, bindings: []input.Binding, screen_w, screen_h: i32) {
+    if state.HelpWindow == 0 { return }
+    lines := binding_lines(bindings)
     defer free_binding_lines(&lines)
-    rect, columns, rows, capacity := help_geometry(len(lines))
-    bg := g_wm.m.Cfg.UnfocusedBorder
-    vals := [2]u32{g_wm.white_pixel, bg}
-    xcb_change_gc(g_wm.conn, g_wm.tab_gc, GC_FOREGROUND | GC_BACKGROUND, &vals[0])
+    rect, columns, rows, capacity := help_geometry(m, screen_w, screen_h, len(lines))
+    bg := m.Cfg.UnfocusedBorder
+    vals := [2]u32{state.WhitePixel, bg}
+    x11.xcb_change_gc(state.Conn, state.TabGC, x11.GC_FOREGROUND | x11.GC_BACKGROUND, &vals[0])
 
-    help_text("skarwm keybindings", 14, 24)
+    help_text(state, "skarwm keybindings", 14, 24)
     col_width := rect.W / i32(columns)
     shown := min(len(lines), capacity)
     for i in 0 ..< shown {
@@ -139,57 +143,61 @@ help_draw :: proc() {
         y := i16(HELP_TOP + i32(row) * HELP_LINE_H)
         max_chars := max(1, int((col_width - 20) / 6))
         line := lines[i]
-        help_text(line[:min(len(line), max_chars)], x, y)
+        help_text(state, line[:min(len(line), max_chars)], x, y)
     }
 
     footer := "Click the overlay or press the help shortcut again to close"
     if shown < len(lines) {
         footer = fmt.tprintf("Showing %d of %d bindings; enlarge the display to see all", shown, len(lines))
     }
-    help_text(footer, 14, i16(rect.H - 10))
-    xcb_flush(g_wm.conn)
+    help_text(state, footer, 14, i16(rect.H - 10))
+    x11.xcb_flush(state.Conn)
 }
 
-help_show :: proc() {
-    if g_wm.help_window != 0 { return }
-    tabs_init()
-    lines := binding_lines()
-    rect, _, _, _ := help_geometry(len(lines))
+Show_Help :: proc(state: ^State, m: ^c.Manager, bindings: []input.Binding, screen_w, screen_h: i32) {
+    if state.HelpWindow != 0 { return }
+    Init_Tabs(state)
+    lines := binding_lines(bindings)
+    rect, _, _, _ := help_geometry(m, screen_w, screen_h, len(lines))
     free_binding_lines(&lines)
 
-    bg := g_wm.m.Cfg.UnfocusedBorder
-    border := g_wm.m.Cfg.FocusedBorder
-    xid := xcb_generate_id(g_wm.conn)
-    vals := [4]u32{bg, border, 1, EVENT_MASK_EXPOSURE | EVENT_MASK_BUTTON_PRESS}
-    cookie := xcb_create_window_checked(
-        g_wm.conn, 0, xid, g_wm.root,
+    bg := m.Cfg.UnfocusedBorder
+    border := m.Cfg.FocusedBorder
+    xid := x11.xcb_generate_id(state.Conn)
+    vals := [4]u32{bg, border, 1, x11.EVENT_MASK_EXPOSURE | x11.EVENT_MASK_BUTTON_PRESS}
+    cookie := x11.xcb_create_window_checked(
+        state.Conn, 0, xid, state.Root,
         i16(rect.X), i16(rect.Y), u16(rect.W), u16(rect.H),
-        2, WINDOW_CLASS_INPUT_OUTPUT, 0,
-        CW_BACK_PIXEL | CW_BORDER_PIXEL | CW_OVERRIDE_REDIRECT | CW_EVENT_MASK, &vals[0],
+        2, x11.WINDOW_CLASS_INPUT_OUTPUT, 0,
+        x11.CW_BACK_PIXEL | x11.CW_BORDER_PIXEL | x11.CW_OVERRIDE_REDIRECT | x11.CW_EVENT_MASK, &vals[0],
     )
-    if err := xcb_request_check(g_wm.conn, cookie); err != nil {
-        xe := (^X_Error)(err)
-        log_error("cannot create keybinding overlay; X error", xe.error_code,
+    if err := x11.xcb_request_check(state.Conn, cookie); err != nil {
+        xe := (^x11.X_Error)(err)
+        logger.Error("cannot create keybinding overlay; X error", xe.error_code,
                   "request", xe.major_code, "resource", xe.resource_id)
-        free_libc(err)
+        x11.free_libc(err)
         return
     }
-    g_wm.help_window = xid
-    set_prop_text(g_wm.conn, xid, atom("_NET_WM_NAME"), atom("UTF8_STRING"), "skarwm keybindings")
-    set_prop_text(g_wm.conn, xid, atom("WM_NAME"), atom("STRING"), "skarwm keybindings")
-    xcb_map_window(g_wm.conn, xid)
-    stack := STACK_MODE_ABOVE
-    xcb_configure_window(g_wm.conn, xid, CW_STACK_MODE, &stack)
-    help_draw()
+    state.HelpWindow = xid
+    x11.set_prop_text(state.Conn, xid, atom(state, "_NET_WM_NAME"), atom(state, "UTF8_STRING"), "skarwm keybindings")
+    x11.set_prop_text(state.Conn, xid, atom(state, "WM_NAME"), atom(state, "STRING"), "skarwm keybindings")
+    x11.xcb_map_window(state.Conn, xid)
+    stack := x11.STACK_MODE_ABOVE
+    x11.xcb_configure_window(state.Conn, xid, x11.CW_STACK_MODE, &stack)
+    Draw_Help(state, m, bindings, screen_w, screen_h)
 }
 
-help_hide :: proc() {
-    if g_wm.help_window == 0 || g_wm.conn == nil { return }
-    xcb_destroy_window(g_wm.conn, g_wm.help_window)
-    g_wm.help_window = 0
-    xcb_flush(g_wm.conn)
+Hide_Help :: proc(state: ^State) {
+    if state.HelpWindow == 0 || state.Conn == nil { return }
+    x11.xcb_destroy_window(state.Conn, state.HelpWindow)
+    state.HelpWindow = 0
+    x11.xcb_flush(state.Conn)
 }
 
-help_toggle :: proc() {
-    if g_wm.help_window == 0 { help_show() } else { help_hide() }
+Toggle_Help :: proc(state: ^State, m: ^c.Manager, bindings: []input.Binding, screen_w, screen_h: i32) {
+    if state.HelpWindow == 0 {
+        Show_Help(state, m, bindings, screen_w, screen_h)
+    } else {
+        Hide_Help(state)
+    }
 }

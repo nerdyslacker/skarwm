@@ -66,11 +66,36 @@ sudo make install
 ```
 
 The install target adds `skarwm`, `skarwm-msg`, `skarwm-session`, the display
-manager entry, and the example configuration. Session integration sources are
-kept under `config/`.
+manager entry, and the example configuration. Session integration files are
+kept under `assets/`.
 
 Run a standalone nested session with `make xephyr`, or use
 `make xephyr-multi` for two RandR monitor objects.
+
+## Source layout
+
+The source is split into small packages with one-way dependencies:
+
+```text
+src/
+├── main.odin          executable entry point
+├── core/              model, layout, operations, IPC types, pure math
+├── x11/               low-level XCB, properties, and RandR bindings
+├── input/             keysyms, modifiers, actions, and resolved bindings
+├── rendering/         geometry animation and rounded window shapes
+├── ui/                tabs, help, and drag/drop overlays
+├── process/           detached command launching
+├── log/               logging
+└── wm/                runtime orchestration, config, EWMH, outputs, IPC server
+cmd/skarwm-msg/        standalone IPC command client
+tests/core_tests/      X-independent core regression suite
+```
+
+See [docs/architecture.md](docs/architecture.md) for the package dependency map,
+runtime flow, module responsibilities, and suggested reading order.
+
+The [documentation index](docs/README.md) links concise guides for layouts,
+bindings, scrolling, workspaces, scratchpads, visuals, and X11 integration.
 
 ## Configuration
 
@@ -83,7 +108,7 @@ Start with the documented example:
 
 ```sh
 mkdir -p ~/.config/skarwm
-cp config/example.rc ~/.config/skarwm/config.rc
+cp assets/example.rc ~/.config/skarwm/config.rc
 skarwm
 ```
 
@@ -93,9 +118,9 @@ enabled by default (`animations : true`) with a 180 ms
 ease-out-cubic curve at a 60 FPS target. `animation_duration_ms`,
 `animation_fps`, and `animation_easing` (`linear` or `ease_out_cubic`) are
 reloadable; disabling animations applies geometry immediately and schedules no
-frames. See `config/example.rc` for the complete settings.
+frames. See `assets/example.rc` for the complete settings.
 
-For `startx`, copy `config/xinitrc.example` to `~/.xinitrc`. Display managers
+For `startx`, copy `assets/xinitrc.example` to `~/.xinitrc`. Display managers
 can use the installed `skarwm.desktop` entry. 
 
 Default interaction highlights:
@@ -122,7 +147,7 @@ Tabbed mode affects only the focused column. Move windows into it with
 `Super+Shift+h/l`, select tabs with `Super+k/j`, and reorder them with
 `Super+Shift+k/j`. Press `Super+t` again to split the group back into columns.
 
-The fully commented [config/example.rc](config/example.rc) documents settings,
+The fully commented [assets/example.rc](assets/example.rc) documents settings,
 bindings, workspace rules, window rules, and autostart commands.
 
 ### Scratchpads
@@ -154,7 +179,7 @@ it hides them. `--spawn COMMAND` starts the application when no window matches.
 
 ## IPC and shell integration
 
-[docs/IPC.md](docs/IPC.md) documents commands, queries, events, scratchpads,
+[docs/IPC.md](docs/ipc.md) documents commands, queries, events, scratchpads,
 and socket selection. Desktop shells should communicate through this interface
 without becoming dependencies of the WM.
 
@@ -164,3 +189,4 @@ The window-management design was inspired by:
 
 - [tonybanters/oxwm](https://github.com/tonybanters/oxwm)
 - [Mr-Emacs/nwm](https://github.com/Mr-Emacs/nwm)
+- [mangowm/mango](https://github.com/mangowm/mango)

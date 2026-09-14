@@ -4,7 +4,7 @@ package core
 // GET_OUTPUTS / SUBSCRIBE /
 // RUN_COMMAND plus skarwm window queries). Pure: builds JSON payloads and
 // reassembles/validates request frames, with no X or socket dependency — the
-// socket server (src/ipc.odin, package main) does the I/O.
+// socket server (src/wm/ipc_server.odin, package wm) does the I/O.
 //
 // JSON is hand-rolled in fixed key order to avoid another runtime dependency.
 // The consumer's JSON parser validates the result, so the format only needs to

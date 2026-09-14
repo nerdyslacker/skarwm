@@ -1,4 +1,4 @@
-package main
+package x11
 
 // Atom interning + property read helpers over the raw xcb layer.
 //

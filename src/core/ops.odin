@@ -210,7 +210,9 @@ Add_Managed :: proc(m: ^Manager, ws: ^Workspace, cl: ^Client, floating: bool, ta
     } else if tab_target != nil && tab_target.Ws == ws {
         _, col, _ := column_of(ws, tab_target)
         if col != nil && col.Layout == .Tabbed {
+            cl.TileWeight = 0
             append(&col.Wins, cl)
+            normalize_stack_weights(col)
             col.Focus = cl
             ws.Focus = cl
             if ws == Current_WS(m) { m.Focused = cl }
@@ -228,6 +230,7 @@ Add_Managed :: proc(m: ^Manager, ws: ^Workspace, cl: ^Client, floating: bool, ta
 attach_new_window :: proc(m: ^Manager, ws: ^Workspace, cl: ^Client) {
     cl.Ws = ws
     cl.Out = Output_Of_WS(m, ws)
+    cl.TileWeight = 0
     idx := len(ws.Cols)
     neighbor: ^Column
     if ws.Focus != nil && !ws.Focus.Floating {
@@ -241,7 +244,8 @@ attach_new_window :: proc(m: ^Manager, ws: ^Workspace, cl: ^Client) {
     // make both the focused column and its new neighbor only partly visible.
     // Give the new column the complementary width of that page instead. With
     // untouched defaults this evaluates to the ordinary page width.
-    if neighbor != nil && len(ws.Cols) >= 2 && cl.Out != nil && !column_has_maximized(neighbor) {
+    if neighbor != nil && neighbor.Width > 0 && len(ws.Cols) >= 1 &&
+       cl.Out != nil && !column_has_maximized(neighbor) {
         p := compute_params(m.Cfg, cl.Out.Geom, len(ws.Cols) + 1, cl.Out.Reserved)
         neighbor_w := column_width(p, neighbor)
         complement := p.WorkW - p.Inner - neighbor_w
@@ -316,6 +320,75 @@ detach_column_empty :: proc(ws: ^Workspace, ci: int) {
     free_column(col)
 }
 
+// Keep stack sizing as normalized proportions, following Mango's scroller
+// model. A new/default row receives the mean existing weight before the whole
+// stack is normalized; it can therefore never become a one-pixel row beside
+// weights captured from an earlier pixel-based resize.
+normalize_stack_weights :: proc(col: ^Column) {
+    if col == nil || len(col.Wins) == 0 { return }
+    sum := f64(0)
+    positive := 0
+    for cl in col.Wins {
+        if cl.TileWeight > 0 {
+            sum += cl.TileWeight
+            positive += 1
+        }
+    }
+    seed := f64(1)
+    if positive > 0 { seed = sum / f64(positive) }
+    for cl in col.Wins {
+        if cl.TileWeight <= 0 {
+            cl.TileWeight = seed
+            sum += seed
+        }
+    }
+    if sum <= 0 { return }
+    for cl in col.Wins { cl.TileWeight /= sum }
+}
+
+// Normalize_Stack_For_Client commits an interactive row resize from temporary
+// pixel weights to stable proportions.
+Normalize_Stack_For_Client :: proc(cl: ^Client) {
+    if cl == nil || cl.Ws == nil || cl.Floating { return }
+    _, col, _ := column_of(cl.Ws, cl)
+    normalize_stack_weights(col)
+}
+
+// Rebalance the columns that are supposed to occupy one visible page. This is
+// the flat-column equivalent of Jotawm promoting a BSP sibling: the remaining
+// page is filled exactly, while the resized ratio is retained instead of being
+// reset to an arbitrary equal split. Wider strips keep their explicit widths.
+rebalance_page_widths :: proc(m: ^Manager, ws: ^Workspace, include_single: bool = false) {
+    if m == nil || ws == nil || len(ws.Cols) == 0 { return }
+    o := Output_Of_WS(m, ws)
+    if o == nil { return }
+    p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+    if len(ws.Cols) == 1 {
+        if include_single && column_width(p, ws.Cols[0]) < p.WorkW {
+            ws.Cols[0].Width = 0
+        }
+        return
+    }
+    if len(ws.Cols) == 2 {
+        target := max(i32(120), p.WorkW - p.Inner)
+        first := column_width(p, ws.Cols[0])
+        second := column_width(p, ws.Cols[1])
+        total := max(i32(1), first + second)
+        if total == target { return }
+        first = i32(i64(target) * i64(first) / i64(total))
+        first = clamp(first, i32(60), target - 60)
+        second = target - first
+        ws.Cols[0].Width = first if first != p.ColW else 0
+        ws.Cols[1].Width = second if second != p.ColW else 0
+        return
+    }
+    // Three or more columns form a scrolling strip. Only discard overrides if
+    // stale topology somehow makes the whole strip narrower than one page.
+    if workspace_strip_total(ws, p) < p.WorkW {
+        for col in ws.Cols { col.Width = 0 }
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Moving
 // ----------------------------------------------------------------------------
@@ -340,33 +413,47 @@ Move_Dir :: proc(m: ^Manager, dir: Dir) -> bool {
     switch dir {
     case .Up:
         if row <= 0 { return false }
+        col.Wins[row].TileWeight, col.Wins[row-1].TileWeight =
+            col.Wins[row-1].TileWeight, col.Wins[row].TileWeight
         col.Wins[row], col.Wins[row-1] = col.Wins[row-1], col.Wins[row]
+        normalize_stack_weights(col)
         col.Focus = cl
         return true
     case .Down:
         if row + 1 >= len(col.Wins) { return false }
+        col.Wins[row].TileWeight, col.Wins[row+1].TileWeight =
+            col.Wins[row+1].TileWeight, col.Wins[row].TileWeight
         col.Wins[row], col.Wins[row+1] = col.Wins[row+1], col.Wins[row]
+        normalize_stack_weights(col)
         col.Focus = cl
         return true
     case .Left:
         if ci <= 0 { return false }
-        return move_window_to_column(ws, cl, col, ci, row, ws.Cols[ci - 1])
+        return move_window_to_column(m, ws, cl, col, ci, row, ws.Cols[ci - 1])
     case .Right:
         if ci + 1 >= len(ws.Cols) { return false }
-        return move_window_to_column(ws, cl, col, ci, row, ws.Cols[ci + 1])
+        return move_window_to_column(m, ws, cl, col, ci, row, ws.Cols[ci + 1])
     }
     return false
 }
 
 // move_window_to_column relocates cl out of (col at source `ci`, `row`) into
 // the bottom of `target`, cleaning up an emptied source column.
-move_window_to_column :: proc(ws: ^Workspace, cl: ^Client, col: ^Column, ci: int, row: int, target: ^Column) -> bool {
+move_window_to_column :: proc(m: ^Manager, ws: ^Workspace, cl: ^Client, col: ^Column, ci: int, row: int, target: ^Column) -> bool {
     if col.Focus == cl {
         col.Focus = in_column_focus_after_removal(col, row)
     }
     ordered_remove(&col.Wins, row)
-    if len(col.Wins) == 0 { detach_column_empty(ws, ci) }
+    source_removed := len(col.Wins) == 0
+    if source_removed {
+        detach_column_empty(ws, ci)
+    } else {
+        normalize_stack_weights(col)
+    }
+    cl.TileWeight = 0
     append(&target.Wins, cl)
+    normalize_stack_weights(target)
+    if source_removed { rebalance_page_widths(m, ws) }
     target.Focus = cl
     ws.Focus = cl
     return true
@@ -415,7 +502,11 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
         } else {
             if source.Focus == cl { source.Focus = in_column_focus_after_removal(source, row) }
             ordered_remove(&source.Wins, row)
-            if len(source.Wins) == 0 { detach_column_empty(src, ci) }
+            if len(source.Wins) == 0 {
+                detach_column_empty(src, ci)
+            } else {
+                normalize_stack_weights(source)
+            }
             if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
         }
         // When the drop collapses a resized source column into an otherwise
@@ -424,7 +515,16 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
         if source_removed && source_width > 0 && drop.Col.Width == 0 {
             drop.Col.Width = source_width
         }
+        cl.TileWeight = 0
         array_insert_at(&drop.Col.Wins, insert_at, cl)
+        normalize_stack_weights(drop.Col)
+        if source_removed {
+            if src != drop.Ws {
+                rebalance_page_widths(m, src, true)
+            } else {
+                rebalance_page_widths(m, src)
+            }
+        }
         drop.Col.Focus = cl
         drop.Ws.Focus = cl
         cl.Ws = drop.Ws
@@ -453,16 +553,28 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
     if source_removed {
         detach_column_empty(src, ci)
         if src == drop.Ws && ci < insert_at { insert_at -= 1 }
+    } else {
+        normalize_stack_weights(source)
     }
     if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
 
     fresh := new_column()
     // Width belongs to the visual column being dragged. Carry it into the new
-    // column for both reordering and extracting a window from a stack.
+    // column for a pure reorder. When extracting from a resized stack on the
+    // same workspace, use the complementary page width so the two resulting
+    // columns do not leave an empty strip at the right edge.
     fresh.Width = source_width
+    if src == drop.Ws && !source_removed && drop.Out != nil {
+        p := compute_params(m.Cfg, drop.Out.Geom, len(drop.Ws.Cols) + 1, drop.Out.Reserved)
+        source_w := column_width(p, source)
+        complement := p.WorkW - p.Inner - source_w
+        if complement >= 60 { fresh.Width = complement }
+    }
+    cl.TileWeight = 0
     append(&fresh.Wins, cl)
     fresh.Focus = cl
     array_insert_at(&drop.Ws.Cols, insert_at, fresh)
+    if src != drop.Ws && source_removed { rebalance_page_widths(m, src, true) }
     drop.Ws.Focus = cl
     cl.Ws = drop.Ws
     cl.Out = drop.Out
@@ -516,7 +628,13 @@ Move_Focused_To_WS :: proc(m: ^Manager, id: int) -> bool {
                 col.Focus = in_column_focus_after_removal(col, row)
             }
             ordered_remove(&col.Wins, row)
-            if len(col.Wins) == 0 { detach_column_empty(src, ci) }
+            column_removed := len(col.Wins) == 0
+            if column_removed {
+                detach_column_empty(src, ci)
+            } else {
+                normalize_stack_weights(col)
+            }
+            if column_removed { rebalance_page_widths(m, src, true) }
         }
         if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
     }
@@ -555,7 +673,13 @@ Move_Focused_To_Output_Rel :: proc(m: ^Manager, dir: int) -> bool {
         if col == nil { return false }
         if col.Focus == cl { col.Focus = in_column_focus_after_removal(col, row) }
         ordered_remove(&col.Wins, row)
-        if len(col.Wins) == 0 { detach_column_empty(src, ci) }
+        column_removed := len(col.Wins) == 0
+        if column_removed {
+            detach_column_empty(src, ci)
+        } else {
+            normalize_stack_weights(col)
+        }
+        if column_removed { rebalance_page_widths(m, src, true) }
         attach_new_window(m, dst, cl)
     }
     if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
@@ -584,7 +708,13 @@ detach_from_workspace :: proc(m: ^Manager, cl: ^Client) -> ^Workspace {
         if col != nil {
             if col.Focus == cl { col.Focus = in_column_focus_after_removal(col, row) }
             ordered_remove(&col.Wins, row)
-            if len(col.Wins) == 0 { detach_column_empty(ws, ci) }
+            column_removed := len(col.Wins) == 0
+            if column_removed {
+                detach_column_empty(ws, ci)
+            } else {
+                normalize_stack_weights(col)
+            }
+            if column_removed { rebalance_page_widths(m, ws, true) }
         }
     }
     if ws.Focus == cl { ws.Focus = fallback_focus_for_ws(ws) }
@@ -766,7 +896,13 @@ Set_Floating :: proc(m: ^Manager, cl: ^Client, on: bool) {
         if ci, col, row := column_of(ws, cl); col != nil {
             if col.Focus == cl { col.Focus = in_column_focus_after_removal(col, row) }
             ordered_remove(&col.Wins, row)
-            if len(col.Wins) == 0 { detach_column_empty(ws, ci) }
+            column_removed := len(col.Wins) == 0
+            if column_removed {
+                detach_column_empty(ws, ci)
+            } else {
+                normalize_stack_weights(col)
+            }
+            if column_removed { rebalance_page_widths(m, ws, true) }
         }
         cl.Floating = true
         append(&ws.Floaters, cl)
@@ -809,6 +945,7 @@ Set_Column_Layout :: proc(m: ^Manager, layout: Column_Layout) -> bool {
 
     if col.Layout == layout { return false }
     col.Layout = layout
+    if layout == .Stacked { normalize_stack_weights(col) }
     col.Focus = ws.Focus
     return true
 }
@@ -932,7 +1069,13 @@ Unmanage_Client :: proc(m: ^Manager, cl: ^Client) -> ^Client {
                 col.Focus = in_column_focus_after_removal(col, row)
             }
             ordered_remove(&col.Wins, row)
-            if len(col.Wins) == 0 { detach_column_empty(ws, ci) }
+            column_removed := len(col.Wins) == 0
+            if column_removed {
+                detach_column_empty(ws, ci)
+            } else {
+                normalize_stack_weights(col)
+            }
+            if column_removed { rebalance_page_widths(m, ws, true) }
             if ws.Focus == cl {
                 if ci < len(ws.Cols) && len(ws.Cols[ci].Wins) > 0 {
                     r := row

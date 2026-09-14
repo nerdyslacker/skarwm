@@ -1,4 +1,6 @@
-package main
+package wm
+
+import x11 "../x11"
 
 // EWMH/ICCCM compatibility for common X11 applications and external tools.
 //
@@ -44,7 +46,7 @@ package main
 // Property writes are deduplicated through Ewmh_State caches so reflows with
 // unchanged state do not spam the server (each write is a round trip).
 
-import c "core"
+import c "../core"
 
 // EWMH bookkeeping for deduplicated writes. Owned by g_wm.ewmh.
 Ewmh_State :: struct {
@@ -84,24 +86,24 @@ ewmh_init :: proc() {
     // _NET_SUPPORTING_WM_CHECK child: a tiny, unmapped InputOutput window that
     // names the WM. Both root and child point at the child; the child carries
     // the human-readable name (this is what `wmctrl -m` prints).
-    wid := xcb_generate_id(g_wm.conn)
-    xcb_create_window(
+    wid := x11.xcb_generate_id(g_wm.conn)
+    x11.xcb_create_window(
         g_wm.conn,
         0, // depth 0 == copy from parent
         wid,
         g_wm.root,
         0, 0, 1, 1,
         0, // border width
-        WINDOW_CLASS_INPUT_OUTPUT,
+        x11.WINDOW_CLASS_INPUT_OUTPUT,
         0, // visual 0 == copy from parent
         0, // no attributes
         nil,
     )
     st.check_win = wid
-    set_prop_atom(g_wm.conn, wid, atom("_NET_SUPPORTING_WM_CHECK"), atom("WINDOW"), wid)
-    set_prop_text(g_wm.conn, wid, atom("_NET_WM_NAME"), atom("UTF8_STRING"), "skarwm")
-    set_prop_atom(g_wm.conn, g_wm.root, atom("_NET_SUPPORTING_WM_CHECK"), atom("WINDOW"), wid)
-    set_prop_text(g_wm.conn, g_wm.root, atom("_NET_WM_NAME"), atom("UTF8_STRING"), "skarwm")
+    x11.set_prop_atom(g_wm.conn, wid, atom("_NET_SUPPORTING_WM_CHECK"), atom("WINDOW"), wid)
+    x11.set_prop_text(g_wm.conn, wid, atom("_NET_WM_NAME"), atom("UTF8_STRING"), "skarwm")
+    x11.set_prop_atom(g_wm.conn, g_wm.root, atom("_NET_SUPPORTING_WM_CHECK"), atom("WINDOW"), wid)
+    x11.set_prop_text(g_wm.conn, g_wm.root, atom("_NET_WM_NAME"), atom("UTF8_STRING"), "skarwm")
 
     // _NET_SUPPORTED: claim exactly what this file implements.
     supported := []u32 {
@@ -126,7 +128,7 @@ ewmh_init :: proc() {
         atom("WM_DELETE_WINDOW"),
         atom("WM_TAKE_FOCUS"),
     }
-    set_prop32(g_wm.conn, g_wm.root, atom("_NET_SUPPORTED"), atom("ATOM"), supported)
+    x11.set_prop32(g_wm.conn, g_wm.root, atom("_NET_SUPPORTED"), atom("ATOM"), supported)
 
     // _NET_CLIENT_LIST stays absent until the first manage() publishes it.
     // _NET_ACTIVE_WINDOW
@@ -135,14 +137,14 @@ ewmh_init :: proc() {
     // appear.
     ewmh_push_desktops()
     st.last_active = 0
-    set_prop_atom(g_wm.conn, g_wm.root, atom("_NET_ACTIVE_WINDOW"), atom("WINDOW"), 0)
-    xcb_flush(g_wm.conn)
+    x11.set_prop_atom(g_wm.conn, g_wm.root, atom("_NET_ACTIVE_WINDOW"), atom("WINDOW"), 0)
+    x11.xcb_flush(g_wm.conn)
 }
 
 ewmh_free :: proc() {
     st := &g_wm.ewmh
     if st.check_win != 0 {
-        xcb_destroy_window(g_wm.conn, st.check_win)
+        x11.xcb_destroy_window(g_wm.conn, st.check_win)
         st.check_win = 0
     }
     if st.win_desktop != nil do delete(st.win_desktop)
@@ -168,7 +170,7 @@ ewmh_push_client_list :: proc() {
     for cl, i in m.Clients {
         xids[i] = cl.Xid
     }
-    set_prop32(g_wm.conn, g_wm.root, atom("_NET_CLIENT_LIST"), atom("WINDOW"), xids)
+    x11.set_prop32(g_wm.conn, g_wm.root, atom("_NET_CLIENT_LIST"), atom("WINDOW"), xids)
 }
 
 // desktop_count returns the number of desktops to advertise: the highest
@@ -200,11 +202,11 @@ ewmh_push_desktops :: proc() {
     count := desktop_count(g_wm.m)
     if idx != st.last_desktop {
         st.last_desktop = idx
-        set_prop32(g_wm.conn, g_wm.root, atom("_NET_CURRENT_DESKTOP"), atom("CARDINAL"), []u32{u32(idx)})
+        x11.set_prop32(g_wm.conn, g_wm.root, atom("_NET_CURRENT_DESKTOP"), atom("CARDINAL"), []u32{u32(idx)})
     }
     if count != st.last_count {
         st.last_count = count
-        set_prop32(g_wm.conn, g_wm.root, atom("_NET_NUMBER_OF_DESKTOPS"), atom("CARDINAL"), []u32{u32(count)})
+        x11.set_prop32(g_wm.conn, g_wm.root, atom("_NET_NUMBER_OF_DESKTOPS"), atom("CARDINAL"), []u32{u32(count)})
     }
 }
 
@@ -236,7 +238,7 @@ ewmh_push_workarea :: proc() {
         }
         if same { return }
     }
-    set_prop32(g_wm.conn, g_wm.root, atom("_NET_WORKAREA"), atom("CARDINAL"), vals)
+    x11.set_prop32(g_wm.conn, g_wm.root, atom("_NET_WORKAREA"), atom("CARDINAL"), vals)
     if st.workarea != nil do delete(st.workarea)
     st.workarea = make([]u32, len(vals))
     copy(st.workarea, vals)
@@ -253,7 +255,7 @@ ewmh_push_client :: proc(cl: ^c.Client) {
     idx := u32(cl.Ws.Id - 1)
     if cached, ok := st.win_desktop[cl.Xid]; ok && cached == idx { return }
     st.win_desktop[cl.Xid] = idx
-    set_prop32(g_wm.conn, cl.Xid, atom("_NET_WM_DESKTOP"), atom("CARDINAL"), []u32{idx})
+    x11.set_prop32(g_wm.conn, cl.Xid, atom("_NET_WM_DESKTOP"), atom("CARDINAL"), []u32{idx})
 }
 
 // ewmh_push_state mirrors fullscreen and maximize into one composited
@@ -277,14 +279,14 @@ ewmh_push_state :: proc(cl: ^c.Client) {
         states[n + 1] = atom("_NET_WM_STATE_MAXIMIZED_HORZ")
         n += 2
     }
-    set_prop32(g_wm.conn, cl.Xid, atom("_NET_WM_STATE"), atom("ATOM"), states[:n])
+    x11.set_prop32(g_wm.conn, cl.Xid, atom("_NET_WM_STATE"), atom("ATOM"), states[:n])
 }
 
 // ewmh_set_wm_state writes ICCCM WM_STATE (Normal/Withdrawn + no icon window).
 // The property uses format 32 with state and icon-window values.
 ewmh_set_wm_state :: proc(cl: ^c.Client, state: i32) {
     vals := [2]u32{u32(state), 0}
-    xcb_change_property(g_wm.conn, PROP_MODE_REPLACE, cl.Xid, atom("WM_STATE"), atom("WM_STATE"), ATOM_FORMAT_32, 2, &vals[0])
+    x11.xcb_change_property(g_wm.conn, x11.PROP_MODE_REPLACE, cl.Xid, atom("WM_STATE"), atom("WM_STATE"), x11.ATOM_FORMAT_32, 2, &vals[0])
 }
 
 // ---------------------------------------------------------------------------
@@ -344,7 +346,7 @@ ewmh_push_active :: proc(focused: ^c.Client) {
     }
     if xid == st.last_active { return }
     st.last_active = xid
-    set_prop_atom(g_wm.conn, g_wm.root, atom("_NET_ACTIVE_WINDOW"), atom("WINDOW"), xid)
+    x11.set_prop_atom(g_wm.conn, g_wm.root, atom("_NET_ACTIVE_WINDOW"), atom("WINDOW"), xid)
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +358,7 @@ ewmh_push_active :: proc(focused: ^c.Client) {
 // message's window field (wmctrl, xdotool, mpv, browsers, GTK); the client
 // message reaches us through our root Substructure selection. A few legacy
 // senders put the window in data[0] instead — accepted for _NET_ACTIVE_WINDOW.
-ewmh_on_client_message :: proc(ev: ^Client_Message_Event) {
+ewmh_on_client_message :: proc(ev: ^x11.Client_Message_Event) {
     m := g_wm.m
     msg := ev.type_
 
@@ -412,18 +414,18 @@ ewmh_on_client_message :: proc(ev: ^Client_Message_Event) {
 ewmh_activate_popup :: proc(xid: u32) {
     if xid == 0 || xid == g_wm.root { return }
     ok, override_redirect, map_state, class := window_info(xid)
-    if !ok || !override_redirect || map_state != MAP_STATE_VIEWABLE ||
-       class != WINDOW_CLASS_INPUT_OUTPUT {
+    if !ok || !override_redirect || map_state != x11.MAP_STATE_VIEWABLE ||
+       class != x11.WINDOW_CLASS_INPUT_OUTPUT {
         return
     }
-    xcb_set_input_focus(g_wm.conn, INPUT_FOCUS_POINTER_ROOT, xid, CURRENT_TIME)
-    xcb_flush(g_wm.conn)
+    x11.xcb_set_input_focus(g_wm.conn, x11.INPUT_FOCUS_POINTER_ROOT, xid, x11.CURRENT_TIME)
+    x11.xcb_flush(g_wm.conn)
 }
 
 // ewmh_state_request applies fullscreen and paired maximize requests. Maximize
 // may be requested for an inactive workspace; fullscreen retains skarwm's
 // visible-focused-window invariant.
-ewmh_state_request :: proc(ev: ^Client_Message_Event) {
+ewmh_state_request :: proc(ev: ^x11.Client_Message_Event) {
     m := g_wm.m
     cl := m.ByXid[ev.window]
     if cl == nil { return }
@@ -496,7 +498,7 @@ ewmh_activate :: proc(cl: ^c.Client) {
 // window with mask 0, which the server delivers to the creating client.
 ewmh_announce_take_focus :: proc(cl: ^c.Client) {
     if !client_has_protocol(cl.Xid, atom("WM_TAKE_FOCUS")) { return }
-    send_client_message(cl.Xid, atom("WM_PROTOCOLS"), atom("WM_TAKE_FOCUS"), CURRENT_TIME)
+    send_client_message(cl.Xid, atom("WM_PROTOCOLS"), atom("WM_TAKE_FOCUS"), x11.CURRENT_TIME)
 }
 
 // adopt_pre_wm_state inherits fullscreen/maximize state present before manage
@@ -505,7 +507,7 @@ adopt_pre_wm_state :: proc(cl: ^c.Client) {
     fs := atom("_NET_WM_STATE_FULLSCREEN")
     max_v := atom("_NET_WM_STATE_MAXIMIZED_VERT")
     max_h := atom("_NET_WM_STATE_MAXIMIZED_HORZ")
-    data, ok := get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_STATE"), atom("ATOM"))
+    data, ok := x11.get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_STATE"), atom("ATOM"))
     if !ok { return }
     defer delete(data)
     if len(data) % 4 != 0 { return }

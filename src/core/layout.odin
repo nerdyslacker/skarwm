@@ -676,17 +676,25 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             if content < i32(nw) { content = i32(nw) }
 
             total_weight := f64(0)
+            positive_weights := 0
             for cl in col.Wins {
-                weight := cl.TileWeight
-                if weight <= 0 { weight = 1 }
-                total_weight += weight
+                if cl.TileWeight > 0 {
+                    total_weight += cl.TileWeight
+                    positive_weights += 1
+                }
             }
+            // A default/new row must use the same scale as existing weights.
+            // Using literal 1 beside weights captured as pixel heights is what
+            // previously collapsed newly inserted windows to almost nothing.
+            default_weight := f64(1)
+            if positive_weights > 0 { default_weight = total_weight / f64(positive_weights) }
+            total_weight += default_weight * f64(nw - positive_weights)
             heights := make([]i32, nw)
             used := i32(0)
             distributable := content - i32(nw)
             for cl, i in col.Wins {
                 weight := cl.TileWeight
-                if weight <= 0 { weight = 1 }
+                if weight <= 0 { weight = default_weight }
                 heights[i] = 1 + i32(f64(distributable) * weight / total_weight)
                 used += heights[i]
             }

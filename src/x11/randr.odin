@@ -1,4 +1,4 @@
-package main
+package x11
 
 // Minimal XCB RandR 1.5 foreign surface used for monitor discovery and change
 // notifications. Core XCB connection/error/cookie types live in xcb.odin.

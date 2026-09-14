@@ -1,4 +1,10 @@
-package main
+package wm
+
+import process "../process"
+import logger "../log"
+import input "../input"
+import c "../core"
+import x11 "../x11"
 
 // i3-compatible IPC server. This file is the socket half of the i3 subset
 // skarwm serves; the wire format, the JSON
@@ -18,8 +24,6 @@ package main
 import "core:os"
 import "core:strings"
 import "core:sys/posix"
-
-import c "core"
 import cc "core:c" // c.char / c.size_t (c is taken by the skarwm core package)
 
 Ipc_Client :: struct {
@@ -61,7 +65,7 @@ ipc_start :: proc() {
         buf: [256]u8
         if posix.mkdir(nul_path(buf[:], path[:i]), {.IRUSR, .IWUSR, .IXUSR}) == .FAIL &&
             posix.errno() != .EEXIST {
-            log_warn("ipc: cannot create", path[:i], ":", posix.errno(), "— IPC disabled")
+            logger.Warn("ipc: cannot create", path[:i], ":", posix.errno(), "— IPC disabled")
             delete(path)
             return
         }
@@ -74,7 +78,7 @@ ipc_start :: proc() {
 
     fd := posix.socket(.UNIX, .STREAM)
     if fd < 0 {
-        log_warn("ipc: socket:", posix.errno(), "— IPC disabled")
+        logger.Warn("ipc: socket:", posix.errno(), "— IPC disabled")
         delete(path)
         return
     }
@@ -83,16 +87,16 @@ ipc_start :: proc() {
     addr.sun_family = .UNIX
     for i in 0 ..< len(path) { addr.sun_path[i] = cc.char(path[i]) }
     if posix.bind(fd, (^posix.sockaddr)(&addr), posix.socklen_t(size_of(addr))) == .FAIL {
-        log_warn("ipc: bind", path, ":", posix.errno(), "— IPC disabled")
+        logger.Warn("ipc: bind", path, ":", posix.errno(), "— IPC disabled")
         posix.close(fd)
         delete(path)
         return
     }
     if posix.chmod(nul_path(buf[:], path), {.IRUSR, .IWUSR}) == .FAIL {
-        log_warn("ipc: chmod:", posix.errno(), "(continuing)")
+        logger.Warn("ipc: chmod:", posix.errno(), "(continuing)")
     }
     if posix.listen(fd, 16) == .FAIL {
-        log_warn("ipc: listen:", posix.errno(), "— IPC disabled")
+        logger.Warn("ipc: listen:", posix.errno(), "— IPC disabled")
         posix.close(fd)
         delete(path)
         return
@@ -106,7 +110,7 @@ ipc_start :: proc() {
 
     g_ipc.listen = fd
     g_ipc.path = path // the socket file now belongs to us (unlinked at stop)
-    log_info("ipc: listening on", path)
+    logger.Info("ipc: listening on", path)
 }
 
 // ipc_sock_path resolves where the listener socket lives. ok = false when the
@@ -120,7 +124,7 @@ ipc_sock_path :: proc() -> (path: string, ok: bool) {
     if override != "" {
         strings.write_string(&sb, override)
         if len(strings.to_string(sb)) >= len(posix.sockaddr_un{}.sun_path) {
-            log_warn("ipc: socket path too long — IPC disabled")
+            logger.Warn("ipc: socket path too long — IPC disabled")
             return "", false
         }
         return strings.clone(strings.to_string(sb)), true
@@ -135,7 +139,7 @@ ipc_sock_path :: proc() -> (path: string, ok: bool) {
         strings.write_string(&sb, ".sock")
     }
     if len(strings.to_string(sb)) >= len(posix.sockaddr_un{}.sun_path) {
-        log_warn("ipc: socket path too long — IPC disabled")
+        logger.Warn("ipc: socket path too long — IPC disabled")
         return "", false
     }
     return strings.clone(strings.to_string(sb)), true
@@ -210,7 +214,7 @@ ipc_accept :: proc() {
         err := posix.errno()
         if err == .EINTR || err == .ECONNABORTED { continue } // transient
         if err == .EAGAIN { return }                          // drained
-        log_warn("ipc: accept:", err, "— disabling the listener")
+        logger.Warn("ipc: accept:", err, "— disabling the listener")
         ipc_listener_down()
         return
     }
@@ -306,7 +310,7 @@ ipc_handle_frame :: proc(cl: ^Ipc_Client, f: c.Ipc_Frame) -> bool {
         delete(pl)
 
     case .Event_Workspace, .Event_Output, .Event_Window:
-        // Event frames are server→client traffic; a client that sends one
+        // x11.Event frames are server→client traffic; a client that sends one
         // gets the same empty-body reply as any other unknown type.
         ipc_send(cl, msg, nil)
 
@@ -317,7 +321,7 @@ ipc_handle_frame :: proc(cl: ^Ipc_Client, f: c.Ipc_Frame) -> bool {
 }
 
 ipc_run_command :: proc(cmd: c.Ipc_Command) {
-    b: Binding
+    b: input.Binding
     b.arg = cmd.arg
     switch cmd.action {
     case .Focus_Left:        b.action = .Focus_Left
@@ -356,7 +360,7 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
         old_focus := g_wm.m.Focused
         count, changed := c.Scratchpad_Toggle_Target(g_wm.m, field, cmd.text, cmd.flag)
         if count == 0 && cmd.spawn != "" {
-            spawn_sh(cmd.spawn)
+            process.Spawn(cmd.spawn)
         } else if changed {
             raise_focused()
             reflow()
