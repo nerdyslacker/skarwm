@@ -1,4 +1,4 @@
-package main
+package x11
 
 // Thin, hand-written foreign layer over libxcb (X11 core protocol).
 //
@@ -441,7 +441,7 @@ EVENT_REPARENT_NOTIFY :: 21
 // bit 0x80 marks an error packet (type = error_code | 0x80)
 // Bit 7 of an event's response_type marks events injected by a client with
 // XSendEvent — every EWMH/ICCCM client message is synthetic, and xcb (unlike
-// Xlib) reports the bit as-is. Event dispatch strips it (see main.odin); a
+// Xlib) reports the bit as-is. Event dispatch strips it (see runtime.odin); a
 // genuine error packet from an unchecked request has response type 0 after
 // stripping.
 SEND_EVENT_BIT :: 0x80

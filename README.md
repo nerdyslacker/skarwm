@@ -72,6 +72,28 @@ kept under `config/`.
 Run a standalone nested session with `make xephyr`, or use
 `make xephyr-multi` for two RandR monitor objects.
 
+## Source layout
+
+The source is split into small packages with one-way dependencies:
+
+```text
+src/
+├── main.odin          executable entry point
+├── core/              model, layout, operations, IPC types, pure math
+├── x11/               low-level XCB, properties, and RandR bindings
+├── input/             keysyms, modifiers, actions, and resolved bindings
+├── rendering/         geometry animation and rounded window shapes
+├── ui/                tabs, help, and drag/drop overlays
+├── process/           detached command launching
+├── log/               logging
+└── wm/                runtime orchestration, config, EWMH, outputs, IPC server
+cmd/skarwm-msg/        standalone IPC command client
+tests/core_tests/      X-independent core regression suite
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the package dependency map,
+runtime flow, module responsibilities, and suggested reading order.
+
 ## Configuration
 
 The configuration search order is `skarwm -c FILE`, `$SKARWM_CONFIG`,
@@ -164,3 +186,4 @@ The window-management design was inspired by:
 
 - [tonybanters/oxwm](https://github.com/tonybanters/oxwm)
 - [Mr-Emacs/nwm](https://github.com/Mr-Emacs/nwm)
+- [mangowm/mango](https://github.com/mangowm/mango)

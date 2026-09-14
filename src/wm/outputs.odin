@@ -1,4 +1,8 @@
-package main
+package wm
+
+import logger "../log"
+import c "../core"
+import x11 "../x11"
 
 // RandR 1.5 monitor discovery. Monitor objects (not raw CRTCs) correctly
 // represent mirrored outputs as one logical rectangle and preserve explicit
@@ -6,7 +10,6 @@ package main
 
 import "core:fmt"
 import "core:strings"
-import c "core"
 
 Randr_State :: struct {
     available: bool,
@@ -22,69 +25,69 @@ g_randr: Randr_State
 
 randr_init :: proc() {
     name := "RANDR"
-    e: ^Error
-    qr := xcb_query_extension_reply(
+    e: ^x11.Error
+    qr := x11.xcb_query_extension_reply(
         g_wm.conn,
-        xcb_query_extension(g_wm.conn, u16(len(name)), cstring(raw_data(name))),
+        x11.xcb_query_extension(g_wm.conn, u16(len(name)), cstring(raw_data(name))),
         &e,
     )
-    if e != nil { free_libc(e) }
+    if e != nil { x11.free_libc(e) }
     if qr == nil || qr.present == 0 {
-        if qr != nil { free_libc(qr) }
-        log_warn("RandR unavailable; using one screen-sized output")
+        if qr != nil { x11.free_libc(qr) }
+        logger.Warn("RandR unavailable; using one screen-sized output")
         return
     }
     g_randr.event_base = qr.first_event
-    free_libc(qr)
+    x11.free_libc(qr)
 
     e = nil
-    vr := xcb_randr_query_version_reply(g_wm.conn, xcb_randr_query_version(g_wm.conn, 1, 5), &e)
-    if e != nil { free_libc(e) }
+    vr := x11.xcb_randr_query_version_reply(g_wm.conn, x11.xcb_randr_query_version(g_wm.conn, 1, 5), &e)
+    if e != nil { x11.free_libc(e) }
     if vr == nil || vr.major_version < 1 || (vr.major_version == 1 && vr.minor_version < 5) {
-        if vr != nil { free_libc(vr) }
-        log_warn("RandR 1.5 monitor objects unavailable; using one screen-sized output")
+        if vr != nil { x11.free_libc(vr) }
+        logger.Warn("RandR 1.5 monitor objects unavailable; using one screen-sized output")
         return
     }
-    free_libc(vr)
+    x11.free_libc(vr)
 
-    mask := RANDR_NOTIFY_MASK_SCREEN_CHANGE | RANDR_NOTIFY_MASK_CRTC_CHANGE |
-        RANDR_NOTIFY_MASK_OUTPUT_CHANGE | RANDR_NOTIFY_MASK_OUTPUT_PROPERTY |
-        RANDR_NOTIFY_MASK_RESOURCE_CHANGE
-    xcb_randr_select_input(g_wm.conn, g_wm.root, mask)
+    mask := x11.RANDR_NOTIFY_MASK_SCREEN_CHANGE | x11.RANDR_NOTIFY_MASK_CRTC_CHANGE |
+        x11.RANDR_NOTIFY_MASK_OUTPUT_CHANGE | x11.RANDR_NOTIFY_MASK_OUTPUT_PROPERTY |
+        x11.RANDR_NOTIFY_MASK_RESOURCE_CHANGE
+    x11.xcb_randr_select_input(g_wm.conn, g_wm.root, mask)
     g_randr.available = true
     randr_scan(false)
 }
 
 atom_name :: proc(id: u32) -> string {
-    e: ^Error
-    reply := xcb_get_atom_name_reply(g_wm.conn, xcb_get_atom_name(g_wm.conn, id), &e)
-    if e != nil { free_libc(e) }
+    e: ^x11.Error
+    reply := x11.xcb_get_atom_name_reply(g_wm.conn, x11.xcb_get_atom_name(g_wm.conn, id), &e)
+    if e != nil { x11.free_libc(e) }
     if reply == nil || reply.name_len == 0 {
-        if reply != nil { free_libc(reply) }
+        if reply != nil { x11.free_libc(reply) }
         return ""
     }
     n := int(reply.name_len)
-    src := ([^]u8)(rawptr(uintptr(rawptr(reply)) + uintptr(size_of(Get_Atom_Name_Reply))))[:n]
+    src := ([^]u8)(rawptr(uintptr(rawptr(reply)) + uintptr(size_of(x11.Get_Atom_Name_Reply))))[:n]
     out := make([]byte, n)
     copy(out, src)
-    free_libc(reply)
+    x11.free_libc(reply)
     return string(out)
 }
 
 randr_scan :: proc(emit_event: bool) {
     if !g_randr.available { return }
-    e: ^Error
-    reply := xcb_randr_get_monitors_reply(g_wm.conn, xcb_randr_get_monitors(g_wm.conn, g_wm.root, 1), &e)
-    if e != nil { free_libc(e) }
+    e: ^x11.Error
+    reply := x11.xcb_randr_get_monitors_reply(g_wm.conn, x11.xcb_randr_get_monitors(g_wm.conn, g_wm.root, 1), &e)
+    if e != nil { x11.free_libc(e) }
     if reply == nil { return }
-    defer free_libc(reply)
+    defer x11.free_libc(reply)
 
     specs := make([dynamic]c.Output_Spec, 0, int(reply.n_monitors))
     defer {
         for spec in specs { if spec.Name != "" { delete(spec.Name) } }
         delete(specs)
     }
-    it := xcb_randr_get_monitors_monitors_iterator(reply)
+    it := x11.xcb_randr_get_monitors_monitors_iterator(reply)
     idx := 0
     for it.rem > 0 && it.data != nil {
         mi := it.data
@@ -98,7 +101,7 @@ randr_scan :: proc(emit_event: bool) {
             })
             idx += 1
         }
-        xcb_randr_monitor_info_next(&it)
+        x11.xcb_randr_monitor_info_next(&it)
     }
     if len(specs) == 0 { return }
     has_primary := false
@@ -132,7 +135,7 @@ randr_scan :: proc(emit_event: bool) {
         // The target output or its workarea may have disappeared. Require a
         // fresh drag instead of leaving an indicator at stale root geometry.
         if g_wm.mouse_client != nil { cancel_pointer_operation() }
-        log_info("RandR: outputs changed; active monitors:", len(specs))
+        logger.Info("RandR: outputs changed; active monitors:", len(specs))
         if emit_event {
             reflow()
             for change in changes { ipc_broadcast_output_event(change.kind, change.output) }

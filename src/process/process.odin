@@ -1,4 +1,6 @@
-package main
+package process
+
+import logger "../log"
 
 // Child-process launching + terminal detection.
 //
@@ -22,9 +24,9 @@ import "core:sys/posix"
 // parent overwrites the buffer on the next spawn.
 sh_buf: [1024]byte
 
-spawn_sh :: proc(cmdline: string) {
+Spawn :: proc(cmdline: string) {
     if len(cmdline) == 0 || len(cmdline) >= len(sh_buf) {
-        log_warn("ignoring spawn (empty or too long)")
+        logger.Warn("ignoring spawn (empty or too long)")
         return
     }
     copy(sh_buf[:len(cmdline)], cmdline)
@@ -32,7 +34,7 @@ spawn_sh :: proc(cmdline: string) {
 
     pid := posix.fork()
     if pid < 0 {
-        log_error("fork failed:", posix.errno())
+        logger.Error("fork failed:", posix.errno())
         return
     }
     if pid == 0 {
@@ -72,7 +74,7 @@ child_exec_sh :: proc() {
 // Returns "" when nothing is found (Super+Return then no-ops with a warning).
 // The returned string may be owned (env value) or a static literal; the caller
 // treats it as a read-only, process-lifetime value (never freed).
-detect_terminal :: proc() -> string {
+Detect_Terminal :: proc() -> string {
     buf: [512]u8
     env := os.get_env_buf(buf[:], "TERMINAL")
     if env != "" {

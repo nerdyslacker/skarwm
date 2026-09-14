@@ -1,7 +1,7 @@
 package core
 
 // Config holds every tunable that drives layout/behavior and is settable from
-// the rc configuration layer (src/config.odin). It lives in `core` so layout
+// the rc configuration layer (src/wm/config.odin). It lives in `core` so layout
 // math can be tested without X or the config parser.
 //
 // `Gap` / `OuterGap` / `InnerGap` / `BorderWidth` / `CornerRadius` are in pixels; the two

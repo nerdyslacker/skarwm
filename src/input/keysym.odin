@@ -1,11 +1,13 @@
-package main
+package input
+
+import x11 "../x11"
 
 // Keysym name lookup + per-server keymap/modifier-mapping caches.
 //
 // libxcb-keysyms is not linked (headers absent), so the equivalent work is done
 // directly against the X core protocol:
-//   - xcb_get_keyboard_mapping  -> keycode -> keysyms (levels per keycode)
-//   - xcb_get_modifier_mapping  -> modifier index -> keycodes
+//   - x11.xcb_get_keyboard_mapping  -> keycode -> keysyms (levels per keycode)
+//   - x11.xcb_get_modifier_mapping  -> modifier index -> keycodes
 // Caches are rebuilt on XCB_MAPPING_NOTIFY.
 
 // Keyboard mapping snapshot. `syms` is a flat array laid out as
@@ -24,44 +26,44 @@ Mod_Map :: struct {
     keycodes:              []u8, // 8 rows x keycodes_per_modifier, row-major
 }
 
-kbd_load :: proc(c: ^Connection) -> (m: Kbd_Map, ok: bool) {
-    cookie := xcb_get_keyboard_mapping(c, MIN_KEYCODE, u8(KEYCODE_COUNT))
-    e: ^Error
-    reply := xcb_get_keyboard_mapping_reply(c, cookie, &e)
+kbd_load :: proc(c: ^x11.Connection) -> (m: Kbd_Map, ok: bool) {
+    cookie := x11.xcb_get_keyboard_mapping(c, MIN_KEYCODE, u8(KEYCODE_COUNT))
+    e: ^x11.Error
+    reply := x11.xcb_get_keyboard_mapping_reply(c, cookie, &e)
     if e != nil {
-        free_libc(e)
+        x11.free_libc(e)
         return m, false
     }
     if reply == nil { return m, false }
-    defer free_libc(reply)
+    defer x11.free_libc(reply)
 
     kpm := int(reply.keysyms_per_keycode)
     if kpm == 0 { return m, false }
     n := KEYCODE_COUNT * kpm
     arr := make([]u32, n)
-    src := rawptr(uintptr(rawptr(reply)) + uintptr(size_of(Get_Keyboard_Mapping_Reply)))
+    src := rawptr(uintptr(rawptr(reply)) + uintptr(size_of(x11.Get_Keyboard_Mapping_Reply)))
     copy(arr, ([^]u32)(src)[:n])
     m.keysyms_per_keycode = kpm
     m.syms = arr
     return m, true
 }
 
-mod_load :: proc(c: ^Connection) -> (m: Mod_Map, ok: bool) {
-    cookie := xcb_get_modifier_mapping(c)
-    e: ^Error
-    reply := xcb_get_modifier_mapping_reply(c, cookie, &e)
+mod_load :: proc(c: ^x11.Connection) -> (m: Mod_Map, ok: bool) {
+    cookie := x11.xcb_get_modifier_mapping(c)
+    e: ^x11.Error
+    reply := x11.xcb_get_modifier_mapping_reply(c, cookie, &e)
     if e != nil {
-        free_libc(e)
+        x11.free_libc(e)
         return m, false
     }
     if reply == nil { return m, false }
-    defer free_libc(reply)
+    defer x11.free_libc(reply)
 
     kcpm := int(reply.keycodes_per_modifier)
     if kcpm == 0 { return m, false }
     n := 8 * kcpm
     arr := make([]u8, n)
-    src := rawptr(uintptr(rawptr(reply)) + uintptr(size_of(Get_Modifier_Mapping_Reply)))
+    src := rawptr(uintptr(rawptr(reply)) + uintptr(size_of(x11.Get_Modifier_Mapping_Reply)))
     copy(arr, ([^]u8)(src)[:n])
     m.keycodes_per_modifier = kcpm
     m.keycodes = arr
@@ -136,31 +138,31 @@ keysym_from_name :: proc(name: string) -> u32 {
 canonical_mods_for_name :: proc(name: string, kb: ^Kbd_Map, mm: ^Mod_Map) -> u16 {
     switch name {
     case "Shift", "shift":
-        return MOD_MASK_SHIFT
+        return x11.MOD_MASK_SHIFT
     case "Control", "Ctrl", "control":
-        return MOD_MASK_CONTROL
+        return x11.MOD_MASK_CONTROL
     case "Mod1":
-        return MOD_MASK_MOD1
+        return x11.MOD_MASK_MOD1
     case "Mod2":
-        return MOD_MASK_MOD2
+        return x11.MOD_MASK_MOD2
     case "Mod3":
-        return MOD_MASK_MOD3
+        return x11.MOD_MASK_MOD3
     case "Mod4":
-        return MOD_MASK_MOD4
+        return x11.MOD_MASK_MOD4
     case "Mod5":
-        return MOD_MASK_MOD5
+        return x11.MOD_MASK_MOD5
     case "Super", "super":
         if m := modifier_mask_for_keysym(kb, mm, keysym_from_name("Super_L")); m != 0 {
             return m
         }
-        return MOD_MASK_MOD4
+        return x11.MOD_MASK_MOD4
     case "Hyper", "hyper":
         if m := modifier_mask_for_keysym(kb, mm, keysym_from_name("Hyper_L")); m != 0 {
             return m
         }
-        return MOD_MASK_MOD3
+        return x11.MOD_MASK_MOD3
     case "Alt", "alt":
-        return MOD_MASK_MOD1
+        return x11.MOD_MASK_MOD1
     case:
         return 0
     }

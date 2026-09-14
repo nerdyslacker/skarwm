@@ -1,10 +1,13 @@
-package main
+package rendering
+
+import logger "../log"
+import x11 "../x11"
+import c "../core"
 
 // X Shape-backed rounded client corners. Shapes are relative to the window
 // origin, so moving a window needs no update; resize animation frames do.
 
 import "core:math"
-import c "core"
 
 Shape_Rectangle :: struct {
     x, y: i16,
@@ -21,37 +24,37 @@ foreign import xcb_shape "system:xcb-shape"
 @(default_calling_convention = "c")
 foreign xcb_shape {
     xcb_shape_rectangles :: proc(
-        conn: ^Connection,
+        conn: ^x11.Connection,
         operation, destination_kind, ordering: u8,
         destination_window: u32,
         x_offset, y_offset: i16,
         rectangles_len: u32,
         rectangles: ^Shape_Rectangle,
-    ) -> Cookie ---
+    ) -> x11.Cookie ---
     xcb_shape_mask :: proc(
-        conn: ^Connection,
+        conn: ^x11.Connection,
         operation, destination_kind: u8,
         destination_window: u32,
         x_offset, y_offset: i16,
         source_bitmap: u32,
-    ) -> Cookie ---
+    ) -> x11.Cookie ---
 }
 
-shape_init :: proc() {
+shape_init :: proc(state: ^State, conn: ^x11.Connection) {
     name := "SHAPE"
-    e: ^Error
-    reply := xcb_query_extension_reply(
-        g_wm.conn,
-        xcb_query_extension(g_wm.conn, u16(len(name)), cstring(raw_data(name))),
+    e: ^x11.Error
+    reply := x11.xcb_query_extension_reply(
+        conn,
+        x11.xcb_query_extension(conn, u16(len(name)), cstring(raw_data(name))),
         &e,
     )
-    if e != nil { free_libc(e) }
+    if e != nil { x11.free_libc(e) }
     if reply != nil {
-        g_wm.shape_available = reply.present != 0
-        free_libc(reply)
+        state.ShapeAvailable = reply.present != 0
+        x11.free_libc(reply)
     }
-    if !g_wm.shape_available {
-        log_warn("X Shape unavailable; corner_radius is disabled")
+    if !state.ShapeAvailable {
+        logger.Warn("X Shape unavailable; corner_radius is disabled")
     }
 }
 
@@ -63,12 +66,12 @@ rounded_inset :: proc(radius, row, height: i32) -> i32 {
     return i32(math.ceil(r - math.sqrt(max(f64(0), r * r - dy * dy))))
 }
 
-shape_rounded_rectangle :: proc(xid: u32, kind: u8, x, y, width, height, radius: i32) {
+shape_rounded_rectangle :: proc(conn: ^x11.Connection, xid: u32, kind: u8, x, y, width, height, radius: i32) {
     r := clamp(radius, i32(0), min(width, height) / 2)
     if r <= 0 {
         rect := Shape_Rectangle{x = i16(x), y = i16(y), width = u16(width), height = u16(height)}
         xcb_shape_rectangles(
-            g_wm.conn, SHAPE_SET, kind, SHAPE_UNSORTED, xid,
+            conn, SHAPE_SET, kind, SHAPE_UNSORTED, xid,
             0, 0, 1, &rect,
         )
         return
@@ -95,49 +98,49 @@ shape_rounded_rectangle :: proc(xid: u32, kind: u8, x, y, width, height, radius:
         height = u16(height - band_y),
     })
     xcb_shape_rectangles(
-        g_wm.conn, SHAPE_SET, kind, SHAPE_UNSORTED, xid,
+        conn, SHAPE_SET, kind, SHAPE_UNSORTED, xid,
         0, 0, u32(len(rects)), raw_data(rects),
     )
 }
 
-shape_client :: proc(cl: ^c.Client, geom: c.Rect, border: i32) {
-    if !g_wm.shape_available || cl == nil { return }
+shape_client :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, cl: ^c.Client, geom: c.Rect, border: i32) {
+    if !state.ShapeAvailable || cl == nil { return }
 
     width := max(i32(1), geom.W) + 2 * max(i32(0), border)
     height := max(i32(1), geom.H) + 2 * max(i32(0), border)
-    radius := clamp(g_wm.m.Cfg.CornerRadius, i32(0), min(width, height) / 2)
+    radius := clamp(m.Cfg.CornerRadius, i32(0), min(width, height) / 2)
     rounded := radius > 0 && !cl.Fullscreen && !cl.Dock
     desired := Window_Shape_State{
         Width = width, Height = height, Border = border,
         Radius = radius, Rounded = rounded,
     }
-    if old, found := g_wm.window_shapes[cl.Xid]; found && old == desired { return }
+    if old, found := state.WindowShapes[cl.Xid]; found && old == desired { return }
 
     if !rounded {
         // None removes both client regions and restores the server defaults.
-        xcb_shape_mask(g_wm.conn, SHAPE_SET, SHAPE_BOUNDING, cl.Xid, 0, 0, 0)
-        xcb_shape_mask(g_wm.conn, SHAPE_SET, SHAPE_CLIP, cl.Xid, 0, 0, 0)
-        g_wm.window_shapes[cl.Xid] = desired
+        xcb_shape_mask(conn, SHAPE_SET, SHAPE_BOUNDING, cl.Xid, 0, 0, 0)
+        xcb_shape_mask(conn, SHAPE_SET, SHAPE_CLIP, cl.Xid, 0, 0, 0)
+        state.WindowShapes[cl.Xid] = desired
         return
     }
 
     b := max(i32(0), border)
     // X draws its border as bounding minus clip. Concentric outer and inner
     // arcs keep that difference visually equal to `border` around corners.
-    shape_rounded_rectangle(cl.Xid, SHAPE_BOUNDING, -b, -b, width, height, radius)
+    shape_rounded_rectangle(conn, cl.Xid, SHAPE_BOUNDING, -b, -b, width, height, radius)
     shape_rounded_rectangle(
-        cl.Xid, SHAPE_CLIP, 0, 0,
+        conn, cl.Xid, SHAPE_CLIP, 0, 0,
         max(i32(1), geom.W), max(i32(1), geom.H), max(i32(0), radius - b),
     )
-    g_wm.window_shapes[cl.Xid] = desired
+    state.WindowShapes[cl.Xid] = desired
 }
 
-shape_forget :: proc(xid: u32) {
-    if g_wm.window_shapes != nil { delete_key(&g_wm.window_shapes, xid) }
+shape_forget :: proc(state: ^State, xid: u32) {
+    if state.WindowShapes != nil { delete_key(&state.WindowShapes, xid) }
 }
 
-shape_shutdown :: proc() {
-    if g_wm.window_shapes != nil { delete(g_wm.window_shapes) }
-    g_wm.window_shapes = nil
-    g_wm.shape_available = false
+shape_shutdown :: proc(state: ^State) {
+    if state.WindowShapes != nil { delete(state.WindowShapes) }
+    state.WindowShapes = nil
+    state.ShapeAvailable = false
 }

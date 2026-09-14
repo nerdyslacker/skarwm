@@ -1,4 +1,12 @@
-package main
+package wm
+
+import process "../process"
+import ui "../ui"
+import rendering "../rendering"
+import logger "../log"
+import input "../input"
+import c "../core"
+import x11 "../x11"
 
 // The WM core glue: connects the pure model (core package) to the X server
 // through the xcb layer. Responsibilities here are X-facing only — policy and
@@ -6,28 +14,6 @@ package main
 // reflow() (arrange + push + focus), never by hand-editing rectangles.
 
 import "core:time"
-import c "core"
-
-Tab_Decoration :: struct {
-    Xid: u32,
-    Client: ^c.Client,
-    Bg: u32,
-    Width: i32,
-}
-
-Client_Animation :: struct {
-    Start, Current, Target: c.Rect,
-    Start_Border, Current_Border, Target_Border: i32,
-    Started: time.Tick,
-    Duration: time.Duration,
-    Easing: c.Animation_Easing,
-    Active: bool,
-}
-
-Window_Shape_State :: struct {
-    Width, Height, Border, Radius: i32,
-    Rounded: bool,
-}
 
 Tiled_Resize_State :: struct {
     Active: bool,
@@ -44,19 +30,19 @@ Tiled_Resize_State :: struct {
 // (0xRRGGBB), settable from the rc file (norm_outer_border / sel_outer_border).
 
 Wm :: struct {
-    conn:     ^Connection,
+    conn:     ^x11.Connection,
     root:     u32,
     scr_w:    i32,
     scr_h:    i32,
     m:        ^c.Manager,
     atoms:    map[string]u32,
     ewmh:     Ewmh_State, // EWMH/ICCCM bookkeeping (see ewmh.odin)
-    kb:       Kbd_Map,
-    mm:       Mod_Map,
+    kb:       input.Kbd_Map,
+    mm:       input.Mod_Map,
     numlock:  u16,
-    lock:     u16, // always MOD_MASK_LOCK; kept as field for symmetry
+    lock:     u16, // always x11.MOD_MASK_LOCK; kept as field for symmetry
     primary_mod: u16,
-    bindings: [dynamic]Binding,
+    bindings: [dynamic]input.Binding,
     rules:        [dynamic]Raw_Rule, // applied to newly-managed windows
     ran_startups: [dynamic]string,   // startup commands already launched
     terminal: string,
@@ -67,24 +53,14 @@ Wm :: struct {
     tiled_resize: Tiled_Resize_State,
     mouse_root_x, mouse_root_y: i16,
     mouse_start: c.Rect,
-    drop_windows: [5]u32,
-    drop_overlay_visible: bool,
-    drop_overlay_has_compositor: bool,
-    drop_target: c.Drop_Target,
-    tabs: [dynamic]Tab_Decoration,
-    tab_gc, tab_font: u32,
-    help_window: u32,
+    ui: ui.State,
     white_pixel: u32,
     tab_spawn_target: u32,
     tab_spawn_started: time.Tick,
     overview_active: bool,
     preview_hover_locked: bool,
     preview_hover_target: u32,
-    animations: map[u32]^Client_Animation,
-    window_shapes: map[u32]Window_Shape_State,
-    shape_available: bool,
-    animations_active: bool,
-    animation_next_frame: time.Tick,
+    rendering: rendering.State,
 }
 
 g_wm: Wm
@@ -94,7 +70,7 @@ g_wm: Wm
 // ---------------------------------------------------------------------------
 
 atom :: proc(name: string) -> u32 {
-    return intern_atom(g_wm.conn, &g_wm.atoms, name)
+    return x11.intern_atom(g_wm.conn, &g_wm.atoms, name)
 }
 
 // ---------------------------------------------------------------------------
@@ -112,10 +88,10 @@ reflow_inner :: proc(ensure_focus_visible, animate: bool) {
     if ensure_focus_visible { c.Ensure_Active_Focus_Visible(g_wm.m) }
     c.Arrange_All(g_wm.m)
     push_geoms(animate)
-    render_tabs()
+    ui.Render_Tabs(&g_wm.ui, g_wm.m)
     render_focus()
     ewmh_pulse() // reconcile desktop/fullscreen client properties (deduped)
-    xcb_flush(g_wm.conn)
+    x11.xcb_flush(g_wm.conn)
 }
 
 reflow :: proc() { reflow_inner(true, true) }
@@ -125,7 +101,9 @@ reflow_immediate :: proc() { reflow_inner(true, false) }
 // push_geoms configures every managed window's position/size/border-width from
 // the model (client rects already account for the border ring). Also maps any
 // client that has not been mapped yet.
-push_geoms :: proc(animate: bool) { animation_commit_targets(animate) }
+push_geoms :: proc(animate: bool) {
+    rendering.Commit(&g_wm.rendering, g_wm.conn, g_wm.m, animate, ewmh_mark_mapped)
+}
 
 // render_focus sets each window's border colour and applies X input focus to the
 // focused client (or PointerRoot when there is no managed focus). A focused
@@ -137,7 +115,7 @@ render_focus :: proc() {
     for cl in m.Clients {
         col := m.Cfg.UnfocusedBorder
         if cl == focused { col = m.Cfg.FocusedBorder }
-        xcb_change_window_attributes(g_wm.conn, cl.Xid, CW_BORDER_PIXEL, &col)
+        x11.xcb_change_window_attributes(g_wm.conn, cl.Xid, x11.CW_BORDER_PIXEL, &col)
     }
     if focused != nil && focused.Floating { raise_focused() }
     apply_x_focus()
@@ -146,22 +124,22 @@ render_focus :: proc() {
 apply_x_focus :: proc() {
     focused := g_wm.m.Focused
     if focused != nil && focused.Mapped {
-        xcb_set_input_focus(g_wm.conn, INPUT_FOCUS_POINTER_ROOT, focused.Xid, CURRENT_TIME)
+        x11.xcb_set_input_focus(g_wm.conn, x11.INPUT_FOCUS_POINTER_ROOT, focused.Xid, x11.CURRENT_TIME)
         ewmh_announce_take_focus(focused) // courtesy for Xt/Java-style clients
     } else {
         // With no managed client, focus the pointer root (dest == PointerRoot).
         // Focus None would discard every key event, which also disables our
         // passive grabs on the root — on an empty desktop Super+Return and the
         // other bindings would silently die.
-        xcb_set_input_focus(g_wm.conn, INPUT_FOCUS_POINTER_ROOT, u32(INPUT_FOCUS_POINTER_ROOT), CURRENT_TIME)
+        x11.xcb_set_input_focus(g_wm.conn, x11.INPUT_FOCUS_POINTER_ROOT, u32(x11.INPUT_FOCUS_POINTER_ROOT), x11.CURRENT_TIME)
     }
     ewmh_push_active(focused)
 }
 
 raise_focused :: proc() {
     if f := g_wm.m.Focused; f != nil {
-        stack := STACK_MODE_ABOVE
-        xcb_configure_window(g_wm.conn, f.Xid, CW_STACK_MODE, &stack)
+        stack := x11.STACK_MODE_ABOVE
+        x11.xcb_configure_window(g_wm.conn, f.Xid, x11.CW_STACK_MODE, &stack)
     }
     raise_docks()
 }
@@ -173,13 +151,13 @@ raise_focused :: proc() {
 raise_docks :: proc() {
     for o in g_wm.m.Outputs {
         for d in o.Docks {
-            stack := STACK_MODE_ABOVE
-            xcb_configure_window(g_wm.conn, d.Xid, CW_STACK_MODE, &stack)
+            stack := x11.STACK_MODE_ABOVE
+            x11.xcb_configure_window(g_wm.conn, d.Xid, x11.CW_STACK_MODE, &stack)
         }
     }
     if f := g_wm.m.Focused; f != nil && f.Fullscreen {
-        stack := STACK_MODE_ABOVE
-        xcb_configure_window(g_wm.conn, f.Xid, CW_STACK_MODE, &stack)
+        stack := x11.STACK_MODE_ABOVE
+        x11.xcb_configure_window(g_wm.conn, f.Xid, x11.CW_STACK_MODE, &stack)
     }
 }
 
@@ -210,8 +188,8 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     // select events on the client so we see title changes, strut updates and
     // pointer hovers. (Child unmap/destroy/configure is already reported by the
     // root SUBSTRUCTURE_NOTIFY grab, so STRUCTURE_NOTIFY here is unnecessary.)
-    evmask := EVENT_MASK_PROPERTY_CHANGE | EVENT_MASK_ENTER_WINDOW | EVENT_MASK_POINTER_MOTION
-    xcb_change_window_attributes(g_wm.conn, xid, CW_EVENT_MASK, &evmask)
+    evmask := x11.EVENT_MASK_PROPERTY_CHANGE | x11.EVENT_MASK_ENTER_WINDOW | x11.EVENT_MASK_POINTER_MOTION
+    x11.xcb_change_window_attributes(g_wm.conn, xid, x11.CW_EVENT_MASK, &evmask)
     grab_client_buttons(xid)
 
     // Dock windows (_NET_WM_WINDOW_TYPE_DOCK) are output-level panels: never
@@ -260,7 +238,7 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
 // read_window_type reports whether the client's _NET_WM_WINDOW_TYPE atom list
 // names DOCK (a dock/panel window).
 read_window_type :: proc(cl: ^c.Client) -> bool {
-    data, ok := get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_WINDOW_TYPE"), atom("ATOM"))
+    data, ok := x11.get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_WINDOW_TYPE"), atom("ATOM"))
     if !ok { return false }
     defer delete(data)
     if len(data) % 4 != 0 { return false }
@@ -279,7 +257,7 @@ read_window_type :: proc(cl: ^c.Client) -> bool {
 // the RandR monitor containing its geometry.
 read_struts :: proc(cl: ^c.Client) {
     cl.Strut = c.Insets {}
-    if data, ok := get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_STRUT_PARTIAL"), atom("CARDINAL")); ok {
+    if data, ok := x11.get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_STRUT_PARTIAL"), atom("CARDINAL")); ok {
         defer delete(data)
         if len(data) >= 12 * 4 {
             vals := ([^]u32)(raw_data(data))
@@ -290,7 +268,7 @@ read_struts :: proc(cl: ^c.Client) {
             return
         }
     }
-    if data, ok := get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_STRUT"), atom("CARDINAL")); ok {
+    if data, ok := x11.get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_STRUT"), atom("CARDINAL")); ok {
         defer delete(data)
         if len(data) >= 4 * 4 {
             vals := ([^]u32)(raw_data(data))
@@ -306,15 +284,15 @@ read_struts :: proc(cl: ^c.Client) {
 // docks keep what they asked for (arrange only clamps). Fallback when the
 // query fails: a strip across the top of the screen.
 read_dock_geometry :: proc(cl: ^c.Client) {
-    cookie := xcb_get_geometry(g_wm.conn, cl.Xid)
-    e: ^Error
-    reply := xcb_get_geometry_reply(g_wm.conn, cookie, &e)
+    cookie := x11.xcb_get_geometry(g_wm.conn, cl.Xid)
+    e: ^x11.Error
+    reply := x11.xcb_get_geometry_reply(g_wm.conn, cookie, &e)
     if e != nil {
-        free_libc(e)
+        x11.free_libc(e)
         reply = nil
     }
     if reply != nil {
-        defer free_libc(reply)
+        defer x11.free_libc(reply)
         cl.FloatingRect = c.Rect { X = i32(reply.x), Y = i32(reply.y), W = i32(reply.width), H = i32(reply.height) }
         return
     }
@@ -325,7 +303,7 @@ read_dock_geometry :: proc(cl: ^c.Client) {
 read_client_meta :: proc(cl: ^c.Client) {
     cl.Title = read_client_title(cl.Xid)
     // WM_CLASS: two NUL-separated strings: instance then class
-    data, ok := get_prop(g_wm.conn, cl.Xid, atom("WM_CLASS"), 0)
+    data, ok := x11.get_prop(g_wm.conn, cl.Xid, atom("WM_CLASS"), 0)
     if !ok || len(data) == 0 {
         if ok { delete(data) }
         return
@@ -361,7 +339,7 @@ read_client_title :: proc(xid: u32) -> string {
 }
 
 read_client_urgency :: proc(cl: ^c.Client) -> bool {
-    data, ok := get_prop(g_wm.conn, cl.Xid, atom("WM_HINTS"), 0)
+    data, ok := x11.get_prop(g_wm.conn, cl.Xid, atom("WM_HINTS"), 0)
     urgent := false
     if ok {
         if len(data) >= 4 {
@@ -382,7 +360,7 @@ P_BASE_SIZE  :: u32(1 << 8)
 
 read_size_hints :: proc(cl: ^c.Client) {
     cl.SizeHints = {}
-    data, ok := get_prop(g_wm.conn, cl.Xid, atom("WM_NORMAL_HINTS"), 0)
+    data, ok := x11.get_prop(g_wm.conn, cl.Xid, atom("WM_NORMAL_HINTS"), 0)
     if !ok { return }
     defer delete(data)
     if len(data) < 4 { return }
@@ -422,9 +400,9 @@ clone_bytes :: proc(s: string) -> string {
 
 // get_text_prop fetches an owned string from a window property of a specific
 // type (type_id 0 = any).
-get_text_prop :: proc(conn: ^Connection, win, prop, type_id: u32) -> (string, bool) {
+get_text_prop :: proc(conn: ^x11.Connection, win, prop, type_id: u32) -> (string, bool) {
     if prop == 0 { return "", false }
-    data, ok := get_prop(conn, win, prop, type_id)
+    data, ok := x11.get_prop(conn, win, prop, type_id)
     if !ok || len(data) == 0 {
         if ok { delete(data) }
         return "", false
@@ -452,7 +430,7 @@ unmanage :: proc(cl: ^c.Client) {
     c.Unmanage_Client(g_wm.m, cl) // docks: removed from Output.Docks, reservation released
     new_focus := g_wm.m.Focused
     ewmh_client_unmanaged(cl) // WM_STATE Withdrawn + _NET_CLIENT_LIST refresh
-    animation_forget(cl.Xid)
+    rendering.Forget(&g_wm.rendering, cl.Xid)
     // drop events so the X server stops notifying us about this window
     c.Free_Client(cl)
     if dock {
@@ -470,8 +448,8 @@ unmanage :: proc(cl: ^c.Client) {
     } else {
         // still redraw borders/focus in case of focus juggling
         render_focus()
-        render_tabs() // an inactive tab may have been the removed client
-        xcb_flush(g_wm.conn)
+        ui.Render_Tabs(&g_wm.ui, g_wm.m) // an inactive tab may have been the removed client
+        x11.xcb_flush(g_wm.conn)
     }
 }
 
@@ -481,18 +459,18 @@ unmanage :: proc(cl: ^c.Client) {
 
 // grab_all_keys (re)installs the root grabs for every binding.
 grab_all_keys :: proc() {
-    xcb_ungrab_key(g_wm.conn, 0, g_wm.root, MOD_MASK_ANY) // keycode 0 == AnyKey
+    x11.xcb_ungrab_key(g_wm.conn, 0, g_wm.root, x11.MOD_MASK_ANY) // keycode 0 == AnyKey
     // Resolve first so explicit combinations can take precedence over the
     // automatically derived Shift+spawn layer below.
     for i in 0 ..< len(g_wm.bindings) {
         b := &g_wm.bindings[i]
-        kc, level := keysym_to_keycode(&g_wm.kb, b.keysym)
+        kc, level := input.keysym_to_keycode(&g_wm.kb, b.keysym)
         if kc == 0 {
-            log_warn("cannot bind keysym", b.keysym, "(not in keymap)")
+            logger.Warn("cannot bind keysym", b.keysym, "(not in keymap)")
             continue
         }
         mods := b.mods
-        if level & 1 == 1 { mods |= MOD_MASK_SHIFT }
+        if level & 1 == 1 { mods |= x11.MOD_MASK_SHIFT }
         b.effective_mods = mods
         b.keycode = kc
     }
@@ -501,26 +479,26 @@ grab_all_keys :: proc() {
         b := &g_wm.bindings[i]
         if b.keycode == 0 { continue }
         for combo in combos {
-            xcb_grab_key(g_wm.conn, 0, g_wm.root, b.effective_mods | combo, b.keycode, GRAB_MODE_ASYNC, GRAB_MODE_ASYNC)
+            x11.xcb_grab_key(g_wm.conn, 0, g_wm.root, b.effective_mods | combo, b.keycode, x11.GRAB_MODE_ASYNC, x11.GRAB_MODE_ASYNC)
         }
     }
     for i in 0 ..< len(g_wm.bindings) {
         b := &g_wm.bindings[i]
-        if b.action != .Spawn || b.keycode == 0 || b.effective_mods & MOD_MASK_SHIFT != 0 { continue }
-        derived := b.effective_mods | MOD_MASK_SHIFT
+        if b.action != .Spawn || b.keycode == 0 || b.effective_mods & x11.MOD_MASK_SHIFT != 0 { continue }
+        derived := b.effective_mods | x11.MOD_MASK_SHIFT
         claimed := false
         for other in g_wm.bindings {
             if other.keycode == b.keycode && other.effective_mods == derived { claimed = true; break }
         }
         if claimed { continue }
         for combo in combos {
-            xcb_grab_key(g_wm.conn, 0, g_wm.root, derived | combo, b.keycode, GRAB_MODE_ASYNC, GRAB_MODE_ASYNC)
+            x11.xcb_grab_key(g_wm.conn, 0, g_wm.root, derived | combo, b.keycode, x11.GRAB_MODE_ASYNC, x11.GRAB_MODE_ASYNC)
         }
     }
 }
 
 // key press dispatch: match by exact (mods,keycode) after stripping Lock/NumLock.
-on_keypress :: proc(ev: ^Key_Press_Event) {
+on_keypress :: proc(ev: ^x11.Key_Press_Event) {
     if g_wm.overview_active {
         overview_keypress(ev)
         return
@@ -535,8 +513,8 @@ on_keypress :: proc(ev: ^Key_Press_Event) {
     }
     // An otherwise-unbound Shift variant of any spawn binding reuses the same
     // command and requests that its next window join the active tab group.
-    if clean & MOD_MASK_SHIFT != 0 {
-        base_mods := clean & ~MOD_MASK_SHIFT
+    if clean & x11.MOD_MASK_SHIFT != 0 {
+        base_mods := clean & ~x11.MOD_MASK_SHIFT
         for i in 0 ..< len(g_wm.bindings) {
             b := &g_wm.bindings[i]
             if b.action != .Spawn || b.keycode == 0 { continue }
@@ -556,7 +534,7 @@ on_keypress :: proc(ev: ^Key_Press_Event) {
 }
 
 keycode_is :: proc(keycode: u8, name: string) -> bool {
-    wanted, _ := keysym_to_keycode(&g_wm.kb, keysym_from_name(name))
+    wanted, _ := input.keysym_to_keycode(&g_wm.kb, input.keysym_from_name(name))
     return wanted != 0 && keycode == wanted
 }
 
@@ -569,18 +547,18 @@ overview_begin :: proc(direction: int) {
         // Convert the passive Alt+Tab grab into an explicit keyboard grab.
         // Releasing the active passive grab first is required: attempting
         // XGrabKeyboard while it is active returns AlreadyGrabbed on Xorg.
-        xcb_ungrab_keyboard(g_wm.conn, CURRENT_TIME)
-        cookie := xcb_grab_keyboard(g_wm.conn, 0, g_wm.root, CURRENT_TIME,
-                                    GRAB_MODE_ASYNC, GRAB_MODE_ASYNC)
-        err: ^Error
-        reply := xcb_grab_keyboard_reply(g_wm.conn, cookie, &err)
+        x11.xcb_ungrab_keyboard(g_wm.conn, x11.CURRENT_TIME)
+        cookie := x11.xcb_grab_keyboard(g_wm.conn, 0, g_wm.root, x11.CURRENT_TIME,
+                                    x11.GRAB_MODE_ASYNC, x11.GRAB_MODE_ASYNC)
+        err: ^x11.Error
+        reply := x11.xcb_grab_keyboard_reply(g_wm.conn, cookie, &err)
         if err != nil {
-            free_libc(err)
+            x11.free_libc(err)
             return
         }
         if reply == nil { return }
         success := reply.status == 0
-        free_libc(reply)
+        x11.free_libc(reply)
         if !success { return }
         g_wm.overview_active = true
     }
@@ -591,13 +569,13 @@ overview_end :: proc(commit: bool) {
     if !g_wm.overview_active { return }
     overview_emit(commit ? "overview-commit" : "overview-cancel")
     g_wm.overview_active = false
-    xcb_ungrab_keyboard(g_wm.conn, CURRENT_TIME)
-    xcb_flush(g_wm.conn)
+    x11.xcb_ungrab_keyboard(g_wm.conn, x11.CURRENT_TIME)
+    x11.xcb_flush(g_wm.conn)
 }
 
-overview_keypress :: proc(ev: ^Key_Press_Event) {
+overview_keypress :: proc(ev: ^x11.Key_Press_Event) {
     if keycode_is(ev.detail, "Tab") {
-        if ev.state & MOD_MASK_SHIFT != 0 {
+        if ev.state & x11.MOD_MASK_SHIFT != 0 {
             overview_emit("overview-previous")
         } else {
             overview_emit("overview-next")
@@ -619,47 +597,14 @@ overview_keypress :: proc(ev: ^Key_Press_Event) {
     }
 }
 
-on_keyrelease :: proc(ev: ^Key_Press_Event) {
+on_keyrelease :: proc(ev: ^x11.Key_Press_Event) {
     if !g_wm.overview_active { return }
     if keycode_is(ev.detail, "Alt_L") || keycode_is(ev.detail, "Alt_R") {
         overview_end(true)
     }
 }
 
-Action_Kind :: enum u8 {
-    None,
-    Spawn, // b.cmd — a shell command line to launch (no arg)
-    Focus_Left, Focus_Right, Focus_Up, Focus_Down,
-    Move_Left, Move_Right, Move_Up, Move_Down,
-    Toggle_Floating,
-    Toggle_Fullscreen,
-    Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
-    Overview_Next, Overview_Prev,
-    Scratchpad_Toggle, Scratchpad_Toggle_Float, Scratchpad_Remove,
-    Show_Bindings,
-    Close,
-    Reload, // re-run the configuration loader
-    Quit,   // exit the WM (cleanup_all runs via main's defer)
-    WS_Next, WS_Prev,
-    WS_Goto,   // arg = workspace id (>=1)
-    Move_To_WS, // arg = workspace id (>=1)
-    Move_To_WS_Next, Move_To_WS_Prev,
-    Focus_Output_Next, Focus_Output_Prev,
-    Move_To_Output_Next, Move_To_Output_Prev,
-}
-
-Binding :: struct {
-    mods:    u16,
-    effective_mods: u16, // declared mods plus any Shift required by the keysym level
-    keysym:  u32,
-    keycode: u8,
-    action:  Action_Kind,
-    arg:     int,
-    cmd:     string, // owned; only meaningful for .Spawn
-    combo:   string, // owned; original configuration spelling for help output
-}
-
-dir_of :: proc(k: Action_Kind) -> c.Dir {
+dir_of :: proc(k: input.Action_Kind) -> c.Dir {
     #partial switch k {
     case .Focus_Left, .Move_Left:   return .Left
     case .Focus_Right, .Move_Right: return .Right
@@ -669,7 +614,7 @@ dir_of :: proc(k: Action_Kind) -> c.Dir {
     return .Left
 }
 
-dispatch_action :: proc(b: ^Binding) {
+dispatch_action :: proc(b: ^input.Binding) {
     m := g_wm.m
     old_focus := m.Focused
     // A keyboard action aborts an in-progress pointer operation. In
@@ -683,7 +628,7 @@ dispatch_action :: proc(b: ^Binding) {
     case .None:
         return
     case .Spawn:
-        if b.cmd != "" { spawn_sh(b.cmd) }
+        if b.cmd != "" { process.Spawn(b.cmd) }
     case .Reload:
         cfg_reload()
     case .Quit:
@@ -751,7 +696,7 @@ dispatch_action :: proc(b: ^Binding) {
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
     case .Show_Bindings:
-        help_toggle()
+        ui.Toggle_Help(&g_wm.ui, g_wm.m, g_wm.bindings[:], g_wm.scr_w, g_wm.scr_h)
     case .Close:
         close_focused()
     case .WS_Next:
@@ -879,10 +824,10 @@ move_focused_to_ws :: proc(id: int) {
 close_client :: proc(cl: ^c.Client) {
     if cl == nil { return }
     if client_has_protocol(cl.Xid, atom("WM_DELETE_WINDOW")) {
-        send_client_message(cl.Xid, atom("WM_PROTOCOLS"), atom("WM_DELETE_WINDOW"), CURRENT_TIME)
+        send_client_message(cl.Xid, atom("WM_PROTOCOLS"), atom("WM_DELETE_WINDOW"), x11.CURRENT_TIME)
     } else {
-        xcb_kill_client(g_wm.conn, cl.Xid)
-        xcb_flush(g_wm.conn)
+        x11.xcb_kill_client(g_wm.conn, cl.Xid)
+        x11.xcb_flush(g_wm.conn)
     }
 }
 
@@ -894,7 +839,7 @@ close_focused :: proc() {
 // (WM_DELETE_WINDOW, WM_TAKE_FOCUS, …).
 client_has_protocol :: proc(xid: u32, target: u32) -> bool {
     if target == 0 { return false }
-    data, ok := get_prop(g_wm.conn, xid, atom("WM_PROTOCOLS"), atom("ATOM"))
+    data, ok := x11.get_prop(g_wm.conn, xid, atom("WM_PROTOCOLS"), atom("ATOM"))
     if !ok { return false }
     defer delete(data)
     if len(data) % 4 != 0 { return false }
@@ -912,14 +857,14 @@ client_has_protocol :: proc(xid: u32, target: u32) -> bool {
 // not need a matching event selection). Using Substructure* here would only
 // reach clients that select those masks on their own window — i.e. nobody.
 send_client_message :: proc(win, msg_type, data0, time: u32) {
-    ev := Client_Message_Event {
-        response_type = u8(EVENT_CLIENT_MESSAGE),
+    ev := x11.Client_Message_Event {
+        response_type = u8(x11.EVENT_CLIENT_MESSAGE),
         format        = 32,
         window        = win,
         type_         = msg_type,
         data          = {data32 = [5]u32{data0, time, 0, 0, 0}},
     }
-    xcb_send_event(g_wm.conn, 0, win, 0, rawptr(&ev))
+    x11.xcb_send_event(g_wm.conn, 0, win, 0, rawptr(&ev))
 }
 
 // ---------------------------------------------------------------------------
@@ -930,20 +875,20 @@ send_client_message :: proc(win, msg_type, data0, time: u32) {
 // output. MapRequest carries no coordinates, so new-window placement needs
 // this small synchronous query.
 output_at_pointer :: proc() -> ^c.Output {
-    cookie := xcb_query_pointer(g_wm.conn, g_wm.root)
-    e: ^Error
-    reply := xcb_query_pointer_reply(g_wm.conn, cookie, &e)
+    cookie := x11.xcb_query_pointer(g_wm.conn, g_wm.root)
+    e: ^x11.Error
+    reply := x11.xcb_query_pointer_reply(g_wm.conn, cookie, &e)
     if e != nil {
-        free_libc(e)
+        x11.free_libc(e)
         return c.Active_Output(g_wm.m)
     }
     if reply == nil { return c.Active_Output(g_wm.m) }
-    defer free_libc(reply)
+    defer x11.free_libc(reply)
     if reply.same_screen == 0 { return c.Active_Output(g_wm.m) }
     return c.Output_At_Point(g_wm.m, i32(reply.root_x), i32(reply.root_y))
 }
 
-on_enter :: proc(ev: ^Enter_Notify_Event) {
+on_enter :: proc(ev: ^x11.Enter_Notify_Event) {
     if ev.mode != NOTIFY_MODE_NORMAL { return } // ignore grabs / synthetic
     if scroll_preview_hover(i32(ev.root_x), i32(ev.root_y)) { return }
     if !g_wm.m.Cfg.FocusFollowsMouse { return }
@@ -956,7 +901,7 @@ on_enter :: proc(ev: ^Enter_Notify_Event) {
         old := g_wm.m.Focused
         c.Focus_Client(g_wm.m, cl)
         render_focus()
-        xcb_flush(g_wm.conn)
+        x11.xcb_flush(g_wm.conn)
         ipc_broadcast_focus_change(old, cl)
     }
 }
@@ -985,11 +930,11 @@ scroll_preview_hover :: proc(x, y: i32) -> bool {
 }
 
 grab_client_buttons :: proc(xid: u32) {
-    mask := u16(EVENT_MASK_BUTTON_PRESS | EVENT_MASK_BUTTON_RELEASE | EVENT_MASK_POINTER_MOTION)
-    xcb_ungrab_button(g_wm.conn, 0, xid, MOD_MASK_ANY)
-    xcb_grab_button(g_wm.conn, 0, xid, mask, GRAB_MODE_SYNC, GRAB_MODE_ASYNC, 0, 0, 1, MOD_MASK_ANY)
-    xcb_grab_button(g_wm.conn, 0, xid, mask, GRAB_MODE_SYNC, GRAB_MODE_ASYNC, 0, 0, 2, MOD_MASK_ANY)
-    xcb_grab_button(g_wm.conn, 0, xid, mask, GRAB_MODE_SYNC, GRAB_MODE_ASYNC, 0, 0, 3, MOD_MASK_ANY)
+    mask := u16(x11.EVENT_MASK_BUTTON_PRESS | x11.EVENT_MASK_BUTTON_RELEASE | x11.EVENT_MASK_POINTER_MOTION)
+    x11.xcb_ungrab_button(g_wm.conn, 0, xid, x11.MOD_MASK_ANY)
+    x11.xcb_grab_button(g_wm.conn, 0, xid, mask, x11.GRAB_MODE_SYNC, x11.GRAB_MODE_ASYNC, 0, 0, 1, x11.MOD_MASK_ANY)
+    x11.xcb_grab_button(g_wm.conn, 0, xid, mask, x11.GRAB_MODE_SYNC, x11.GRAB_MODE_ASYNC, 0, 0, 2, x11.MOD_MASK_ANY)
+    x11.xcb_grab_button(g_wm.conn, 0, xid, mask, x11.GRAB_MODE_SYNC, x11.GRAB_MODE_ASYNC, 0, 0, 3, x11.MOD_MASK_ANY)
 }
 
 toggle_client_maximized :: proc(cl: ^c.Client) -> bool {
@@ -1007,15 +952,15 @@ toggle_client_maximized :: proc(cl: ^c.Client) -> bool {
 regrab_client_buttons :: proc() {
     // Wheel buttons are grabbed on the root so Mod+wheel works over empty
     // space and client windows alike. Lock/NumLock variants mirror key grabs.
-    xcb_ungrab_button(g_wm.conn, 4, g_wm.root, MOD_MASK_ANY)
-    xcb_ungrab_button(g_wm.conn, 5, g_wm.root, MOD_MASK_ANY)
+    x11.xcb_ungrab_button(g_wm.conn, 4, g_wm.root, x11.MOD_MASK_ANY)
+    x11.xcb_ungrab_button(g_wm.conn, 5, g_wm.root, x11.MOD_MASK_ANY)
     if g_wm.primary_mod != 0 {
-        mask := u16(EVENT_MASK_BUTTON_PRESS)
+        mask := u16(x11.EVENT_MASK_BUTTON_PRESS)
         combos := [4]u16{0, g_wm.lock, g_wm.numlock, g_wm.lock | g_wm.numlock}
         for combo in combos {
             mods := g_wm.primary_mod | combo
-            xcb_grab_button(g_wm.conn, 0, g_wm.root, mask, GRAB_MODE_ASYNC, GRAB_MODE_ASYNC, 0, 0, 4, mods)
-            xcb_grab_button(g_wm.conn, 0, g_wm.root, mask, GRAB_MODE_ASYNC, GRAB_MODE_ASYNC, 0, 0, 5, mods)
+            x11.xcb_grab_button(g_wm.conn, 0, g_wm.root, mask, x11.GRAB_MODE_ASYNC, x11.GRAB_MODE_ASYNC, 0, 0, 4, mods)
+            x11.xcb_grab_button(g_wm.conn, 0, g_wm.root, mask, x11.GRAB_MODE_ASYNC, x11.GRAB_MODE_ASYNC, 0, 0, 5, mods)
         }
     }
     for cl in g_wm.m.Clients { if !cl.Dock { grab_client_buttons(cl.Xid) } }
@@ -1137,12 +1082,12 @@ tiled_resize_motion :: proc(root_x, root_y: i32) {
     reflow_immediate()
 }
 
-on_button_press :: proc(ev: ^Button_Press_Event) {
-    if ev.event == g_wm.help_window {
-        help_hide()
+on_button_press :: proc(ev: ^x11.Button_Press_Event) {
+    if ev.event == g_wm.ui.HelpWindow {
+        ui.Hide_Help(&g_wm.ui)
         return
     }
-    if tab := tab_client(ev.event); tab != nil {
+    if tab := ui.Tab_Client(&g_wm.ui, ev.event); tab != nil {
         if ev.detail == 2 {
             toggle_client_maximized(tab)
             return
@@ -1170,16 +1115,16 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
 
     cl := g_wm.m.ByXid[ev.event]
     if cl == nil || cl.Dock {
-        xcb_allow_events(g_wm.conn, ALLOW_REPLAY_POINTER, ev.time)
+        x11.xcb_allow_events(g_wm.conn, x11.ALLOW_REPLAY_POINTER, ev.time)
         return
     }
     if ev.detail == 2 {
         if toggle_client_maximized(cl) {
-            xcb_allow_events(g_wm.conn, ALLOW_ASYNC_POINTER, ev.time)
+            x11.xcb_allow_events(g_wm.conn, x11.ALLOW_ASYNC_POINTER, ev.time)
         } else {
-            xcb_allow_events(g_wm.conn, ALLOW_REPLAY_POINTER, ev.time)
+            x11.xcb_allow_events(g_wm.conn, x11.ALLOW_REPLAY_POINTER, ev.time)
         }
-        xcb_flush(g_wm.conn)
+        x11.xcb_flush(g_wm.conn)
         return
     }
     old := g_wm.m.Focused
@@ -1194,11 +1139,11 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
     tiled_resize := modified && !cl.Floating && !cl.Maximized && ev.detail == 3
     if tiled_resize {
         if begin_tiled_resize(cl, i32(ev.root_x), i32(ev.root_y)) {
-            xcb_allow_events(g_wm.conn, ALLOW_ASYNC_POINTER, ev.time)
+            x11.xcb_allow_events(g_wm.conn, x11.ALLOW_ASYNC_POINTER, ev.time)
         } else {
-            xcb_allow_events(g_wm.conn, ALLOW_REPLAY_POINTER, ev.time)
+            x11.xcb_allow_events(g_wm.conn, x11.ALLOW_REPLAY_POINTER, ev.time)
         }
-        xcb_flush(g_wm.conn)
+        x11.xcb_flush(g_wm.conn)
         return
     }
     if floating_drag || tiled_drag {
@@ -1208,22 +1153,22 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
         g_wm.mouse_root_x = ev.root_x
         g_wm.mouse_root_y = ev.root_y
         g_wm.mouse_start = cl.FloatingRect
-        if tiled_drag { drop_overlay_update(i32(ev.root_x), i32(ev.root_y)) }
-        xcb_allow_events(g_wm.conn, ALLOW_ASYNC_POINTER, ev.time)
+        if tiled_drag { ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y)) }
+        x11.xcb_allow_events(g_wm.conn, x11.ALLOW_ASYNC_POINTER, ev.time)
     } else {
-        xcb_allow_events(g_wm.conn, ALLOW_REPLAY_POINTER, ev.time)
+        x11.xcb_allow_events(g_wm.conn, x11.ALLOW_REPLAY_POINTER, ev.time)
     }
-    xcb_flush(g_wm.conn)
+    x11.xcb_flush(g_wm.conn)
 }
 
-on_motion :: proc(ev: ^Motion_Notify_Event) {
+on_motion :: proc(ev: ^x11.Motion_Notify_Event) {
     cl := g_wm.mouse_client
     if cl == nil {
         scroll_preview_hover(i32(ev.root_x), i32(ev.root_y))
         return
     }
     if g_wm.mouse_tiled_drag {
-        drop_overlay_update(i32(ev.root_x), i32(ev.root_y))
+        ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
         return
     }
     if g_wm.tiled_resize.Active {
@@ -1254,15 +1199,15 @@ on_motion :: proc(ev: ^Motion_Notify_Event) {
     reflow_immediate()
 }
 
-on_button_release :: proc(ev: ^Button_Press_Event) {
+on_button_release :: proc(ev: ^x11.Button_Press_Event) {
     cl := g_wm.mouse_client
     if cl != nil && g_wm.mouse_tiled_drag {
         old_output := cl.Out
         old_ws := cl.Ws
         target := c.Drop_Target_At_Point(
-            g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, g_wm.drop_target,
+            g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, g_wm.ui.DropTarget,
         )
-        drop_overlay_hide()
+        ui.Hide_Drop(&g_wm.ui)
         if c.Move_Client_To_Drop(g_wm.m, cl, target) {
             if target.Out != old_output {
                 ipc_broadcast_output_event("focus", target.Out.Name)
@@ -1273,7 +1218,7 @@ on_button_release :: proc(ev: ^Button_Press_Event) {
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
         }
     } else if g_wm.mouse_tiled_drag {
-        drop_overlay_hide()
+        ui.Hide_Drop(&g_wm.ui)
     } else if cl != nil && g_wm.tiled_resize.Active {
         ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
     }
@@ -1281,8 +1226,8 @@ on_button_release :: proc(ev: ^Button_Press_Event) {
 }
 
 cancel_pointer_operation :: proc() {
-    if g_wm.mouse_client != nil { xcb_ungrab_pointer(g_wm.conn, CURRENT_TIME) }
-    if g_wm.mouse_tiled_drag { drop_overlay_hide() }
+    if g_wm.mouse_client != nil { x11.xcb_ungrab_pointer(g_wm.conn, x11.CURRENT_TIME) }
+    if g_wm.mouse_tiled_drag { ui.Hide_Drop(&g_wm.ui) }
     g_wm.mouse_client = nil
     g_wm.mouse_resize = false
     g_wm.mouse_tiled_drag = false
@@ -1302,7 +1247,7 @@ on_current_ws :: proc(cl: ^c.Client) -> bool {
 // on_configure_request is called for managed windows trying to resize/move
 // themselves (tiled: rejected by re-applying layout) and for unmanaged windows
 // (passed through verbatim).
-on_configure_request :: proc(ev: ^Configure_Request_Event) {
+on_configure_request :: proc(ev: ^x11.Configure_Request_Event) {
     xid := ev.window
     if cl := g_wm.m.ByXid[xid]; cl != nil {
         if g_wm.tiled_resize.Active && g_wm.mouse_client == cl {
@@ -1327,11 +1272,11 @@ on_configure_request :: proc(ev: ^Configure_Request_Event) {
         u32(ev.width), u32(ev.height), u32(ev.border_width),
         0, 0,
     }
-    xcb_configure_window(g_wm.conn, xid, u32(ev.value_mask), &vals[0])
-    xcb_flush(g_wm.conn)
+    x11.xcb_configure_window(g_wm.conn, xid, u32(ev.value_mask), &vals[0])
+    x11.xcb_flush(g_wm.conn)
 }
 
-apply_float_configure :: proc(cl: ^c.Client, ev: ^Configure_Request_Event) {
+apply_float_configure :: proc(cl: ^c.Client, ev: ^x11.Configure_Request_Event) {
     // A zero-size configure is a request to collapse. Panel shells emit a
     // zero-size step while re-asserting geometry after a WM fight (Quickshell
     // does this against WMs that tile panels); honouring it would hide the
@@ -1340,17 +1285,17 @@ apply_float_configure :: proc(cl: ^c.Client, ev: ^Configure_Request_Event) {
     if ev.width == 0 || ev.height == 0 { return }
     r := cl.FloatingRect
     mask := u32(ev.value_mask)
-    if mask & CW_X != 0 { r.X = i32(ev.x) }
-    if mask & CW_Y != 0 { r.Y = i32(ev.y) }
-    if mask & CW_WIDTH != 0 { r.W = i32(ev.width) }
-    if mask & CW_HEIGHT != 0 { r.H = i32(ev.height) }
+    if mask & x11.CW_X != 0 { r.X = i32(ev.x) }
+    if mask & x11.CW_Y != 0 { r.Y = i32(ev.y) }
+    if mask & x11.CW_WIDTH != 0 { r.W = i32(ev.width) }
+    if mask & x11.CW_HEIGHT != 0 { r.H = i32(ev.height) }
     if !cl.Dock { r = constrain_floating_rect(cl, r) }
     cl.FloatingRect = r
 }
 
 // on_property_notify reacts to title changes (refresh metadata + IPC event)
 // and dock strut changes (reflow the work area live).
-on_property_notify :: proc(ev: ^Property_Notify_Event) {
+on_property_notify :: proc(ev: ^x11.Property_Notify_Event) {
     cl := g_wm.m.ByXid[ev.window]
     if cl == nil { return }
     if ev.atom == atom("_NET_WM_NAME") || ev.atom == atom("WM_NAME") {
@@ -1360,8 +1305,8 @@ on_property_notify :: proc(ev: ^Property_Notify_Event) {
             cl.Title = fresh
             ipc_broadcast_window_event(c.IPC_WINDOW_TITLE, cl)
             if old != "" { delete(old) }
-            render_tabs()
-            xcb_flush(g_wm.conn)
+            ui.Render_Tabs(&g_wm.ui, g_wm.m)
+            x11.xcb_flush(g_wm.conn)
         } else if fresh != "" {
             delete(fresh)
         }
@@ -1389,7 +1334,7 @@ on_property_notify :: proc(ev: ^Property_Notify_Event) {
 // resize has window == root too, so both fields must match — otherwise every
 // geometry push we send a client would be mistaken for a screen resize and feed
 // back into the layout.
-on_configure_notify :: proc(ev: ^Configure_Notify_Event) {
+on_configure_notify :: proc(ev: ^x11.Configure_Notify_Event) {
     if ev.event != g_wm.root || ev.window != g_wm.root { return }
     g_wm.scr_w = i32(ev.width)
     g_wm.scr_h = i32(ev.height)
