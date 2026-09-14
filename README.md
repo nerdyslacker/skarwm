@@ -15,7 +15,8 @@ desktop UI are intentionally left to external programs such as
 Features include dynamic workspaces, stacked and tabbed columns, RandR
 multi-monitor support, independent workspaces per monitor, floating and
 fullscreen windows, native scratchpads, atomic rc reloads, window rules,
-EWMH/ICCCM interoperability, dock struts, and nonblocking Unix-socket IPC.
+edge previews with hover-to-reveal, EWMH/ICCCM interoperability, dock struts,
+and nonblocking Unix-socket IPC.
 
 > **Note:** skarwm was developed with AI assistance as a project for learning
 > Odin. It is a hobby project and my daily driver.
@@ -52,7 +53,8 @@ sudo xbps-install -S tigervnc xterm xdotool xwininfo xrandr xprop \
   python3-xlib wmctrl xorg-server-xephyr
 ```
 
-No shell, bar, compositor, or notification daemon is required by skarwm.
+At runtime skarwm links libxcb plus its RandR and Shape extensions. No shell,
+bar, compositor, or notification daemon is required.
 
 ## Build and install
 
@@ -85,6 +87,14 @@ cp config/example.rc ~/.config/skarwm/config.rc
 skarwm
 ```
 
+Client corners can be rounded with `corner_radius : N`; `0` keeps them square,
+and fullscreen windows and bars are never clipped. Layout transitions are
+enabled by default (`animations : true`) with a 180 ms
+ease-out-cubic curve at a 60 FPS target. `animation_duration_ms`,
+`animation_fps`, and `animation_easing` (`linear` or `ease_out_cubic`) are
+reloadable; disabling animations applies geometry immediately and schedules no
+frames. See `config/example.rc` for the complete settings.
+
 For `startx`, copy `config/xinitrc.example` to `~/.xinitrc`. Display managers
 can use the installed `skarwm.desktop` entry. 
 
@@ -102,8 +112,11 @@ Default interaction highlights:
 - `Super`+wheel: scroll the workspace strip;
 - `Super+,/.`: focus the previous/next monitor;
 - `Super+Shift+,/.`: move the focused window between monitors;
-- `Super`+left-drag: move a floating window or reposition a tiled window;
-- `Super`+right-drag: resize a floating window.
+- middle-click: maximize/restore a managed window within its usable work area;
+- `Super`+left-drag: move a floating window or reposition a tiled window; tiled
+  drags show one contextual edge overlay (translucent when a compositor runs);
+- `Super`+right-drag: resize a floating window or the nearest tiled split;
+- hover a narrow edge preview: reveal and focus the adjacent hidden window;
 
 Tabbed mode affects only the focused column. Move windows into it with
 `Super+Shift+h/l`, select tabs with `Super+k/j`, and reorder them with

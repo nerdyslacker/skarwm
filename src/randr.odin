@@ -129,6 +129,9 @@ randr_scan :: proc(emit_event: bool) {
     }
 
     if c.Reconcile_Outputs(g_wm.m, specs[:]) {
+        // The target output or its workarea may have disappeared. Require a
+        // fresh drag instead of leaving an indicator at stale root geometry.
+        if g_wm.mouse_client != nil { cancel_pointer_operation() }
         log_info("RandR: outputs changed; active monitors:", len(specs))
         if emit_event {
             reflow()

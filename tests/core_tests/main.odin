@@ -39,19 +39,24 @@ GEOM :: c.Rect{X = 0, Y = 0, W = 1920, H = 1080}
 
 main :: proc() {
     test_config()
+    test_animation_math()
+    test_resize_math()
     test_workspaces()
     test_add_and_focus()
     test_focus_direction()
     test_move_dir()
     test_pointer_column_move()
+    test_relative_column_drop()
     test_unmanage()
     test_floating()
     test_fullscreen()
+    test_maximize()
     test_tabbed_layout()
     test_multi_output()
     test_multi_output_scrolling()
     test_layout_geometry()
     test_scrolling()
+    test_scroll_previews()
     test_two_columns_fit()
     test_arrange_hidden()
     test_move_to_ws()
@@ -117,7 +122,12 @@ test_config :: proc() {
     eq(cfg.OuterGap, 8, "default outer gap")
     eq(cfg.InnerGap, 8, "default inner gap")
     eq(cfg.BorderWidth, 2, "default border")
+    eq(cfg.CornerRadius, 0, "rounded corners disabled by default")
     ok(cfg.FocusFollowsMouse, "default focus-follows-mouse")
+    ok(cfg.Animations, "animations enabled by default")
+    eq(cfg.AnimationDurationMs, i32(180), "default animation duration")
+    eq(cfg.AnimationFps, i32(60), "default animation frame rate")
+    eq(cfg.AnimationEasing, c.Animation_Easing.Ease_Out_Cubic, "default animation easing")
 
     gapped := cfg
     gapped.Gap = 16
@@ -131,6 +141,120 @@ test_config :: proc() {
     eq(c.Resolve_Page_Width(1904, 8, 3), 948, "3+ columns keep the same page width")
     eq(2 * c.Resolve_Page_Width(1904, 8, 2) + 8, 1904, "two pages + one inner gap fill the screen")
     eq(c.Resolve_Page_Width(100, 8, 2), 60, "page width floored at 60 px")
+}
+
+test_animation_math :: proc() {
+    eq(c.Animation_Progress(-1, 100), f64(0), "animation progress clamps negative elapsed")
+    eq(c.Animation_Progress(50, 100), f64(0.5), "animation progress uses elapsed time")
+    eq(c.Animation_Progress(100, 100), f64(1), "animation progress completes exactly")
+    eq(c.Animation_Progress(1, 0), f64(1), "zero duration completes immediately")
+
+    eq(c.Animation_Ease(.Linear, 0.4), f64(0.4), "linear easing preserves progress")
+    eq(c.Animation_Ease(.Ease_Out_Cubic, 0.5), f64(0.875), "ease-out cubic curve")
+    eq(c.Animation_Ease(.Ease_Out_Cubic, 2), f64(1), "easing clamps high input")
+
+    start := c.Rect{X = 0, Y = 10, W = 100, H = 50}
+    target := c.Rect{X = 101, Y = -10, W = 201, H = 100}
+    eq(c.Animation_Lerp_Rect(start, target, 0), start, "rect interpolation starts exactly")
+    eq(c.Animation_Lerp_Rect(start, target, 1), target, "rect interpolation ends exactly")
+    eq(
+        c.Animation_Lerp_Rect(start, target, 0.5),
+        c.Rect{X = 51, Y = 0, W = 151, H = 75},
+        "rect interpolation rounds consistently",
+    )
+}
+
+test_resize_math :: proc() {
+    first, second := c.Resize_Pair(500, 500, 200, 100, 100)
+    eq(first, i32(700), "paired resize grows first side")
+    eq(second, i32(300), "paired resize shrinks following side")
+    first, second = c.Resize_Pair(500, 500, 900, 100, 100)
+    eq(first, i32(900), "paired resize honors neighbor minimum")
+    eq(second, i32(100), "paired resize keeps neighbor positive")
+    first, second = c.Resize_Pair(500, 500, 300, 100, 100, 600, 0)
+    eq(first, i32(600), "paired resize honors first maximum")
+    eq(first + second, i32(1000), "paired resize preserves total extent")
+
+    hints := c.Size_Hints{
+        MinW = 100, MinH = 80, MaxW = 500, MaxH = 400,
+        BaseW = 100, BaseH = 80, IncW = 20, IncH = 10,
+    }
+    w, h := c.Constrain_Size(hints, 337, 249)
+    eq(w, i32(320), "size hints apply width base/increment")
+    eq(h, i32(240), "size hints apply height base/increment")
+    w, h = c.Constrain_Size(hints, 20, 900)
+    eq(w, i32(100), "size hints enforce minimum")
+    eq(h, i32(400), "size hints enforce maximum")
+
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    c.Activate_WS(m, c.Ensure_WS(m, 1))
+    a := add_tiled(m, 301)
+    b := add_tiled(m, 302)
+    ws := c.Current_WS(m)
+    ws.Cols[0].Width = 700
+    ws.Cols[1].Width = 1196
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 696, H = 1060}, "custom column width affects every tile")
+    eq(b.Geom, c.Rect{X = 718, Y = 10, W = 1192, H = 1060}, "adjacent resized column follows boundary")
+
+    ok(c.Move_Dir(m, .Left), "resize row fixture stacks windows")
+    a.TileWeight, b.TileWeight = 3, 1
+    c.Arrange_All(m)
+    eq(a.Geom.Y, i32(10), "weighted first row stays at column top")
+    eq(a.Geom.H, i32(788), "weighted first row receives larger share")
+    eq(b.Geom.Y, i32(810), "following row moves with resized boundary")
+    eq(b.Geom.H, i32(260), "following row consumes remaining column height")
+
+    inserted := mk_man()
+    defer c.Destroy_Manager(inserted)
+    c.Activate_WS(inserted, c.Ensure_WS(inserted, 1))
+    ia := add_tiled(inserted, 311)
+    ib := add_tiled(inserted, 312)
+    iws := c.Current_WS(inserted)
+    iws.Cols[0].Width = 700
+    iws.Cols[1].Width = 1196
+    c.Arrange_All(inserted)
+    _ = ia
+    id := add_tiled(inserted, 313)
+    c.Ensure_Active_Focus_Visible(inserted)
+    c.Arrange_All(inserted)
+    // The old left column remains as the real edge preview; the resized focus
+    // and its complementary newcomer occupy the remaining page without partial
+    // columns or an oversized default insertion.
+    eq(ib.Geom, c.Rect{X = 38, Y = 10, W = 1174, H = 1060}, "resized focused column remains visible after insertion")
+    eq(id.Geom, c.Rect{X = 1224, Y = 10, W = 686, H = 1060}, "new column receives complementary page width")
+
+    reordered := mk_man()
+    defer c.Destroy_Manager(reordered)
+    c.Activate_WS(reordered, c.Ensure_WS(reordered, 1))
+    ra := add_tiled(reordered, 321)
+    rb := add_tiled(reordered, 322)
+    rws := c.Current_WS(reordered)
+    rws.Cols[0].Width = 700
+    rws.Cols[1].Width = 1196
+    ok(c.Move_Client_To_Drop(reordered, rb, c.Drop_Target{
+        Kind = .New_Column, Out = rb.Out, Ws = rws, Insert_Index = 0,
+    }), "resized column can be reordered")
+    eq(rws.Cols[0].Wins[0], rb, "reordered client enters requested column position")
+    eq(rws.Cols[0].Width, i32(1196), "horizontal drop carries resized column width")
+    _ = ra
+
+    stacked := mk_man()
+    defer c.Destroy_Manager(stacked)
+    c.Activate_WS(stacked, c.Ensure_WS(stacked, 1))
+    sa := add_tiled(stacked, 331)
+    sb := add_tiled(stacked, 332)
+    sws := c.Current_WS(stacked)
+    sws.Cols[0].Width = 700
+    ok(c.Move_Client_To_Drop(stacked, sa, c.Drop_Target{
+        Kind = .Into_Column, Out = sb.Out, Ws = sws, Col = sws.Cols[1], Row_Index = 0,
+    }), "resized column can be stacked by drop")
+    eq(len(sws.Cols), 1, "stacking drop removes emptied source column")
+    eq(sws.Cols[0].Width, i32(700), "stacking drop preserves explicit source width")
+    c.Arrange_All(stacked)
+    eq(sa.Geom.W, i32(696), "lone resized stack does not expand to full screen")
+    eq(sb.Geom.W, i32(696), "all windows follow the retained column width")
 }
 
 // ----------------------------------------------------------------------------
@@ -327,8 +451,12 @@ test_pointer_column_move :: proc() {
     c.Focus_Client(m, target)
     c.Arrange_All(m)
 
+    center := c.Drop_Target_At_Point(m, right.Geom.X + right.Geom.W / 2, right.Geom.Y + right.Geom.H / 2)
+    eq(center.Kind, c.Drop_Kind.None, "drag center has no active drop zone")
+
     vertical := c.Drop_Target_At_Point(m, right.Geom.X + right.Geom.W / 2, right.Geom.Y + 10)
     eq(vertical.Kind, c.Drop_Kind.Into_Column, "top chooser selects vertical drop")
+    eq(vertical.Zone, c.Drop_Zone.Top, "top edge reports one explicit direction")
     eq(vertical.Out, right, "drop hit resolves destination output")
     eq(vertical.Ws, right.Current, "drop hit resolves visible destination workspace")
     ok(vertical.Col != nil, "drop hit resolves destination column")
@@ -346,15 +474,49 @@ test_pointer_column_move :: proc() {
 
     c.Arrange_All(m)
     bottom := c.Drop_Target_At_Point(m, right.Geom.X + right.Geom.W / 2, right.Geom.Y + right.Geom.H - 10)
+    eq(bottom.Zone, c.Drop_Zone.Bottom, "bottom edge reports one explicit direction")
     ok(c.Move_Client_To_Drop(m, moving, bottom), "bottom chooser reorders within the vertical column")
     eq(vertical.Col.Wins[len(vertical.Col.Wins) - 1], moving, "bottom drop inserts client below destination windows")
 
     horizontal := c.Drop_Target_At_Point(m, right.Geom.X + 10, right.Geom.Y + right.Geom.H / 2)
     eq(horizontal.Kind, c.Drop_Kind.New_Column, "left chooser selects horizontal drop")
+    eq(horizontal.Zone, c.Drop_Zone.Left, "left edge reports one explicit direction")
+    eq(horizontal.Geom, c.Rect{X = 1288, Y = 8, W = 261, H = 784}, "left width matches top height and spans the workarea")
+    eq(horizontal.Geom.W, vertical.Geom.H, "side overlay width equals top overlay height")
+    at_overlay_border := c.Drop_Target_At_Point(
+        m, horizontal.Geom.X + horizontal.Geom.W - 1, right.Geom.Y + right.Geom.H / 2,
+    )
+    eq(at_overlay_border.Zone, c.Drop_Zone.Left, "overlay activates through its inner boundary pixel")
+    past_overlay_border := c.Drop_Target_At_Point(
+        m, horizontal.Geom.X + horizontal.Geom.W, right.Geom.Y + right.Geom.H / 2,
+    )
+    eq(past_overlay_border.Kind, c.Drop_Kind.None, "fresh drag position outside overlay boundary stays inactive")
+    no_sticky := c.Drop_Target_At_Point(
+        m, horizontal.Geom.X + horizontal.Geom.W + 6, right.Geom.Y + right.Geom.H / 2,
+    )
+    eq(no_sticky.Kind, c.Drop_Kind.None, "pointer beyond enter threshold has no fresh target")
+    sticky := c.Drop_Target_At_Point(
+        m, horizontal.Geom.X + horizontal.Geom.W + 6, right.Geom.Y + right.Geom.H / 2,
+        nil, horizontal,
+    )
+    eq(sticky.Zone, c.Drop_Zone.Left, "active zone remains stable inside hysteresis margin")
+    released := c.Drop_Target_At_Point(
+        m, horizontal.Geom.X + horizontal.Geom.W + c.DROP_ZONE_HYSTERESIS + 1,
+        right.Geom.Y + right.Geom.H / 2, nil, horizontal,
+    )
+    eq(released.Kind, c.Drop_Kind.None, "active zone releases beyond hysteresis margin")
     ok(c.Move_Client_To_Drop(m, moving, horizontal), "tiled client creates a horizontal column on the same output")
     eq(len(right.Current.Cols), 3, "horizontal drop adds a destination column")
     eq(len(right.Current.Cols[0].Wins), 1, "new horizontal column contains only dropped client")
     eq(right.Current.Cols[0].Wins[0], moving, "horizontal column inserted at left edge")
+
+    right_edge := c.Drop_Target_At_Point(
+        m, right.Geom.X + right.Geom.W - 10, right.Geom.Y + right.Geom.H / 2, moving,
+    )
+    eq(right_edge.Zone, c.Drop_Zone.Right, "right edge reports one explicit direction")
+    eq(right_edge.Geom, c.Rect{X = 2291, Y = 8, W = 261, H = 784}, "right width matches top height and spans the workarea")
+    ok(c.Move_Client_To_Drop(m, moving, right_edge), "right chooser reorders the tiled client")
+    eq(right.Current.Cols[1].Wins[0], moving, "right drop moves client immediately after its neighboring column")
 
     empty_drop := c.Drop_Target_At_Point(m, empty.Geom.X + 10, empty.Geom.Y + empty.Geom.H / 2)
     eq(empty_drop.Kind, c.Drop_Kind.New_Column, "empty output exposes a first-column target")
@@ -372,6 +534,34 @@ test_pointer_column_move :: proc() {
     eq(floater.Ws, right.Current, "floating drag changes workspace ownership")
     eq(floater.FloatingRect.X, 1400, "floating drag preserves root-coordinate position")
     eq(c.Active_Output(m), right, "focus follows cross-output floating drag")
+}
+
+test_relative_column_drop :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    a := add_tiled(m, 100)
+    b := add_tiled(m, 101)
+    d := add_tiled(m, 102)
+    c.Arrange_All(m)
+    _, b_col, _ := c.Column_Of(b)
+
+    left := c.Drop_Target_At_Point(m, 10, 540, d)
+    eq(left.Zone, c.Drop_Zone.Left, "third column finds a relative left drop")
+    eq(left.Col, b_col, "relative left drop targets the immediately preceding column")
+    eq(left.Insert_Index, 1, "relative left drop inserts before the preceding target")
+    ok(c.Move_Client_To_Drop(m, d, left), "third column can move between the first two")
+    eq(ws.Cols[0].Wins[0], a, "first column stays first after relative drop")
+    eq(ws.Cols[1].Wins[0], d, "dragged third column becomes the middle column")
+    eq(ws.Cols[2].Wins[0], b, "former middle column shifts right")
+
+    right := c.Drop_Target_At_Point(m, 1910, 540, d)
+    eq(right.Col, b_col, "relative right drop targets the immediately following column")
+    ok(c.Move_Client_To_Drop(m, d, right), "middle column can move right again")
+    eq(ws.Cols[0].Wins[0], a, "first column remains stable after right drop")
+    eq(ws.Cols[1].Wins[0], b, "following column shifts into the middle")
+    eq(ws.Cols[2].Wins[0], d, "dragged column moves immediately after its neighbor")
 }
 
 // ----------------------------------------------------------------------------
@@ -495,6 +685,97 @@ test_fullscreen :: proc() {
     ok(b.Fullscreen, "b fullscreen again")
     ok(!c.Focus_Dir(m, .Left), "no focus nav out of fullscreen")
     ok(!c.Move_Dir(m, .Left), "no move out of fullscreen")
+}
+
+test_maximize :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+
+    a := add_tiled(m, 100)
+    b := add_tiled(m, 101)
+    c.Arrange_All(m)
+    original := a.Geom
+    c.Focus_Client(m, a)
+    ok(c.Toggle_Maximized(a), "maximize tiled client")
+    ok(a.Maximized, "tiled client records maximized state")
+    ok(!a.Floating, "maximize preserves tiled membership")
+    eq(a.MaxRestoreGeom, original, "maximize snapshots tiled geometry")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 1900, H = 1060}, "maximized tiled client fills usable area")
+    ok(m.ByXid[101].Geom.X <= c.HIDE_X, "maximized tiled column displaces its neighbor off-screen")
+    ok(c.Scroll_Viewport(m, 1), "neighbor remains reachable by scrolling")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = -946, Y = 10, W = 1900, H = 1060}, "scrolling translates but does not resize the maximized column")
+    ok(m.ByXid[101].Geom.X >= 0, "scrolling reveals the displaced neighbor")
+    ok(c.Scroll_Viewport(m, -1), "scroll back to maximized column")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 1900, H = 1060}, "layout reflow preserves maximize override")
+    ok(c.Toggle_Maximized(a), "restore tiled client")
+    c.Arrange_All(m)
+    eq(a.Geom, original, "tiled client restores exact layout geometry")
+
+    c.Focus_Client(m, b)
+    ok(c.Set_Maximized(b, true), "maximize right tiled client")
+    c.Ensure_Active_Focus_Visible(m)
+    c.Arrange_All(m)
+    eq(b.Geom, c.Rect{X = 10, Y = 10, W = 1900, H = 1060}, "right maximized column expands left to fill its page")
+    ok(c.Scroll_Viewport(m, -1), "scroll left from right maximized column")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 944, H = 1060}, "left neighbor remains visible beside right maximized page")
+    eq(b.Geom, c.Rect{X = 966, Y = 10, W = 1900, H = 1060}, "right maximized page stays full-width while partially visible")
+    c.Set_Maximized(b, false)
+    ws.ViewportX = 0
+    c.Focus_Client(m, a)
+
+    c.Set_Floating(m, a, true)
+    a.FloatingRect = c.Rect{X = 123, Y = 87, W = 701, H = 509}
+    c.Arrange_All(m)
+    float_original := a.Geom
+    ok(c.Set_Maximized(a, true), "maximize floating client")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 1900, H = 1060}, "maximized floater fills usable area")
+    a.FloatingRect = c.Rect{X = 1, Y = 2, W = 3, H = 4}
+    ok(c.Set_Maximized(a, false), "restore floating client")
+    c.Arrange_All(m)
+    eq(a.FloatingRect, c.Rect{X = 123, Y = 87, W = 701, H = 509}, "floating restore preserves exact user rect")
+    eq(a.Geom, float_original, "floating client restores exact visible geometry")
+
+    a.Fullscreen = true
+    ok(!c.Toggle_Maximized(a), "fullscreen blocks maximize toggle")
+    ok(!a.Maximized, "fullscreen remains distinct from maximized")
+    a.Fullscreen = false
+
+    dock := add_dock(m, 300, c.Insets{Top = 24, Left = 40}, c.Rect{X = 0, Y = 0, W = 1920, H = 24})
+    _ = dock
+    ok(c.Set_Maximized(a, true), "maximize with reserved work area")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 50, Y = 34, W = 1860, H = 1036}, "maximize respects gaps, borders, and dock struts")
+
+    c.Switch_WS_Id(m, 2)
+    c.Arrange_All(m)
+    ok(a.Geom.X <= c.HIDE_X, "maximized client is hidden with its workspace")
+    c.Switch_WS_Id(m, 1)
+    c.Arrange_All(m)
+    ok(a.Maximized, "maximize state survives workspace switch")
+    eq(a.Geom, c.Rect{X = 50, Y = 34, W = 1860, H = 1036}, "maximized geometry returns with workspace")
+    eq(a.Ws, ws, "maximize does not change workspace ownership")
+
+    multi := c.New_Manager()
+    defer c.Destroy_Manager(multi)
+    specs := []c.Output_Spec{
+        {Name = "left", Geom = c.Rect{X = 0, Y = 0, W = 1920, H = 1080}, Primary = true},
+        {Name = "right", Geom = c.Rect{X = 1920, Y = 0, W = 1280, H = 1024}},
+    }
+    c.Reconcile_Outputs(multi, specs)
+    moved := add_tiled(multi, 400)
+    c.Arrange_All(multi)
+    c.Set_Maximized(moved, true)
+    ok(c.Move_Focused_To_Output_Rel(multi, 1), "move maximized client to another output")
+    c.Arrange_All(multi)
+    ok(moved.Maximized, "maximize state survives output move")
+    eq(moved.Geom, c.Rect{X = 1930, Y = 10, W = 1260, H = 1004}, "maximize recomputes destination output geometry")
 }
 
 test_tabbed_layout :: proc() {
@@ -649,8 +930,8 @@ test_multi_output_scrolling :: proc() {
     right_third := add_tiled(m, 202)
 
     c.Arrange_All(m)
-    eq(left_third.Geom.X, left.Geom.X + c.HIDE_X, "left overflow column cannot spill onto right output")
-    eq(right_third.Geom.X, right.Geom.X + c.HIDE_X, "right overflow column is parked off-screen")
+    eq(left_third.Geom.X, -26, "left output exposes the edge of its right neighbor")
+    eq(right_third.Geom.X, 1894, "right output exposes the edge of its right neighbor")
     ok(right_first.Geom.X >= right.Geom.X, "visible right column stays on its own output")
 
     eq(left.Current.ViewportX, 0, "left viewport starts independently at zero")
@@ -660,7 +941,7 @@ test_multi_output_scrolling :: proc() {
     eq(right.Current.ViewportX, 0, "right output viewport remains unchanged")
     eq(c.Active_Output(m), right, "pointer scrolling does not steal active output")
     c.Arrange_All(m)
-    eq(left_first.Geom.X, left.Geom.X + c.HIDE_X, "scrolled-away left column cannot appear on another output")
+    eq(left_first.Geom.X, -1878, "left output exposes its left neighbor after scrolling")
     ok(left_third.Geom.X >= left.Geom.X && left_third.Geom.X < left.Geom.X + left.Geom.W,
        "newly visible left column stays within its output")
 }
@@ -734,10 +1015,71 @@ test_scrolling :: proc() {
     c.Focus_Client(m, d)
     c.Ensure_Active_Focus_Visible(m)
     c.Arrange_All(m)
-    eq(d.Geom.X, 966, "right column drawn at work_x + strip_x - viewport + border")
-    eq(a.Geom.X, c.HIDE_X, "scrolled-off column is parked instead of leaking beyond the output")
+    eq(d.Geom.X, 980, "right column leaves a normal gap beside the left preview")
+    eq(a.Geom.X, -918, "scrolled-off column leaves a narrow left preview")
     _, first_bar_visible := c.Tab_Bar_Rect(m, c.Active_Output(m), ws, 0)
     ok(!first_bar_visible, "scrolled-off column does not expose a tab decoration")
+}
+
+test_scroll_previews :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    a := add_tiled(m, 100)
+    b := add_tiled(m, 101)
+    d := add_tiled(m, 102)
+
+    c.Arrange_All(m)
+    previews := c.Scroll_Previews(m, c.Active_Output(m))
+    eq(len(previews), 1, "first strip page has one right preview")
+    if len(previews) == 1 {
+        eq(previews[0].Side, c.Scroll_Preview_Side.Right, "preview points right")
+        eq(previews[0].Client, d, "right preview targets nearest hidden client")
+        eq(previews[0].Geom, c.Rect{X = 1892, Y = 8, W = 20, H = 1064}, "right preview uses actual workarea edge")
+        eq(d.Geom.W, i32(944), "right neighbor keeps its full window width")
+        ok(d.Geom.X + d.Geom.W > 1920, "right neighbor continues naturally beyond the screen")
+    }
+    delete(previews)
+
+    preview, hit := c.Scroll_Preview_At_Point(m, 1900, 500)
+    ok(hit && preview.Client == d, "point on exposed right edge resolves preview target")
+    ok(c.Reveal_Scroll_Client(m, d), "reveal focuses and scrolls to right preview target")
+    eq(m.Focused, d, "revealed preview target becomes focused")
+    eq(ws.ViewportX, 956, "revealed target aligns the next strip page")
+    c.Arrange_All(m)
+    previews = c.Scroll_Previews(m, c.Active_Output(m))
+    eq(len(previews), 1, "last strip page has one left preview")
+    if len(previews) == 1 {
+        eq(previews[0].Side, c.Scroll_Preview_Side.Left, "preview points left")
+        eq(previews[0].Client, a, "left preview targets nearest hidden client")
+        eq(previews[0].Geom, c.Rect{X = 8, Y = 8, W = 20, H = 1064}, "left preview uses actual workarea edge")
+        eq(a.Geom.W, i32(944), "left neighbor keeps its full window width")
+        ok(a.Geom.X < 0, "left neighbor continues naturally beyond the screen")
+    }
+    delete(previews)
+
+    // A page with hidden columns on both sides reserves both preview strips.
+    // The visible tiles reflow between them and retain the configured inner
+    // gap instead of being covered by either preview.
+    e := add_tiled(m, 103)
+    c.Arrange_All(m)
+    previews = c.Scroll_Previews(m, c.Active_Output(m))
+    eq(len(previews), 2, "middle strip page exposes previews on both sides")
+    if len(previews) == 2 {
+        eq(previews[0].Client, a, "left preview still targets nearest hidden client")
+        eq(previews[1].Client, e, "right preview targets nearest hidden client")
+        eq(b.Geom.X - b.Border - (previews[0].Geom.X + previews[0].Geom.W), i32(8), "left preview keeps the normal inner gap")
+        eq(previews[1].Geom.X - (d.Geom.X + d.Geom.W + d.Border), i32(8), "right preview keeps the normal inner gap")
+    }
+    delete(previews)
+
+    c.Focus_Client(m, d)
+    d.Fullscreen = true
+    c.Arrange_All(m)
+    previews = c.Scroll_Previews(m, c.Active_Output(m))
+    eq(len(previews), 0, "fullscreen suppresses scroll previews")
+    delete(previews)
 }
 
 // two columns fit on screen exactly, so the viewport never pans
@@ -923,6 +1265,13 @@ test_dock_geometry_and_struts :: proc() {
     eq(a.Geom, c.Rect { X = 10, Y = 34, W = 1900, H = 1008 }, "bottom strut keeps the outer gap too")
     eq(bdock.Geom, c.Rect { X = 0, Y = 1052, W = 1920, H = 28 }, "bottom dock sits at its rect")
     eq(o.Reserved, c.Insets { Top = 24, Bottom = 28 }, "per-side max across docks")
+    drop_targets := c.Drop_Targets(m)
+    eq(len(drop_targets), 4, "dock workarea still exposes four directional targets")
+    for target in drop_targets {
+        ok(target.HitGeom.Y >= 32 && target.HitGeom.Y + target.HitGeom.H <= 1044,
+           "drop activation remains inside top/bottom struts")
+    }
+    delete(drop_targets)
 
     // a dock without client geometry defaults to a 24 px top strip
     naked := add_dock(m, 302, c.Insets {}, c.Rect {})
@@ -965,7 +1314,7 @@ test_dock_sticky :: proc() {
     eq(ws1.ViewportX, 0, "dock does not disturb the viewport")
 }
 
-// Fullscreen covers the output; docks remain drawn above it.
+// Fullscreen covers the output while the dock retains its geometry underneath.
 test_dock_fullscreen_coexists :: proc() {
     m := mk_man()
     defer c.Destroy_Manager(m)
@@ -1024,7 +1373,7 @@ test_dock_reserved_ensure_visible :: proc() {
     eq(ws.ViewportX, 856, "viewport pan accounts for the side reservation")
     c.Arrange_All(m)
     ok(d.Geom.X + d.Geom.W <= 1920, "focused column fully on screen")
-    eq(d.Geom.X, 1066, "drawn at work_x 208 + strip 1712 - viewport 856 + border 2")
+    eq(d.Geom.X, 1080, "drawn after reserving a left preview and its normal gap")
 }
 
 // ----------------------------------------------------------------------------

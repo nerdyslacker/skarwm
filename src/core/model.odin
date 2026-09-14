@@ -23,6 +23,15 @@ Rect :: struct {
     X, Y, W, H: i32,
 }
 
+// ICCCM WM_NORMAL_HINTS subset used by interactive resizing. Zero values mean
+// that the corresponding constraint was not supplied by the client.
+Size_Hints :: struct {
+    MinW, MinH: i32,
+    MaxW, MaxH: i32,
+    BaseW, BaseH: i32,
+    IncW, IncH: i32,
+}
+
 rect_empty :: proc(r: Rect) -> bool {
     return r.W <= 0 || r.H <= 0
 }
@@ -55,13 +64,22 @@ Client :: struct {
 
     Floating:   bool, // participates in floating layout (in ws.Floaters)
     Fullscreen: bool, // covers the whole output while its workspace is current
+    // Maximized is a work-area layout override, distinct from fullscreen and
+    // from structural tiled/floating membership.  The restore snapshot lets
+    // the pointer action undo the transition without losing session geometry.
+    Maximized:          bool,
+    MaxRestoreGeom:     Rect,
+    MaxRestoreFloatRect: Rect,
+    MaxRestoreFloating: bool,
     Urgent:     bool, // ICCCM WM_HINTS urgency flag
     Mapped:     bool, // the X layer has MapWindow'ed it
     Border:     i32, // border width to apply (0 while fullscreen), set by arrange
+    SizeHints: Size_Hints,
+    TileWeight: f64, // relative height inside a stacked column; 0 means default
 
     // Dock is an output-level panel window (_NET_WM_WINDOW_TYPE_DOCK). A dock
-    // has Ws == nil and lives in Output.Docks: never tiled, never focused,
-    // never hidden on a workspace switch, kept above fullscreen windows.
+    // has Ws == nil and lives in Output.Docks: never tiled, never focused, and
+    // never hidden on a workspace switch. Active fullscreen clients cover it.
     Dock: bool,
     // Stashed scratchpads remain managed by X but are detached from every
     // workspace and parked off-screen until summoned.
@@ -83,6 +101,7 @@ Column :: struct {
     Wins:  [dynamic]^Client, // top → bottom
     Focus: ^Client, // most recently focused window inside this column
     Layout: Column_Layout,
+    Width: i32, // desired tile width; 0 means the layout-derived default
 }
 
 // A horizontal scrolling workspace.

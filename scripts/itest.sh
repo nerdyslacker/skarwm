@@ -21,13 +21,11 @@
 #   - one window alone            -> 1260x780+10+10   (fills the work width)
 #   - a two-window vertical stack -> 1260x384+10+10 / 1260x384+10+406
 #   - a column of a 2+ strip      -> 624x780+10+10 or 624x780+646+10 (col0/col1)
-# With a third (or later) column the strip overflows and the viewport pans; the
-# focused (newest) column then sits at client X 646 and off-page columns are
-# parked rather than allowed to spill onto another RandR output. Hidden,
-# off-page, and other-workspace windows are parked at X = -20000 with full-output
-# width 1280. Predicates below are therefore
-# width-agnostic within {1260,624} and treat "tiled" as any such window whose
-# X > -10000 (parked windows are 1280 wide, so they never match).
+# With a third (or later) column the strip overflows and the viewport pans.
+# Visible columns reflow to reserve each 20px edge preview and its 8px inner
+# gap: one preview yields 610px clients and two previews yield 596px clients.
+# Hidden, off-page, and other-workspace windows are parked at X = -20000 with
+# full-output width 1280, so they never match the tiled-width predicates below.
 
 set -u
 cd "$(dirname "$0")/.." || exit 2
@@ -42,6 +40,7 @@ export SKARWM_SOCKET="${TMPDIR:-/tmp}/skarwm-itest.sock"
 # back to its built-in defaults, no matter what config lives in the real $HOME.
 XDGC="${TMPDIR:-/tmp}/skarwm_itest_xdg"
 export XDG_CONFIG_HOME="$XDGC"
+PICOM_PID=""
 
 say() { printf '%s\n' "$*"; }
 pass() { PASS=$((PASS+1)); say "PASS  $*"; }
@@ -58,13 +57,20 @@ xtops() {
 
 geom_of() { xtops | awk -v id="$1" '$1==id{print $2; exit}'; }
 
-# Tiled windows are 1260 or 624 px wide; parked (hidden) windows keep the full
-# output width (1280) and transient pre-layout windows are not tiled, so neither
-# matches. Panning never changes a column's width, so off-screen-left columns
-# (negative X) still count as tiled.
-count_tiled() { xtops | awk '$2 ~ /^(1260|624)x/{n++} END{print n+0}'; }
-first_tiled_id() { xtops | awk '$2 ~ /^(1260|624)x/{print $1; exit}'; }
+# Tiled windows use the ordinary 1260/624px widths or the 610/596px widths of
+# pages reserving one/two previews. Parked windows keep the full output width
+# (1280), and transient pre-layout windows are not tiled, so neither matches.
+count_tiled() { xtops | awk '$2 ~ /^(1260|624|610|596)x/{n++} END{print n+0}'; }
+first_tiled_id() { xtops | awk '$2 ~ /^(1260|624|610|596)x/{print $1; exit}'; }
 unnamed_children() { xwininfo -root -tree 2>/dev/null | grep -c '(has no name)' || true; }
+unnamed_ids() { xwininfo -root -tree 2>/dev/null | awk '/\(has no name\)/{print $1}'; }
+mapped_unnamed_children() {
+  n=0
+  while read -r id; do
+    [ -n "$id" ] && xwininfo -id "$id" 2>/dev/null | grep -q 'Map State: IsViewable' && n=$((n+1))
+  done < <(unnamed_ids)
+  printf '%s\n' "$n"
+}
 
 # geosplit <WxH+X+Y> sets $gw $gh $gx $gy
 geosplit() {
@@ -110,7 +116,13 @@ die_display() {
   [ -f "$WM_LOG" ] && { say "--- WM log ---"; cat "$WM_LOG"; }
   exit 1
 }
-cleanup() { pkill -x skarwm 2>/dev/null; pkill -x xterm 2>/dev/null; pkill -x Xvnc 2>/dev/null; rm -f "$SKARWM_SOCKET"; }
+cleanup() {
+  if [ -n "$PICOM_PID" ]; then kill "$PICOM_PID" 2>/dev/null || true; PICOM_PID=""; fi
+  pkill -x skarwm 2>/dev/null
+  pkill -x xterm 2>/dev/null
+  pkill -x Xvnc 2>/dev/null
+  rm -f "$SKARWM_SOCKET"
+}
 trap cleanup EXIT
 
 # ---------------------------------------------------------------------------
@@ -148,19 +160,122 @@ if wait_tiled_n 2; then pass "spawn second terminal -> 2 columns"; else fail "sp
 # fill-up-to-2: both columns fit on screen together and the viewport never pans
 if wait_for two_side_by_side; then pass "two columns tile side-by-side on screen (no scroll)"; else fail "two side-by-side"; fi
 
-# ---- 2b. tiled Super+drag shows four zones and drops vertically --------------
+# Button2 over the left managed client maximizes to the work area, advertises
+# both EWMH maximize atoms, then restores the exact two-column layout.
+xdotool mousemove 300 400 click 2 >/dev/null 2>&1
+if wait_geom "$first" "1260x780+10+10"; then pass "middle click maximizes a tiled client"; else fail "middle-click maximize"; fi
+max_state=$(xprop -id "$first" _NET_WM_STATE 2>/dev/null)
+if [[ $max_state == *"_NET_WM_STATE_MAXIMIZED_VERT"* && $max_state == *"_NET_WM_STATE_MAXIMIZED_HORZ"* ]]; then
+  pass "middle-click maximize publishes both EWMH atoms"
+else
+  fail "middle-click maximize EWMH state ($max_state)"
+fi
+# The maximized column is a full-width strip page, not an overlay. Scrolling
+# right parks it and exposes the following normal-width column.
+xdotool keydown super click 5 keyup super >/dev/null 2>&1
+if wait_geom "$first" "1260x780+-626+10" && xtops | grep -q '624x780+646+10'; then
+  pass "scroll shows the maximized page beside its displaced neighbor"
+else
+  fail "scroll past maximized page"
+fi
+xdotool keydown super click 4 keyup super >/dev/null 2>&1
+wait_geom "$first" "1260x780+10+10" || fail "scroll back to maximized page"
+xdotool click 2 >/dev/null 2>&1
+if wait_for two_side_by_side; then pass "second middle click restores tiled geometry"; else fail "middle-click restore"; fi
+
+# Mod+Button3 on a tiled window moves its nearest split boundary. Resizing the
+# left column wider must shrink and shift the right column, keeping the workarea
+# filled. Restore the split before the drag/drop fixture below.
+second=$(xtops | awk '$2=="624x780+646+10"{print $1; exit}')
+xdotool mousemove 500 400 keydown Super_L mousedown 3 >/dev/null 2>&1
+sleep 0.1
+xdotool mousemove 620 400 >/dev/null 2>&1
+sleep 0.2
+xdotool mouseup 3 keyup Super_L >/dev/null 2>&1
+if wait_geom "$first" "744x780+10+10" && wait_geom "$second" "504x780+766+10"; then
+  pass "tiled resize changes the whole column and following column"
+else
+  fail "tiled column resize"
+fi
+# Opening beside a resized column must use the remaining page width rather than
+# injecting a generic 624px column and leaving partially visible windows.
+key super+Return
+new_after_resize=$(printf '0x%x' "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')")
+if wait_geom "$first" "727x780+10+10" && wait_geom "$new_after_resize" "493x780+749+10"; then
+  pass "new window preserves resized page proportions"
+else
+  fail "new window after column resize (old=$(geom_of "$first"), new=$(geom_of "$new_after_resize"))"
+fi
+key super+shift+q
+wait_for ipc_count_is 2 || fail "close post-resize insertion"
+xdotool mousemove 620 400 keydown Super_L mousedown 3 >/dev/null 2>&1
+sleep 0.1
+xdotool mousemove 500 400 >/dev/null 2>&1
+sleep 0.2
+xdotool mouseup 3 keyup Super_L >/dev/null 2>&1
+if wait_for two_side_by_side; then pass "tiled column resize restores exact split"; else fail "column resize restore"; fi
+
+# ---- 2b. tiled Super+drag shows one contextual zone and drops vertically -----
 before_overlay=$(unnamed_children)
+before_overlay_mapped=$(mapped_unnamed_children)
 xdotool mousemove 950 400 keydown Super_L mousedown 1 >/dev/null 2>&1
 sleep 0.3
-xdotool mousemove 640 100 >/dev/null 2>&1
+if [ "$(unnamed_children)" -eq "$before_overlay" ] && [ "$(mapped_unnamed_children)" -eq "$before_overlay_mapped" ]; then
+  pass "tiled drag in center shows no drop overlay"
+else
+  fail "center drag unexpectedly showed an overlay"
+fi
+
+# Enter the left activation edge. Exactly one reusable five-window overlay is
+# created (one translucent fill + four border pieces), rather than four
+# directional outlines. Without a compositor the fill remains safely unmapped.
+# The workarea starts at x=8 and the side overlay is 261px wide, so x=268 is
+# its last pixel. This is deliberately much earlier than the old 72px trigger.
+xdotool mousemove 268 400 >/dev/null 2>&1
 sleep 0.3
 during_overlay=$(unnamed_children)
-if [ $((during_overlay - before_overlay)) -eq 16 ]; then pass "tiled drag shows exactly four drop-zone outlines"; else fail "fixed four-way drop-zone overlay"; fi
+active_overlay_mapped=$(mapped_unnamed_children)
+if [ $((during_overlay - before_overlay)) -eq 5 ] && [ $((active_overlay_mapped - before_overlay_mapped)) -eq 4 ]; then
+  pass "left edge shows one outline and safely omits fill without compositor"
+else
+  fail "single active overlay fallback"
+fi
+opacity_windows=0
+for id in $(unnamed_ids); do
+  xprop -id "$id" _NET_WM_WINDOW_OPACITY 2>/dev/null | grep -q '= ' && opacity_windows=$((opacity_windows+1))
+done
+if [ "$opacity_windows" -eq 1 ]; then pass "overlay fill publishes compositor opacity"; else fail "overlay fill opacity property"; fi
+
+# Start a compositor when available; the next direction update should add the
+# translucent fill without recreating the overlay.
+if command -v picom >/dev/null 2>&1; then
+  picom --config /dev/null --backend xrender --no-vsync >/tmp/picom_itest.log 2>&1 &
+  PICOM_PID=$!
+  sleep 0.8
+fi
+
+# Leaving the threshold hides the overlay; changing direction reuses the same
+# windows rather than destroying/recreating them.
+xdotool mousemove 640 400 >/dev/null 2>&1; sleep 0.3
+if [ "$(mapped_unnamed_children)" -eq "$before_overlay_mapped" ]; then pass "leaving edge hides active overlay"; else fail "overlay hide in center"; fi
+xdotool mousemove 1260 400 >/dev/null 2>&1; sleep 0.3
+if [ "$(unnamed_children)" -eq "$during_overlay" ] && [ $(( $(mapped_unnamed_children) - before_overlay_mapped )) -ge 4 ]; then
+  pass "switching direction reuses the active overlay"
+else
+  fail "overlay reuse across directions"
+fi
+if [ -n "$PICOM_PID" ] && kill -0 "$PICOM_PID" 2>/dev/null; then
+  if [ $(( $(mapped_unnamed_children) - before_overlay_mapped )) -eq 5 ]; then pass "compositor maps translucent overlay fill"; else fail "compositor-backed overlay fill"; fi
+fi
+
+# Finish in the top activation edge and retain the existing vertical drop.
+xdotool mousemove 640 20 >/dev/null 2>&1
+sleep 0.3
 xdotool mouseup 1 keyup Super_L >/dev/null 2>&1
 if wait_for stack_of_two; then pass "tiled drag top zone stacks vertically"; else fail "tiled drag vertical drop"; fi
 sleep 0.3
-after_overlay=$(unnamed_children)
-if [ "$after_overlay" -le "$before_overlay" ]; then pass "drop-zone overlays close after drop"; else fail "drop-zone overlay cleanup"; fi
+after_overlay_mapped=$(mapped_unnamed_children)
+if [ "$after_overlay_mapped" -eq "$before_overlay_mapped" ]; then pass "drop hides the reusable overlay"; else fail "drop-zone overlay cleanup"; fi
 
 # Toggle to tabbed and back to split the test stack into two horizontal columns,
 # restoring the fixture expected by the keyboard movement checks below.
@@ -191,6 +306,27 @@ fi
 ty_dec=$(printf '%d' "$ty")   # XGetInputFocus returns decimal ids
 by_dec=$(printf '%d' "$by")
 
+# Drag the lower boundary of the top row. The bottom row follows and both rows
+# continue to fill the column; then restore the equal split for later checks.
+xdotool mousemove 640 300 keydown Super_L mousedown 3 >/dev/null 2>&1
+sleep 0.1
+xdotool mousemove 640 400 >/dev/null 2>&1
+sleep 0.2
+xdotool mouseup 3 keyup Super_L >/dev/null 2>&1
+if wait_geom "$ty" "1260x484+10+10" && wait_geom "$by" "1260x284+10+506"; then
+  pass "stack row resize moves the shared boundary"
+else
+  fail "stack row resize"
+fi
+xdotool mousemove 640 300 keydown Super_L mousedown 3 >/dev/null 2>&1
+sleep 0.1
+xdotool mousemove 640 200 >/dev/null 2>&1
+sleep 0.2
+xdotool mouseup 3 keyup Super_L >/dev/null 2>&1
+if wait_for stack_of_two; then pass "stack row resize restores exact split"; else fail "row resize restore"; fi
+# Keep focus-follows-mouse from changing the keyboard fixture as rows swap.
+xdotool mousemove 640 795 >/dev/null 2>&1; sleep 0.3
+
 # ---- 4. focus up/down within the stack ----------------------------------------
 key super+k
 if wait_focus "$ty_dec"; then pass "focus up -> top window"; else fail "focus up -> top"; fi
@@ -207,7 +343,7 @@ key super+t
 if wait_geom "$ty" "1260x756+10+34" && wait_hidden_x "$by"; then
   pass "tabbed layout shows only the active tab at full column size"
 else
-  fail "tabbed active geometry"
+  fail "tabbed active geometry (active=$(geom_of "$ty"), peer=$(geom_of "$by"))"
 fi
 key super+k
 if wait_focus "$by_dec" && wait_geom "$by" "1260x756+10+34" && wait_hidden_x "$ty"; then
@@ -273,8 +409,9 @@ xdotool mousemove 640 795 >/dev/null 2>&1; sleep 0.3
 # Strip: page width (1264 - 8) / 2 = 628 tile / 624 client, step 636. Columns 0
 # and 1 fill the work area exactly; a 3rd column makes the strip 1900px wide and
 # each later spawn lands to the right of the focused (newest) column, panning the
-# viewport so the newest column sits at client X 646 and earlier columns are
-# parked off-screen. (4 columns -> strip 2536, max viewport 1272.)
+# viewport so the newest column is visible on the right and earlier columns are
+# parked off-screen. Preview pages reserve 20px of the neighboring window plus the usual 8px
+# inner gap. (4 columns -> strip 2536, max viewport 1272.)
 ok4=true
 scroll_ids=()
 for n in 1 2 3 4; do
@@ -292,18 +429,18 @@ right_id=${scroll_ids[3]}
 if wait_hidden_x "$left_id"; then pass "3rd+ spawn pans the strip (1st column parked)"; else fail "strip pan start"; fi
 
 # focus is the newest = rightmost column; viewport clamps at max so the last
-# column's right edge sits against the work-area right edge (client x = 646).
+# column's right edge sits inside the space reserved for the left preview.
 if wait_focus "$(printf '%d' "$right_id")"; then pass "newest column focused at far right"; else fail "far-right focus"; fi
-if wait_geom "$right_id" "624x780+646+10"; then pass "viewport clamps at strip max (right edge aligned)"; else fail "right clamp geometry"; fi
+if wait_geom "$right_id" "610x780+660+10"; then pass "viewport clamps at strip max with preview space reserved"; else fail "right clamp geometry"; fi
 
 # walk focus back three columns to the leftmost one: viewport must return to 0
 for _ in 1 2 3; do key super+h; done
 if wait_focus "$(printf '%d' "$left_id")"; then pass "focus left to the leftmost column"; else fail "focus left walk"; fi
-if wait_geom "$left_id" "624x780+10+10"; then pass "viewport returns to 0 at leftmost column"; else fail "left clamp geometry"; fi
+if wait_geom "$left_id" "610x780+10+10"; then pass "viewport returns to 0 at leftmost column"; else fail "left clamp geometry"; fi
 
 # an extra focus-left beyond the edge must be a no-op (no overscroll)
 key super+h
-if wait_geom "$left_id" "624x780+10+10" && [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$left_id")" ]; then
+if wait_geom "$left_id" "610x780+10+10" && [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$left_id")" ]; then
   pass "no overscroll past the leftmost column"
 else
   fail "overscrolled past leftmost"
@@ -314,19 +451,50 @@ fi
 xdotool keydown super >/dev/null 2>&1
 xdotool click 5 >/dev/null 2>&1
 xdotool keyup super >/dev/null 2>&1
-if wait_hidden_x "$left_id" && [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$left_id")" ]; then
-  pass "Mod+wheel down scrolls right without changing focus"
+if wait_geom "$left_id" "624x780+-598+10" && [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$left_id")" ]; then
+  pass "Mod+wheel down scrolls right without changing focus and leaves a preview"
 else
   fail "Mod+wheel down viewport scroll"
 fi
 xdotool keydown super >/dev/null 2>&1
 xdotool click 4 >/dev/null 2>&1
 xdotool keyup super >/dev/null 2>&1
-if wait_geom "$left_id" "624x780+10+10"; then
+if wait_geom "$left_id" "610x780+10+10"; then
   pass "Mod+wheel up scrolls left"
 else
   fail "Mod+wheel up viewport scroll"
 fi
+
+# Hover the exposed right edge: column 2 is revealed and focused. Keeping the
+# pointer stationary at the new right preview must not chain into column 3.
+xdotool mousemove --sync 900 400 >/dev/null 2>&1
+xdotool mousemove 1260 400 >/dev/null 2>&1
+hover_target=${scroll_ids[2]}
+if wait_focus "$(printf '%d' "$hover_target")" && wait_geom "$hover_target" "596x780+646+10"; then
+  pass "hovering right preview reveals and focuses its real client"
+else
+  fail "right preview hover reveal"
+fi
+sleep 0.8
+if [ "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')" = "$(printf '%d' "$hover_target")" ]; then
+  pass "stationary pointer does not repeat or oscillate preview navigation"
+else
+  fail "preview hover lock"
+fi
+
+# Leaving every preview unlocks navigation. Entering the new left preview
+# returns to the previous page and focuses its nearest hidden client.
+xdotool mousemove --sync 640 795 >/dev/null 2>&1; sleep 0.6
+xdotool mousemove --sync 15 400 >/dev/null 2>&1
+if wait_focus "$(printf '%d' "$left_id")" && wait_geom "$left_id" "610x780+10+10"; then
+  pass "leaving preview and hovering the opposite edge reveals left neighbor"
+else
+  fail "left preview hover after unlock"
+fi
+
+# Restore the left-focused fixture expected by the workspace tests below.
+xdotool mousemove 640 795 >/dev/null 2>&1
+wait_focus "$(printf '%d' "$left_id")" || fail "restore focus after preview hover checks"
 
 # ---- 11. dynamic workspaces ------------------------------------------------------
 # ws1 holds the 4 columns; the focused (leftmost) window moves to a fresh ws2.
@@ -344,7 +512,7 @@ else
 fi
 
 key super+1
-if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "624x780+10+10"; then
+if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "610x780+10+10"; then
   pass "ws1 restores its 3 remaining columns"
 else
   fail "ws1 restore after move"
@@ -354,7 +522,7 @@ fi
 key super+n
 if wait_geom "$moved_hex" "1260x780+10+10"; then pass "workspace next (super+n) lands on ws2"; else fail "workspace next"; fi
 key super+p
-if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "624x780+10+10"; then
+if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "610x780+10+10"; then
   pass "workspace prev (super+p) returns to ws1"
 else
   fail "workspace prev"
@@ -364,7 +532,7 @@ fi
 key super+9
 if wait_for zero_tiled; then pass "goto fresh workspace 9 (created empty on demand)"; else fail "workspace 9 create"; fi
 key super+1
-if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "624x780+10+10"; then
+if wait_workspace_n 1 3 && wait_geom "${scroll_ids[1]}" "610x780+10+10"; then
   pass "back to ws1"
 else
   fail "back to ws1"
@@ -385,7 +553,12 @@ mod_key : super
 inner_gap : 8
 outer_gap : 8
 border_width : 2
+corner_radius : 0
 focus_follows_mouse : true
+animations : false
+animation_duration_ms : 180
+animation_fps : 60
+animation_easing : ease_out_cubic
 bind : mod + Return : "xterm"
 call : mod + Shift + r : reload_config
 call : mod + Shift + q : close_window
@@ -409,6 +582,11 @@ key super+Return
 if wait_tiled_n 1; then pass "rc config: spawn tiles under -c file"; else fail "rc spawn"; fi
 rcwin=$(first_tiled_id)
 if wait_geom "$rcwin" "1260x780+10+10"; then pass "rc config: single window geometry (outer 8 / border 2)"; else fail "rc geometry"; fi
+if xwininfo -id "$rcwin" -shape 2>/dev/null | grep -q "No window shape defined"; then
+  pass "rc config: corner_radius 0 keeps windows square"
+else
+  fail "rc config: zero-radius window unexpectedly shaped"
+fi
 
 # reload with a changed outer_gap/border_width reflows the *existing* window
 cat > "$RC" <<'RC'
@@ -416,6 +594,11 @@ mod_key : super
 outer_gap : 20
 inner_gap : 8
 border_width : 4
+corner_radius : 12
+animations : true
+animation_duration_ms : 120
+animation_fps : 75
+animation_easing : linear
 bind : mod + Return : "xterm"
 call : mod + Shift + r : reload_config
 call : mod + Shift + q : close_window
@@ -428,6 +611,11 @@ workspace : mod + 2 : view 2
 RC
 key super+shift+r
 if wait_geom "$rcwin" "1232x752+24+24"; then pass "rc config: atomic reload reflows to outer 20 / border 4"; else fail "rc reload geometry"; fi
+if wait_for sh -c "xwininfo -id '$rcwin' -shape 2>/dev/null | grep -q 'Window shape extents'"; then
+  pass "rc config: positive corner_radius reshapes existing window"
+else
+  fail "rc config: rounded shape not applied after reload"
+fi
 
 # malformed rc (unknown action token) -> previous config kept, WM alive
 printf 'call : mod + x : no_such_action\n' >> "$RC"
@@ -484,7 +672,9 @@ fi
 sup=$(xprop -root _NET_SUPPORTED 2>/dev/null)
 if [ -n "$sup" ] && echo "$sup" | grep -q _NET_CLIENT_LIST \
    && echo "$sup" | grep -q _NET_ACTIVE_WINDOW \
-   && echo "$sup" | grep -q _NET_WM_STATE_FULLSCREEN; then
+   && echo "$sup" | grep -q _NET_WM_STATE_FULLSCREEN \
+   && echo "$sup" | grep -q _NET_WM_STATE_MAXIMIZED_VERT \
+   && echo "$sup" | grep -q _NET_WM_STATE_MAXIMIZED_HORZ; then
   pass "ewmh: _NET_SUPPORTED claims the implemented subset"
 else
   fail "ewmh: _NET_SUPPORTED subset"
@@ -618,7 +808,7 @@ fi
 # ---- 13. docks and struts ------------------------------------------------------
 # An EWMH dock (panel) window fabricated with python-xlib (scripts/xdock.py):
 # classified by _NET_WM_WINDOW_TYPE, never focused, visible on every workspace,
-# stacked above windows (fullscreen included), and its _NET_WM_STRUT_PARTIAL
+# stacked above ordinary windows but below fullscreen, and its _NET_WM_STRUT_PARTIAL
 # shrinks the tiling work area live. Work-area numbers below assume the built-in
 # defaults (outer 8 / border 2): baseline client 1260x780+10+10; a 24 px top
 # strut pushes it to 1260x756+10+34; a 48 px strut to 1260x732+10+58; the root
@@ -722,17 +912,17 @@ fi
 key super+1
 if wait_geom "$xt" "1260x756+10+34"; then pass "dock: back on ws1 the window retiles below"; else fail "dock: ws1 restore"; fi
 
-# fullscreen covers the output; the panel stays visible and stacked above
+# fullscreen covers the output and is stacked above the panel
 key super+f
 if wait_geom "$xt" "1280x800+0+0"; then pass "dock: window fullscreens over the work area"; else fail "dock: fullscreen"; fi
 if wait_abs_geom "$DOCK" "1280x24+0+0"; then
-  pass "dock: panel survives fullscreen"
+  pass "dock: panel keeps its geometry under fullscreen"
 else
-  fail "dock: panel hidden by fullscreen"
+  fail "dock: panel geometry changed during fullscreen"
 fi
 dp=$(tree_pos "$DOCK"); xp=$(tree_pos "$xt")
-if [ -n "$dp" ] && [ -n "$xp" ] && [ "$dp" -lt "$xp" ]; then
-  pass "dock: stacked above the fullscreen window"
+if [ -n "$dp" ] && [ -n "$xp" ] && [ "$xp" -lt "$dp" ]; then
+  pass "dock: fullscreen window stacked above panel"
 else
   fail "dock: stacking order (dock line $dp vs window line $xp)"
 fi

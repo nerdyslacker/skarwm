@@ -15,6 +15,31 @@ Tab_Decoration :: struct {
     Width: i32,
 }
 
+Client_Animation :: struct {
+    Start, Current, Target: c.Rect,
+    Start_Border, Current_Border, Target_Border: i32,
+    Started: time.Tick,
+    Duration: time.Duration,
+    Easing: c.Animation_Easing,
+    Active: bool,
+}
+
+Window_Shape_State :: struct {
+    Width, Height, Border, Radius: i32,
+    Rounded: bool,
+}
+
+Tiled_Resize_State :: struct {
+    Active: bool,
+    Left, Right: ^c.Column,
+    Upper, Lower: ^c.Client,
+    Left_Start, Right_Start: i32,
+    Default_Column_Width: i32,
+    Upper_Start, Lower_Start: i32,
+    Left_Min, Right_Min, Left_Max, Right_Max: i32,
+    Upper_Min, Lower_Min, Upper_Max, Lower_Max: i32,
+}
+
 // Border colours come from Config.FocusedBorder / Config.UnfocusedBorder
 // (0xRRGGBB), settable from the rc file (norm_outer_border / sel_outer_border).
 
@@ -39,9 +64,12 @@ Wm :: struct {
     mouse_client: ^c.Client,
     mouse_resize: bool,
     mouse_tiled_drag: bool,
+    tiled_resize: Tiled_Resize_State,
     mouse_root_x, mouse_root_y: i16,
     mouse_start: c.Rect,
-    drop_windows: [dynamic]u32,
+    drop_windows: [5]u32,
+    drop_overlay_visible: bool,
+    drop_overlay_has_compositor: bool,
     drop_target: c.Drop_Target,
     tabs: [dynamic]Tab_Decoration,
     tab_gc, tab_font: u32,
@@ -50,6 +78,13 @@ Wm :: struct {
     tab_spawn_target: u32,
     tab_spawn_started: time.Tick,
     overview_active: bool,
+    preview_hover_locked: bool,
+    preview_hover_target: u32,
+    animations: map[u32]^Client_Animation,
+    window_shapes: map[u32]Window_Shape_State,
+    shape_available: bool,
+    animations_active: bool,
+    animation_next_frame: time.Tick,
 }
 
 g_wm: Wm
@@ -69,41 +104,28 @@ atom :: proc(name: string) -> u32 {
 // reflow_inner recomputes and renders the layout. Most actions keep the
 // focused column visible; explicit wheel scrolling disables that snap so the
 // viewport can move independently of focus.
-reflow_inner :: proc(ensure_focus_visible: bool) {
+reflow_inner :: proc(ensure_focus_visible, animate: bool) {
+    if g_wm.tiled_resize.Active &&
+       (g_wm.mouse_client == nil || !on_current_ws(g_wm.mouse_client)) {
+        cancel_pointer_operation()
+    }
     if ensure_focus_visible { c.Ensure_Active_Focus_Visible(g_wm.m) }
     c.Arrange_All(g_wm.m)
-    push_geoms()
+    push_geoms(animate)
     render_tabs()
     render_focus()
     ewmh_pulse() // reconcile desktop/fullscreen client properties (deduped)
     xcb_flush(g_wm.conn)
 }
 
-reflow :: proc() { reflow_inner(true) }
-reflow_preserve_viewport :: proc() { reflow_inner(false) }
+reflow :: proc() { reflow_inner(true, true) }
+reflow_preserve_viewport :: proc() { reflow_inner(false, true) }
+reflow_immediate :: proc() { reflow_inner(true, false) }
 
 // push_geoms configures every managed window's position/size/border-width from
 // the model (client rects already account for the border ring). Also maps any
 // client that has not been mapped yet.
-push_geoms :: proc() {
-    m := g_wm.m
-    for cl in m.Clients {
-        geom := cl.Geom
-        vals := [5]u32 {
-            u32(i16(geom.X)),
-            u32(i16(geom.Y)),
-            u32(geom.W),
-            u32(geom.H),
-            u32(cl.Border),
-        }
-        xcb_configure_window(g_wm.conn, cl.Xid, CW_X | CW_Y | CW_WIDTH | CW_HEIGHT | CW_BORDER_WIDTH, &vals[0])
-        if !cl.Mapped {
-            xcb_map_window(g_wm.conn, cl.Xid)
-            cl.Mapped = true
-            ewmh_mark_mapped(cl) // ICCCM: WM_STATE Normal once mapped
-        }
-    }
-}
+push_geoms :: proc(animate: bool) { animation_commit_targets(animate) }
 
 // render_focus sets each window's border colour and applies X input focus to the
 // focused client (or PointerRoot when there is no managed focus). A focused
@@ -141,20 +163,23 @@ raise_focused :: proc() {
         stack := STACK_MODE_ABOVE
         xcb_configure_window(g_wm.conn, f.Xid, CW_STACK_MODE, &stack)
     }
-    raise_docks() // docks stay stacked above the focused window (fullscreen included)
+    raise_docks()
 }
 
-// raise_docks stacks every dock of the active output on top. This only needs
-// to happen
-// where a dock can overlap something: after raising/focusing a window (toggled
-// fullscreen, ws switches) and after mapping a new window (the server maps it
-// on top of the stack).
+// raise_docks restores the normal panel layer, then puts an active fullscreen
+// client above it. This is called anywhere a newly mapped or focused window can
+// disturb stacking, so docks remain above ordinary windows without covering a
+// real fullscreen client.
 raise_docks :: proc() {
     for o in g_wm.m.Outputs {
         for d in o.Docks {
             stack := STACK_MODE_ABOVE
             xcb_configure_window(g_wm.conn, d.Xid, CW_STACK_MODE, &stack)
         }
+    }
+    if f := g_wm.m.Focused; f != nil && f.Fullscreen {
+        stack := STACK_MODE_ABOVE
+        xcb_configure_window(g_wm.conn, f.Xid, CW_STACK_MODE, &stack)
     }
 }
 
@@ -180,11 +205,12 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     cl := c.New_Client(xid)
     read_client_meta(cl)
     read_client_urgency(cl)
+    read_size_hints(cl)
 
     // select events on the client so we see title changes, strut updates and
     // pointer hovers. (Child unmap/destroy/configure is already reported by the
     // root SUBSTRUCTURE_NOTIFY grab, so STRUCTURE_NOTIFY here is unnecessary.)
-    evmask := EVENT_MASK_PROPERTY_CHANGE | EVENT_MASK_ENTER_WINDOW
+    evmask := EVENT_MASK_PROPERTY_CHANGE | EVENT_MASK_ENTER_WINDOW | EVENT_MASK_POINTER_MOTION
     xcb_change_window_attributes(g_wm.conn, xid, CW_EVENT_MASK, &evmask)
     grab_client_buttons(xid)
 
@@ -198,12 +224,10 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
         c.Add_Dock_To_Output(m, c.Output_At_Rect(m, cl.FloatingRect), cl)
         ewmh_client_managed(cl) // _NET_CLIENT_LIST (no _NET_WM_DESKTOP: Ws == nil)
         reflow() // arranges the dock and maps it (push_geoms)
-        raise_docks() // a fresh map lands on top of the stack — put the dock there
+        raise_docks() // keep the dock below an active fullscreen client
         ipc_broadcast_window_event(c.IPC_WINDOW_NEW, cl)
         return
     }
-
-    adopt_pre_fullscreen(cl) // inherit _NET_WM_STATE_FULLSCREEN set before mapping
 
     // A MapRequest has no coordinates of its own. Its caller queries the root
     // pointer and supplies the output so normal clients open where the pointer
@@ -225,9 +249,10 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
         floating = floating || fl
     }
     c.Add_Managed(m, ws, cl, floating, tab_target)
+    adopt_pre_wm_state(cl) // inherit fullscreen/maximize set before mapping
     ewmh_client_managed(cl) // _NET_CLIENT_LIST + _NET_WM_DESKTOP
     reflow()
-    raise_docks() // the new window mapped on top of the stack — docks go above
+    raise_docks() // restore normal dock order (or fullscreen above all)
     ipc_broadcast_window_event(c.IPC_WINDOW_NEW, cl)
     ipc_broadcast_focus_change(old_focus, m.Focused)
 }
@@ -350,6 +375,44 @@ read_client_urgency :: proc(cl: ^c.Client) -> bool {
     return changed
 }
 
+P_MIN_SIZE   :: u32(1 << 4)
+P_MAX_SIZE   :: u32(1 << 5)
+P_RESIZE_INC :: u32(1 << 6)
+P_BASE_SIZE  :: u32(1 << 8)
+
+read_size_hints :: proc(cl: ^c.Client) {
+    cl.SizeHints = {}
+    data, ok := get_prop(g_wm.conn, cl.Xid, atom("WM_NORMAL_HINTS"), 0)
+    if !ok { return }
+    defer delete(data)
+    if len(data) < 4 { return }
+    vals := ([^]u32)(raw_data(data))[:len(data) / 4]
+    flags := vals[0]
+    if flags & P_MIN_SIZE != 0 && len(vals) >= 7 {
+        cl.SizeHints.MinW, cl.SizeHints.MinH = i32(vals[5]), i32(vals[6])
+    }
+    if flags & P_MAX_SIZE != 0 && len(vals) >= 9 {
+        cl.SizeHints.MaxW, cl.SizeHints.MaxH = i32(vals[7]), i32(vals[8])
+    }
+    if flags & P_RESIZE_INC != 0 && len(vals) >= 11 {
+        cl.SizeHints.IncW, cl.SizeHints.IncH = i32(vals[9]), i32(vals[10])
+    }
+    if flags & P_BASE_SIZE != 0 && len(vals) >= 17 {
+        cl.SizeHints.BaseW, cl.SizeHints.BaseH = i32(vals[15]), i32(vals[16])
+    }
+}
+
+constrain_floating_rect :: proc(cl: ^c.Client, r: c.Rect) -> c.Rect {
+    result := r
+    b := max(i32(0), cl.Border)
+    content_w := max(i32(1), r.W - 2 * b)
+    content_h := max(i32(1), r.H - 2 * b)
+    content_w, content_h = c.Constrain_Size(cl.SizeHints, content_w, content_h)
+    result.W = content_w + 2 * b
+    result.H = content_h + 2 * b
+    return result
+}
+
 clone_bytes :: proc(s: string) -> string {
     if s == "" { return "" }
     b := make([]byte, len(s))
@@ -381,6 +444,7 @@ get_text_prop :: proc(conn: ^Connection, win, prop, type_id: u32) -> (string, bo
 // unmanage removes the window from the model and frees it, returning the
 // replacement focus (already applied to X) — or nil if none.
 unmanage :: proc(cl: ^c.Client) {
+    if g_wm.mouse_client == cl || g_wm.tiled_resize.Active { cancel_pointer_operation() }
     dock := cl.Dock
     ws := cl.Ws // captured for the empty-workspace announcement below
     was_focused := g_wm.m.Focused == cl
@@ -388,6 +452,7 @@ unmanage :: proc(cl: ^c.Client) {
     c.Unmanage_Client(g_wm.m, cl) // docks: removed from Output.Docks, reservation released
     new_focus := g_wm.m.Focused
     ewmh_client_unmanaged(cl) // WM_STATE Withdrawn + _NET_CLIENT_LIST refresh
+    animation_forget(cl.Xid)
     // drop events so the X server stops notifying us about this window
     c.Free_Client(cl)
     if dock {
@@ -414,8 +479,7 @@ unmanage :: proc(cl: ^c.Client) {
 // key handling
 // ---------------------------------------------------------------------------
 
-// grab_all_keys (re)installs the root grabs for every binding. The four
-// lock/numlock variants follow the recipe in docs/REFERENCE_NOTES.md §2/§3.
+// grab_all_keys (re)installs the root grabs for every binding.
 grab_all_keys :: proc() {
     xcb_ungrab_key(g_wm.conn, 0, g_wm.root, MOD_MASK_ANY) // keycode 0 == AnyKey
     // Resolve first so explicit combinations can take precedence over the
@@ -608,6 +672,13 @@ dir_of :: proc(k: Action_Kind) -> c.Dir {
 dispatch_action :: proc(b: ^Binding) {
     m := g_wm.m
     old_focus := m.Focused
+    // A keyboard action aborts an in-progress pointer operation. In
+    // particular, workspace/layout changes must never leave a stale overlay.
+    if g_wm.mouse_client != nil { cancel_pointer_operation() }
+    // Explicit keyboard input takes precedence and suppresses a hover retarget
+    // until pointer motion confirms it has left all preview zones.
+    g_wm.preview_hover_locked = true
+    g_wm.preview_hover_target = 0
     switch b.action {
     case .None:
         return
@@ -873,8 +944,9 @@ output_at_pointer :: proc() -> ^c.Output {
 }
 
 on_enter :: proc(ev: ^Enter_Notify_Event) {
-    if !g_wm.m.Cfg.FocusFollowsMouse { return }
     if ev.mode != NOTIFY_MODE_NORMAL { return } // ignore grabs / synthetic
+    if scroll_preview_hover(i32(ev.root_x), i32(ev.root_y)) { return }
+    if !g_wm.m.Cfg.FocusFollowsMouse { return }
     xid := ev.event
     if cl := g_wm.m.ByXid[xid]; cl != nil {
         // Docks have Ws == nil, so on_current_ws below is false for them and
@@ -889,11 +961,47 @@ on_enter :: proc(ev: ^Enter_Notify_Event) {
     }
 }
 
+// scroll_preview_hover is shared by EnterNotify and MotionNotify. Once a
+// preview triggers it remains locked while the pointer is over any preview;
+// this prevents the opposite edge created by the reveal from immediately
+// navigating back underneath a stationary pointer.
+scroll_preview_hover :: proc(x, y: i32) -> bool {
+    preview, over := c.Scroll_Preview_At_Point(g_wm.m, x, y)
+    if !over {
+        g_wm.preview_hover_locked = false
+        g_wm.preview_hover_target = 0
+        return false
+    }
+    if g_wm.mouse_client != nil { return true }
+    if g_wm.preview_hover_locked { return true }
+
+    old := g_wm.m.Focused
+    if !c.Reveal_Scroll_Client(g_wm.m, preview.Client) { return true }
+    g_wm.preview_hover_locked = true
+    g_wm.preview_hover_target = preview.Client.Xid
+    reflow_preserve_viewport()
+    ipc_broadcast_focus_change(old, preview.Client)
+    return true
+}
+
 grab_client_buttons :: proc(xid: u32) {
     mask := u16(EVENT_MASK_BUTTON_PRESS | EVENT_MASK_BUTTON_RELEASE | EVENT_MASK_POINTER_MOTION)
     xcb_ungrab_button(g_wm.conn, 0, xid, MOD_MASK_ANY)
     xcb_grab_button(g_wm.conn, 0, xid, mask, GRAB_MODE_SYNC, GRAB_MODE_ASYNC, 0, 0, 1, MOD_MASK_ANY)
+    xcb_grab_button(g_wm.conn, 0, xid, mask, GRAB_MODE_SYNC, GRAB_MODE_ASYNC, 0, 0, 2, MOD_MASK_ANY)
     xcb_grab_button(g_wm.conn, 0, xid, mask, GRAB_MODE_SYNC, GRAB_MODE_ASYNC, 0, 0, 3, MOD_MASK_ANY)
+}
+
+toggle_client_maximized :: proc(cl: ^c.Client) -> bool {
+    if cl == nil || cl.Dock || cl.Fullscreen || !on_current_ws(cl) { return false }
+    old := g_wm.m.Focused
+    if old != cl { c.Focus_Client(g_wm.m, cl) }
+    if !c.Toggle_Maximized(cl) { return false }
+    reflow()
+    raise_focused()
+    ipc_broadcast_focus_change(old, cl)
+    ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
+    return true
 }
 
 regrab_client_buttons :: proc() {
@@ -913,12 +1021,132 @@ regrab_client_buttons :: proc() {
     for cl in g_wm.m.Clients { if !cl.Dock { grab_client_buttons(cl.Xid) } }
 }
 
+column_resize_limits :: proc(col: ^c.Column) -> (minimum, maximum: i32) {
+    minimum = 60
+    if col == nil { return }
+    for cl in col.Wins {
+        minimum = max(minimum, cl.SizeHints.MinW + 2 * max(i32(0), cl.Border))
+        if cl.SizeHints.MaxW > 0 {
+            outer_max := cl.SizeHints.MaxW + 2 * max(i32(0), cl.Border)
+            if maximum == 0 || outer_max < maximum { maximum = outer_max }
+        }
+    }
+    return
+}
+
+row_resize_limits :: proc(cl: ^c.Client) -> (minimum, maximum: i32) {
+    minimum = 40
+    if cl == nil { return }
+    b := 2 * max(i32(0), cl.Border)
+    minimum = max(minimum, cl.SizeHints.MinH + b)
+    if cl.SizeHints.MaxH > 0 { maximum = cl.SizeHints.MaxH + b }
+    return
+}
+
+column_is_maximized :: proc(col: ^c.Column) -> bool {
+    if col == nil { return false }
+    for cl in col.Wins { if cl.Maximized { return true } }
+    return false
+}
+
+begin_tiled_resize :: proc(cl: ^c.Client, root_x, root_y: i32) -> bool {
+    if cl == nil || cl.Floating || cl.Fullscreen || cl.Maximized || !on_current_ws(cl) { return false }
+    ci, col, row := c.Column_Of(cl)
+    if col == nil { return false }
+
+    // Finish any layout transition first so the drag snapshot matches the
+    // geometry beneath the pointer exactly.
+    reflow_immediate()
+    state := Tiled_Resize_State{}
+
+    if len(cl.Ws.Cols) > 1 {
+        left_index, right_index := -1, -1
+        midpoint := cl.Geom.X + cl.Geom.W / 2
+        if root_x < midpoint && ci > 0 {
+            left_index, right_index = ci - 1, ci
+        } else if root_x >= midpoint && ci + 1 < len(cl.Ws.Cols) {
+            left_index, right_index = ci, ci + 1
+        }
+        if left_index >= 0 {
+            left, right := cl.Ws.Cols[left_index], cl.Ws.Cols[right_index]
+            if !column_is_maximized(left) && !column_is_maximized(right) {
+                state.Left, state.Right = left, right
+                state.Left_Start = c.Column_Width_At(g_wm.m, cl.Out, cl.Ws, left_index)
+                state.Right_Start = c.Column_Width_At(g_wm.m, cl.Out, cl.Ws, right_index)
+                state.Default_Column_Width = c.Default_Column_Width(g_wm.m, cl.Out, cl.Ws)
+                state.Left_Min, state.Left_Max = column_resize_limits(left)
+                state.Right_Min, state.Right_Max = column_resize_limits(right)
+            }
+        }
+    }
+
+    if col.Layout == .Stacked && len(col.Wins) > 1 {
+        upper_index, lower_index := -1, -1
+        midpoint := cl.Geom.Y + cl.Geom.H / 2
+        if root_y < midpoint && row > 0 {
+            upper_index, lower_index = row - 1, row
+        } else if root_y >= midpoint && row + 1 < len(col.Wins) {
+            upper_index, lower_index = row, row + 1
+        }
+        if upper_index >= 0 {
+            // Preserve every row's current share; only the selected boundary
+            // changes while the rest of the stack remains stable.
+            for win in col.Wins {
+                win.TileWeight = f64(win.Geom.H + 2 * max(i32(0), win.Border))
+            }
+            state.Upper, state.Lower = col.Wins[upper_index], col.Wins[lower_index]
+            state.Upper_Start = i32(state.Upper.TileWeight)
+            state.Lower_Start = i32(state.Lower.TileWeight)
+            state.Upper_Min, state.Upper_Max = row_resize_limits(state.Upper)
+            state.Lower_Min, state.Lower_Max = row_resize_limits(state.Lower)
+        }
+    }
+
+    state.Active = state.Left != nil || state.Upper != nil
+    if !state.Active { return false }
+    g_wm.tiled_resize = state
+    g_wm.mouse_client = cl
+    g_wm.mouse_root_x = i16(root_x)
+    g_wm.mouse_root_y = i16(root_y)
+    return true
+}
+
+tiled_resize_motion :: proc(root_x, root_y: i32) {
+    state := &g_wm.tiled_resize
+    if !state.Active { return }
+    if state.Left != nil && state.Right != nil {
+        left, right := c.Resize_Pair(
+            state.Left_Start, state.Right_Start,
+            root_x - i32(g_wm.mouse_root_x),
+            state.Left_Min, state.Right_Min, state.Left_Max, state.Right_Max,
+        )
+        // Returning a boundary to the layout's natural split clears the
+        // override. Such a column can expand normally if it later stands
+        // alone, while a genuinely resized column keeps its explicit width.
+        state.Left.Width = left if left != state.Default_Column_Width else 0
+        state.Right.Width = right if right != state.Default_Column_Width else 0
+    }
+    if state.Upper != nil && state.Lower != nil {
+        upper, lower := c.Resize_Pair(
+            state.Upper_Start, state.Lower_Start,
+            root_y - i32(g_wm.mouse_root_y),
+            state.Upper_Min, state.Lower_Min, state.Upper_Max, state.Lower_Max,
+        )
+        state.Upper.TileWeight, state.Lower.TileWeight = f64(upper), f64(lower)
+    }
+    reflow_immediate()
+}
+
 on_button_press :: proc(ev: ^Button_Press_Event) {
     if ev.event == g_wm.help_window {
         help_hide()
         return
     }
     if tab := tab_client(ev.event); tab != nil {
+        if ev.detail == 2 {
+            toggle_client_maximized(tab)
+            return
+        }
         old := g_wm.m.Focused
         c.Focus_Client(g_wm.m, tab)
         raise_focused()
@@ -929,6 +1157,10 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
 
     clean := ev.state & ~(g_wm.lock | g_wm.numlock)
     if g_wm.primary_mod != 0 && clean == g_wm.primary_mod && (ev.detail == 4 || ev.detail == 5) {
+        // Do not let geometry moving beneath this explicit wheel action turn
+        // the same stationary pointer into a second, implicit scroll.
+        g_wm.preview_hover_locked = true
+        g_wm.preview_hover_target = 0
         dir := -1
         if ev.detail == 5 { dir = 1 }
         output := c.Output_At_Point(g_wm.m, i32(ev.root_x), i32(ev.root_y))
@@ -941,6 +1173,15 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
         xcb_allow_events(g_wm.conn, ALLOW_REPLAY_POINTER, ev.time)
         return
     }
+    if ev.detail == 2 {
+        if toggle_client_maximized(cl) {
+            xcb_allow_events(g_wm.conn, ALLOW_ASYNC_POINTER, ev.time)
+        } else {
+            xcb_allow_events(g_wm.conn, ALLOW_REPLAY_POINTER, ev.time)
+        }
+        xcb_flush(g_wm.conn)
+        return
+    }
     old := g_wm.m.Focused
     if on_current_ws(cl) && old != cl {
         c.Focus_Client(g_wm.m, cl)
@@ -948,8 +1189,18 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
         ipc_broadcast_focus_change(old, cl)
     }
     modified := g_wm.primary_mod != 0 && clean & g_wm.primary_mod == g_wm.primary_mod
-    floating_drag := modified && cl.Floating && (ev.detail == 1 || ev.detail == 3)
+    floating_drag := modified && cl.Floating && !cl.Maximized && (ev.detail == 1 || ev.detail == 3)
     tiled_drag := modified && !cl.Floating && ev.detail == 1
+    tiled_resize := modified && !cl.Floating && !cl.Maximized && ev.detail == 3
+    if tiled_resize {
+        if begin_tiled_resize(cl, i32(ev.root_x), i32(ev.root_y)) {
+            xcb_allow_events(g_wm.conn, ALLOW_ASYNC_POINTER, ev.time)
+        } else {
+            xcb_allow_events(g_wm.conn, ALLOW_REPLAY_POINTER, ev.time)
+        }
+        xcb_flush(g_wm.conn)
+        return
+    }
     if floating_drag || tiled_drag {
         g_wm.mouse_client = cl
         g_wm.mouse_resize = floating_drag && ev.detail == 3
@@ -967,9 +1218,16 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
 
 on_motion :: proc(ev: ^Motion_Notify_Event) {
     cl := g_wm.mouse_client
-    if cl == nil { return }
+    if cl == nil {
+        scroll_preview_hover(i32(ev.root_x), i32(ev.root_y))
+        return
+    }
     if g_wm.mouse_tiled_drag {
         drop_overlay_update(i32(ev.root_x), i32(ev.root_y))
+        return
+    }
+    if g_wm.tiled_resize.Active {
+        tiled_resize_motion(i32(ev.root_x), i32(ev.root_y))
         return
     }
     if !g_wm.mouse_resize {
@@ -991,8 +1249,9 @@ on_motion :: proc(ev: ^Motion_Notify_Event) {
         r.X += dx
         r.Y += dy
     }
+    if g_wm.mouse_resize { r = constrain_floating_rect(cl, r) }
     cl.FloatingRect = r
-    reflow()
+    reflow_immediate()
 }
 
 on_button_release :: proc(ev: ^Button_Press_Event) {
@@ -1000,7 +1259,9 @@ on_button_release :: proc(ev: ^Button_Press_Event) {
     if cl != nil && g_wm.mouse_tiled_drag {
         old_output := cl.Out
         old_ws := cl.Ws
-        target := c.Drop_Target_At_Point(g_wm.m, i32(ev.root_x), i32(ev.root_y), cl)
+        target := c.Drop_Target_At_Point(
+            g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, g_wm.drop_target,
+        )
         drop_overlay_hide()
         if c.Move_Client_To_Drop(g_wm.m, cl, target) {
             if target.Out != old_output {
@@ -1013,10 +1274,19 @@ on_button_release :: proc(ev: ^Button_Press_Event) {
         }
     } else if g_wm.mouse_tiled_drag {
         drop_overlay_hide()
+    } else if cl != nil && g_wm.tiled_resize.Active {
+        ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
     }
+    cancel_pointer_operation()
+}
+
+cancel_pointer_operation :: proc() {
+    if g_wm.mouse_client != nil { xcb_ungrab_pointer(g_wm.conn, CURRENT_TIME) }
+    if g_wm.mouse_tiled_drag { drop_overlay_hide() }
     g_wm.mouse_client = nil
     g_wm.mouse_resize = false
     g_wm.mouse_tiled_drag = false
+    g_wm.tiled_resize = {}
 }
 
 NOTIFY_MODE_NORMAL :: u8(0)
@@ -1035,6 +1305,10 @@ on_current_ws :: proc(cl: ^c.Client) -> bool {
 on_configure_request :: proc(ev: ^Configure_Request_Event) {
     xid := ev.window
     if cl := g_wm.m.ByXid[xid]; cl != nil {
+        if g_wm.tiled_resize.Active && g_wm.mouse_client == cl {
+            reflow_immediate()
+            return
+        }
         if cl.Floating || cl.Dock {
             // honour floating/dock move/resize requests (a dock keeps the
             // geometry it asks for; tiled windows do not choose theirs)
@@ -1070,6 +1344,7 @@ apply_float_configure :: proc(cl: ^c.Client, ev: ^Configure_Request_Event) {
     if mask & CW_Y != 0 { r.Y = i32(ev.y) }
     if mask & CW_WIDTH != 0 { r.W = i32(ev.width) }
     if mask & CW_HEIGHT != 0 { r.H = i32(ev.height) }
+    if !cl.Dock { r = constrain_floating_rect(cl, r) }
     cl.FloatingRect = r
 }
 
@@ -1094,6 +1369,10 @@ on_property_notify :: proc(ev: ^Property_Notify_Event) {
     }
     if ev.atom == atom("WM_HINTS") {
         if read_client_urgency(cl) { ipc_broadcast_window_event(c.IPC_WINDOW_URGENT, cl) }
+        return
+    }
+    if ev.atom == atom("WM_NORMAL_HINTS") {
+        read_size_hints(cl)
         return
     }
     if cl.Dock && (ev.atom == atom("_NET_WM_STRUT_PARTIAL") || ev.atom == atom("_NET_WM_STRUT")) {

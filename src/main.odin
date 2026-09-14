@@ -81,7 +81,8 @@ wm_startup :: proc() -> bool {
     g_wm.rules = make([dynamic]Raw_Rule, 0, 4)
     g_wm.ran_startups = make([dynamic]string, 0, 4)
     g_wm.tabs = make([dynamic]Tab_Decoration, 0, 8)
-    g_wm.drop_windows = make([dynamic]u32, 0, 32)
+    g_wm.animations = make(map[u32]^Client_Animation)
+    g_wm.window_shapes = make(map[u32]Window_Shape_State)
     g_wm.lock = MOD_MASK_LOCK
 
     // Claim the screen. If a WM already has a SubstructureRedirect grab on the
@@ -91,7 +92,9 @@ wm_startup :: proc() -> bool {
         EVENT_MASK_SUBSTRUCTURE_NOTIFY |
         EVENT_MASK_STRUCTURE_NOTIFY |
         EVENT_MASK_KEY_PRESS |
-        EVENT_MASK_KEY_RELEASE,
+        EVENT_MASK_KEY_RELEASE |
+        EVENT_MASK_POINTER_MOTION |
+        EVENT_MASK_ENTER_WINDOW,
     )
     cookie := xcb_change_window_attributes_checked(g_wm.conn, g_wm.root, CW_EVENT_MASK, &mask)
     if err := xcb_request_check(g_wm.conn, cookie); err != nil {
@@ -112,6 +115,7 @@ wm_startup :: proc() -> bool {
     g_wm.mm = mm
     g_wm.numlock = modifier_mask_for_keysym(&g_wm.kb, &g_wm.mm, keysym_from_name("Num_Lock"))
 
+    shape_init()
     g_wm.terminal = detect_terminal()
     if g_wm.terminal == "" {
         log_warn("no terminal emulator found; Super+Return will do nothing")
@@ -122,7 +126,7 @@ wm_startup :: proc() -> bool {
 
 cleanup_all :: proc() {
     drop_overlay_hide()
-    if g_wm.drop_windows != nil { delete(g_wm.drop_windows) }
+    drop_overlay_destroy()
     help_hide()
     tabs_shutdown()
     release_bindings(&g_wm.bindings)
@@ -132,6 +136,8 @@ cleanup_all :: proc() {
         delete(g_wm.ran_startups)
     }
     if g_cfg_flag != "" { delete(g_cfg_flag) }
+    animation_shutdown()
+    shape_shutdown()
     if g_wm.m != nil do c.Destroy_Manager(g_wm.m)
     ewmh_free() // destroy the check window, drop EWMH caches
     if g_wm.atoms != nil do delete(g_wm.atoms)
@@ -219,7 +225,7 @@ event_loop :: proc() {
             i += 1
         }
 
-        if posix.poll(raw_data(pfds), posix.nfds_t(len(pfds)), -1) < 0 {
+        if posix.poll(raw_data(pfds), posix.nfds_t(len(pfds)), animation_poll_timeout_ms()) < 0 {
             delete(pfds) // EINTR or a signal: repoll
             continue
         }
@@ -231,6 +237,7 @@ event_loop :: proc() {
                 if ev == nil { break }
                 handle_event(ev)
                 free_libc(ev)
+                animation_run_due_frame()
             }
         }
 
@@ -261,6 +268,9 @@ event_loop :: proc() {
         for cl in to_drop { ipc_drop_client(cl) } // removed after the walk
         delete(to_drop)
         delete(pfds)
+        // A busy X or IPC stream cannot starve animation frames: check the
+        // monotonic deadline after dispatch as well as through poll's timeout.
+        animation_run_due_frame()
     }
 }
 

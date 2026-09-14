@@ -1,6 +1,6 @@
 # skarwm build.
 #
-# Required at *runtime*:   libxcb + libxcb-randr
+# Required at *runtime*:   libxcb + libxcb-randr + libxcb-shape
 # Required at *build* time: odin
 #
 # Configuration is a plain-text rc file — there is no embedded
@@ -55,6 +55,9 @@ xephyr: build/skarwm build/skarwm-msg
 
 xephyr-multi: build/skarwm build/skarwm-msg
 	SKARWM_XEPHYR_DISPLAY="$(XEPHYR_DISPLAY)" scripts/xephyr.sh multi
+
+xephyr-anush: build/skarwm build/skarwm-msg
+	SKARWM_XEPHYR_DISPLAY="$(XEPHYR_DISPLAY)" scripts/xephyr.sh single	-c "$(HOME)/Projects/Experimental/anush/config/skarwm/config.rc"
 
 clean:
 	rm -rf build

@@ -229,12 +229,24 @@ attach_new_window :: proc(m: ^Manager, ws: ^Workspace, cl: ^Client) {
     cl.Ws = ws
     cl.Out = Output_Of_WS(m, ws)
     idx := len(ws.Cols)
+    neighbor: ^Column
     if ws.Focus != nil && !ws.Focus.Floating {
-        if ci, _, _ := column_of(ws, ws.Focus); ci >= 0 {
+        if ci, focused_col, _ := column_of(ws, ws.Focus); ci >= 0 {
             idx = ci + 1
+            neighbor = focused_col
         }
     }
     col := new_column()
+    // Once columns have custom widths, a generic default-width insertion can
+    // make both the focused column and its new neighbor only partly visible.
+    // Give the new column the complementary width of that page instead. With
+    // untouched defaults this evaluates to the ordinary page width.
+    if neighbor != nil && len(ws.Cols) >= 2 && cl.Out != nil && !column_has_maximized(neighbor) {
+        p := compute_params(m.Cfg, cl.Out.Geom, len(ws.Cols) + 1, cl.Out.Reserved)
+        neighbor_w := column_width(p, neighbor)
+        complement := p.WorkW - p.Inner - neighbor_w
+        if complement >= 60 { col.Width = complement }
+    }
     append(&col.Wins, cl)
     array_insert_at(&ws.Cols, idx, col)
     col.Focus = cl
@@ -373,8 +385,8 @@ Move_Client_To_Column :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output, dst: ^Wo
 }
 
 // Move_Client_To_Drop applies a four-way tiled drop target. Top/bottom zones
-// insert at the corresponding end of the focused vertical stack; left/right
-// zones create a new horizontal column at the workspace edge.
+// insert at the corresponding end of the selected vertical stack; left/right
+// create a horizontal column before/after the selected neighboring column.
 Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool {
     if drop.Kind == .Into_Column {
         if m == nil || cl == nil || cl.Ws == nil || cl.Floating || cl.Fullscreen ||
@@ -393,6 +405,8 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
         src := cl.Ws
         ci, source, row := column_of(src, cl)
         if source == nil { return false }
+        source_width := source.Width
+        source_removed := source != drop.Col && len(source.Wins) == 1
         insert_at := drop.Row_Index
         if source == drop.Col {
             if len(source.Wins) == 1 { return false }
@@ -403,6 +417,12 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
             ordered_remove(&source.Wins, row)
             if len(source.Wins) == 0 { detach_column_empty(src, ci) }
             if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
+        }
+        // When the drop collapses a resized source column into an otherwise
+        // default destination, retain that horizontal size. In particular,
+        // the resulting lone stack must not unexpectedly fill the screen.
+        if source_removed && source_width > 0 && drop.Col.Width == 0 {
+            drop.Col.Width = source_width
         }
         array_insert_at(&drop.Col.Wins, insert_at, cl)
         drop.Col.Focus = cl
@@ -426,6 +446,7 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
     if source == nil { return false }
     insert_at := drop.Insert_Index
     source_removed := len(source.Wins) == 1
+    source_width := source.Width
 
     if source.Focus == cl { source.Focus = in_column_focus_after_removal(source, row) }
     ordered_remove(&source.Wins, row)
@@ -436,6 +457,9 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
     if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
 
     fresh := new_column()
+    // Width belongs to the visual column being dragged. Carry it into the new
+    // column for both reordering and extracting a window from a stack.
+    fresh.Width = source_width
     append(&fresh.Wins, cl)
     fresh.Focus = cl
     array_insert_at(&drop.Ws.Cols, insert_at, fresh)
@@ -690,10 +714,43 @@ Scratchpad_Toggle_Target :: proc(m: ^Manager, field: Scratchpad_Match_Field, val
 // Floating / fullscreen
 // ----------------------------------------------------------------------------
 
+// Set_Maximized enables/disables the work-area geometry override without
+// changing the client's tiled/floating membership. Fullscreen is deliberately
+// stronger and blocks a new maximize request; a window that was already
+// maximized may pass through fullscreen and returns to maximized afterwards.
+Set_Maximized :: proc(cl: ^Client, on: bool) -> bool {
+    if cl == nil || cl.Dock || cl.Ws == nil || cl.Stashed { return false }
+    if on == cl.Maximized { return false }
+    if on {
+        if cl.Fullscreen { return false }
+        cl.MaxRestoreGeom = cl.Geom
+        cl.MaxRestoreFloatRect = cl.FloatingRect
+        cl.MaxRestoreFloating = cl.Floating
+        cl.Maximized = true
+    } else {
+        cl.Maximized = false
+        // FloatingRect is authoritative for floating layout and may otherwise
+        // have been changed by a configure request while maximized.
+        if cl.MaxRestoreFloating {
+            cl.FloatingRect = cl.MaxRestoreFloatRect
+        }
+        cl.Geom = cl.MaxRestoreGeom
+    }
+    return true
+}
+
+Toggle_Maximized :: proc(cl: ^Client) -> bool {
+    if cl == nil { return false }
+    return Set_Maximized(cl, !cl.Maximized)
+}
+
 // Set_Floating moves cl into or out of the workspace's floating list. A window
 // being tiled again becomes its own new column to the right of the focus.
 Set_Floating :: proc(m: ^Manager, cl: ^Client, on: bool) {
     if cl == nil || cl.Ws == nil { return }
+    // Changing layout mode is an explicit replacement for maximize. Restore
+    // the saved base state before moving between structural containers.
+    if cl.Maximized { Set_Maximized(cl, false) }
     ws := cl.Ws
 
     if on && !cl.Floating {
@@ -796,10 +853,26 @@ Scroll_Output_Viewport :: proc(m: ^Manager, o: ^Output, dir: int) -> bool {
     ws := o.Current
     if ws == nil || len(ws.Cols) == 0 { return false }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
-    _, step := strip_geometry(p, len(ws.Cols))
-    if step <= 0 { return false }
     sign := i32(dir / abs(dir))
-    next := clamp_viewport(ws.ViewportX + step * sign, p, len(ws.Cols))
+    next := ws.ViewportX
+    if sign > 0 {
+        for col, ci in ws.Cols {
+            left := workspace_col_left(ws, p, ci)
+            if left > ws.ViewportX {
+                next = left
+                break
+            }
+            if ci + 1 == len(ws.Cols) { next += column_width(p, col) + p.Inner }
+        }
+    } else {
+        next = 0
+        for _, ci in ws.Cols {
+            left := workspace_col_left(ws, p, ci)
+            if left >= ws.ViewportX { break }
+            next = left
+        }
+    }
+    next = clamp_workspace_viewport(next, ws, p)
     if next == ws.ViewportX { return false }
     ws.ViewportX = next
     return true
@@ -809,6 +882,24 @@ Scroll_Output_Viewport :: proc(m: ^Manager, o: ^Output, dir: int) -> bool {
 // the active output. Pointer wheel handling selects its output explicitly.
 Scroll_Viewport :: proc(m: ^Manager, dir: int) -> bool {
     return Scroll_Output_Viewport(m, Active_Output(m), dir)
+}
+
+// Reveal_Scroll_Client focuses a preview target and aligns its column fully in
+// the owning output's viewport. The X layer handles rendering and notifications.
+Reveal_Scroll_Client :: proc(m: ^Manager, cl: ^Client) -> bool {
+    if m == nil || cl == nil || cl.Ws == nil || cl.Out == nil || cl.Floating || cl.Fullscreen || cl.Maximized {
+        return false
+    }
+    ws := cl.Ws
+    if cl.Out.Current != ws { return false }
+    ci, col, _ := column_of(ws, cl)
+    if col == nil { return false }
+    p := compute_params(m.Cfg, cl.Out.Geom, len(ws.Cols), cl.Out.Reserved)
+    next := ensure_workspace_col_visible(ws.ViewportX, ws, p, ci)
+    changed := next != ws.ViewportX || m.Focused != cl
+    ws.ViewportX = next
+    Focus_Client(m, cl)
+    return changed
 }
 
 // ----------------------------------------------------------------------------
@@ -904,5 +995,5 @@ Ensure_Active_Focus_Visible :: proc(m: ^Manager) {
     o := Active_Output(m)
     if o == nil { return }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
-    ws.ViewportX = ensure_col_visible(ws.ViewportX, p, len(ws.Cols), col_left_px(p, ci))
+    ws.ViewportX = ensure_workspace_col_visible(ws.ViewportX, ws, p, ci)
 }
