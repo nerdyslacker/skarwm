@@ -30,6 +30,13 @@ sel_outer_border  : #FF5F00
 # True (default): moving the pointer over a window focuses it.
 focus_follows_mouse : true
 
+# Time-based layout transitions. Disable for immediate geometry updates and no
+# animation timer work. Easing may be `linear` or `ease_out_cubic`.
+animations : true
+animation_duration_ms : 180
+animation_fps : 60
+animation_easing : ease_out_cubic
+
 # ---- launching ----------------------------------------------------------------
 
 # bind: run a shell command. Combo = modifier tokens + one key.

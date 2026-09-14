@@ -501,6 +501,10 @@ inner_gap : 8
 outer_gap : 8
 border_width : 2
 focus_follows_mouse : true
+animations : false
+animation_duration_ms : 180
+animation_fps : 60
+animation_easing : ease_out_cubic
 bind : mod + Return : "xterm"
 call : mod + Shift + r : reload_config
 call : mod + Shift + q : close_window
@@ -531,6 +535,10 @@ mod_key : super
 outer_gap : 20
 inner_gap : 8
 border_width : 4
+animations : true
+animation_duration_ms : 120
+animation_fps : 75
+animation_easing : linear
 bind : mod + Return : "xterm"
 call : mod + Shift + r : reload_config
 call : mod + Shift + q : close_window

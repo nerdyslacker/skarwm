@@ -81,6 +81,7 @@ wm_startup :: proc() -> bool {
     g_wm.rules = make([dynamic]Raw_Rule, 0, 4)
     g_wm.ran_startups = make([dynamic]string, 0, 4)
     g_wm.tabs = make([dynamic]Tab_Decoration, 0, 8)
+    g_wm.animations = make(map[u32]^Client_Animation)
     g_wm.lock = MOD_MASK_LOCK
 
     // Claim the screen. If a WM already has a SubstructureRedirect grab on the
@@ -133,6 +134,7 @@ cleanup_all :: proc() {
         delete(g_wm.ran_startups)
     }
     if g_cfg_flag != "" { delete(g_cfg_flag) }
+    animation_shutdown()
     if g_wm.m != nil do c.Destroy_Manager(g_wm.m)
     ewmh_free() // destroy the check window, drop EWMH caches
     if g_wm.atoms != nil do delete(g_wm.atoms)
@@ -220,7 +222,7 @@ event_loop :: proc() {
             i += 1
         }
 
-        if posix.poll(raw_data(pfds), posix.nfds_t(len(pfds)), -1) < 0 {
+        if posix.poll(raw_data(pfds), posix.nfds_t(len(pfds)), animation_poll_timeout_ms()) < 0 {
             delete(pfds) // EINTR or a signal: repoll
             continue
         }
@@ -232,6 +234,7 @@ event_loop :: proc() {
                 if ev == nil { break }
                 handle_event(ev)
                 free_libc(ev)
+                animation_run_due_frame()
             }
         }
 
@@ -262,6 +265,9 @@ event_loop :: proc() {
         for cl in to_drop { ipc_drop_client(cl) } // removed after the walk
         delete(to_drop)
         delete(pfds)
+        // A busy X or IPC stream cannot starve animation frames: check the
+        // monotonic deadline after dispatch as well as through poll's timeout.
+        animation_run_due_frame()
     }
 }
 

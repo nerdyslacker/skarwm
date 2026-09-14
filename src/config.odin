@@ -25,7 +25,8 @@ package main
 //     scan and directives resolved afterwards, so `mod_key` may appear anywhere.
 //   - settings: mod_key (alias modkey), inner_gap, outer_gap, gap (seeds both),
 //     border_width, norm_outer_border (unfocused colour), sel_outer_border
-//     (focused colour), focus_follows_mouse. Legacy decorative/titlebar keys
+//     (focused colour), focus_follows_mouse, animations,
+//     animation_duration_ms, animation_fps, animation_easing. Legacy decorative/titlebar keys
 //     are accepted and ignored; an unknown setting logs one warning.
 //   - directives:
 //       bind       : <combo> : "<command>"
@@ -92,9 +93,12 @@ Load_Scratch :: struct {
     mod_key_set: bool,
     // numeric / boolean / colour config overrides (defaults applied at build)
     gap, outer_gap, inner_gap, border: i32,
-    ffm:  bool,
+    ffm, animations: bool,
+    animation_duration_ms, animation_fps: i32,
+    animation_easing: c.Animation_Easing,
     focused, unfocused: u32,
     gap_set, outer_set, inner_set, border_set, ffm_set: bool,
+    animations_set, animation_duration_set, animation_fps_set, animation_easing_set: bool,
     focused_set, unfocused_set: bool,
     // directives
     binds:    [dynamic]Raw_Bind,
@@ -207,6 +211,14 @@ parse_bool_value :: proc(s: string) -> (bool, bool) {
     case "false", "0": return false, true
     }
     return false, false
+}
+
+parse_animation_easing :: proc(s: string) -> (c.Animation_Easing, bool) {
+    switch quoted_trim(s) {
+    case "linear":         return .Linear, true
+    case "ease_out_cubic": return .Ease_Out_Cubic, true
+    }
+    return {}, false
 }
 
 // split_ws splits on runs of spaces/tabs, dropping empty fields.
@@ -404,6 +416,10 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.inner_set   { r.cfg.InnerGap = sc.inner_gap }
     if sc.border_set  { r.cfg.BorderWidth = sc.border }
     if sc.ffm_set     { r.cfg.FocusFollowsMouse = sc.ffm }
+    if sc.animations_set { r.cfg.Animations = sc.animations }
+    if sc.animation_duration_set { r.cfg.AnimationDurationMs = sc.animation_duration_ms }
+    if sc.animation_fps_set { r.cfg.AnimationFps = sc.animation_fps }
+    if sc.animation_easing_set { r.cfg.AnimationEasing = sc.animation_easing }
     if sc.focused_set { r.cfg.FocusedBorder = sc.focused }
     if sc.unfocused_set { r.cfg.UnfocusedBorder = sc.unfocused }
     c.Apply_Gap_Alias(&r.cfg)
@@ -511,6 +527,36 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         v, ok := parse_bool_value(value)
         if !ok { append(errs, fmt.aprintf("focus_follows_mouse: expected true/false, got %q", value)); return false }
         sc.ffm = v; sc.ffm_set = true
+        return true
+
+    case "animations":
+        v, ok := parse_bool_value(value)
+        if !ok { append(errs, fmt.aprintf("animations: expected true/false, got %q", value)); return false }
+        sc.animations = v; sc.animations_set = true
+        return true
+    case "animation_duration_ms":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 0 || n > 5000 {
+            append(errs, fmt.aprintf("animation_duration_ms: expected 0..5000, got %q", value))
+            return false
+        }
+        sc.animation_duration_ms = n; sc.animation_duration_set = true
+        return true
+    case "animation_fps":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 1 || n > 240 {
+            append(errs, fmt.aprintf("animation_fps: expected 1..240, got %q", value))
+            return false
+        }
+        sc.animation_fps = n; sc.animation_fps_set = true
+        return true
+    case "animation_easing":
+        v, ok := parse_animation_easing(value)
+        if !ok {
+            append(errs, fmt.aprintf("animation_easing: expected linear/ease_out_cubic, got %q", value))
+            return false
+        }
+        sc.animation_easing = v; sc.animation_easing_set = true
         return true
 
     case:

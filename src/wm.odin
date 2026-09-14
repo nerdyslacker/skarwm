@@ -15,6 +15,15 @@ Tab_Decoration :: struct {
     Width: i32,
 }
 
+Client_Animation :: struct {
+    Start, Current, Target: c.Rect,
+    Start_Border, Current_Border, Target_Border: i32,
+    Started: time.Tick,
+    Duration: time.Duration,
+    Easing: c.Animation_Easing,
+    Active: bool,
+}
+
 // Border colours come from Config.FocusedBorder / Config.UnfocusedBorder
 // (0xRRGGBB), settable from the rc file (norm_outer_border / sel_outer_border).
 
@@ -54,6 +63,9 @@ Wm :: struct {
     overview_active: bool,
     preview_hover_locked: bool,
     preview_hover_target: u32,
+    animations: map[u32]^Client_Animation,
+    animations_active: bool,
+    animation_next_frame: time.Tick,
 }
 
 g_wm: Wm
@@ -73,41 +85,24 @@ atom :: proc(name: string) -> u32 {
 // reflow_inner recomputes and renders the layout. Most actions keep the
 // focused column visible; explicit wheel scrolling disables that snap so the
 // viewport can move independently of focus.
-reflow_inner :: proc(ensure_focus_visible: bool) {
+reflow_inner :: proc(ensure_focus_visible, animate: bool) {
     if ensure_focus_visible { c.Ensure_Active_Focus_Visible(g_wm.m) }
     c.Arrange_All(g_wm.m)
-    push_geoms()
+    push_geoms(animate)
     render_tabs()
     render_focus()
     ewmh_pulse() // reconcile desktop/fullscreen client properties (deduped)
     xcb_flush(g_wm.conn)
 }
 
-reflow :: proc() { reflow_inner(true) }
-reflow_preserve_viewport :: proc() { reflow_inner(false) }
+reflow :: proc() { reflow_inner(true, true) }
+reflow_preserve_viewport :: proc() { reflow_inner(false, true) }
+reflow_immediate :: proc() { reflow_inner(true, false) }
 
 // push_geoms configures every managed window's position/size/border-width from
 // the model (client rects already account for the border ring). Also maps any
 // client that has not been mapped yet.
-push_geoms :: proc() {
-    m := g_wm.m
-    for cl in m.Clients {
-        geom := cl.Geom
-        vals := [5]u32 {
-            u32(i16(geom.X)),
-            u32(i16(geom.Y)),
-            u32(geom.W),
-            u32(geom.H),
-            u32(cl.Border),
-        }
-        xcb_configure_window(g_wm.conn, cl.Xid, CW_X | CW_Y | CW_WIDTH | CW_HEIGHT | CW_BORDER_WIDTH, &vals[0])
-        if !cl.Mapped {
-            xcb_map_window(g_wm.conn, cl.Xid)
-            cl.Mapped = true
-            ewmh_mark_mapped(cl) // ICCCM: WM_STATE Normal once mapped
-        }
-    }
-}
+push_geoms :: proc(animate: bool) { animation_commit_targets(animate) }
 
 // render_focus sets each window's border colour and applies X input focus to the
 // focused client (or PointerRoot when there is no managed focus). A focused
@@ -392,6 +387,7 @@ unmanage :: proc(cl: ^c.Client) {
     c.Unmanage_Client(g_wm.m, cl) // docks: removed from Output.Docks, reservation released
     new_focus := g_wm.m.Focused
     ewmh_client_unmanaged(cl) // WM_STATE Withdrawn + _NET_CLIENT_LIST refresh
+    animation_forget(cl.Xid)
     // drop events so the X server stops notifying us about this window
     c.Free_Client(cl)
     if dock {
@@ -1059,7 +1055,7 @@ on_motion :: proc(ev: ^Motion_Notify_Event) {
         r.Y += dy
     }
     cl.FloatingRect = r
-    reflow()
+    reflow_immediate()
 }
 
 on_button_release :: proc(ev: ^Button_Press_Event) {

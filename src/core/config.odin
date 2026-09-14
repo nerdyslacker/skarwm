@@ -14,6 +14,10 @@ Config :: struct {
     InnerGap: i32,
     BorderWidth: i32,
     FocusFollowsMouse: bool,
+    Animations: bool,
+    AnimationDurationMs: i32,
+    AnimationFps: i32,
+    AnimationEasing: Animation_Easing,
     FocusedBorder: u32,   // border colour of the focused window
     UnfocusedBorder: u32, // border colour of every other window
 }
@@ -25,9 +29,18 @@ Default_Config :: proc() -> Config {
         InnerGap          = 8,
         BorderWidth       = 2,
         FocusFollowsMouse = true,
+        Animations        = true,
+        AnimationDurationMs = 180,
+        AnimationFps      = 60,
+        AnimationEasing   = .Ease_Out_Cubic,
         FocusedBorder     = 0xE0AF68,
         UnfocusedBorder   = 0x3A3A3A,
     }
+}
+
+Animation_Easing :: enum u8 {
+    Linear,
+    Ease_Out_Cubic,
 }
 
 // Apply_Gap_Alias seeds both OuterGap and InnerGap from Gap when the caller only

@@ -39,6 +39,7 @@ GEOM :: c.Rect{X = 0, Y = 0, W = 1920, H = 1080}
 
 main :: proc() {
     test_config()
+    test_animation_math()
     test_workspaces()
     test_add_and_focus()
     test_focus_direction()
@@ -121,6 +122,10 @@ test_config :: proc() {
     eq(cfg.InnerGap, 8, "default inner gap")
     eq(cfg.BorderWidth, 2, "default border")
     ok(cfg.FocusFollowsMouse, "default focus-follows-mouse")
+    ok(cfg.Animations, "animations enabled by default")
+    eq(cfg.AnimationDurationMs, i32(180), "default animation duration")
+    eq(cfg.AnimationFps, i32(60), "default animation frame rate")
+    eq(cfg.AnimationEasing, c.Animation_Easing.Ease_Out_Cubic, "default animation easing")
 
     gapped := cfg
     gapped.Gap = 16
@@ -134,6 +139,27 @@ test_config :: proc() {
     eq(c.Resolve_Page_Width(1904, 8, 3), 948, "3+ columns keep the same page width")
     eq(2 * c.Resolve_Page_Width(1904, 8, 2) + 8, 1904, "two pages + one inner gap fill the screen")
     eq(c.Resolve_Page_Width(100, 8, 2), 60, "page width floored at 60 px")
+}
+
+test_animation_math :: proc() {
+    eq(c.Animation_Progress(-1, 100), f64(0), "animation progress clamps negative elapsed")
+    eq(c.Animation_Progress(50, 100), f64(0.5), "animation progress uses elapsed time")
+    eq(c.Animation_Progress(100, 100), f64(1), "animation progress completes exactly")
+    eq(c.Animation_Progress(1, 0), f64(1), "zero duration completes immediately")
+
+    eq(c.Animation_Ease(.Linear, 0.4), f64(0.4), "linear easing preserves progress")
+    eq(c.Animation_Ease(.Ease_Out_Cubic, 0.5), f64(0.875), "ease-out cubic curve")
+    eq(c.Animation_Ease(.Ease_Out_Cubic, 2), f64(1), "easing clamps high input")
+
+    start := c.Rect{X = 0, Y = 10, W = 100, H = 50}
+    target := c.Rect{X = 101, Y = -10, W = 201, H = 100}
+    eq(c.Animation_Lerp_Rect(start, target, 0), start, "rect interpolation starts exactly")
+    eq(c.Animation_Lerp_Rect(start, target, 1), target, "rect interpolation ends exactly")
+    eq(
+        c.Animation_Lerp_Rect(start, target, 0.5),
+        c.Rect{X = 51, Y = 0, W = 151, H = 75},
+        "rect interpolation rounds consistently",
+    )
 }
 
 // ----------------------------------------------------------------------------

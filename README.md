@@ -86,6 +86,12 @@ cp config/example.rc ~/.config/skarwm/config.rc
 skarwm
 ```
 
+Layout transitions are enabled by default (`animations : true`) with a 180 ms
+ease-out-cubic curve at a 60 FPS target. `animation_duration_ms`,
+`animation_fps`, and `animation_easing` (`linear` or `ease_out_cubic`) are
+reloadable; disabling animations applies geometry immediately and schedules no
+frames. See `config/example.rc` for the complete settings.
+
 For `startx`, copy `config/xinitrc.example` to `~/.xinitrc`. Display managers
 can use the installed `skarwm.desktop` entry. 
 
