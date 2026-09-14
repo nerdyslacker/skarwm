@@ -40,6 +40,7 @@ GEOM :: c.Rect{X = 0, Y = 0, W = 1920, H = 1080}
 main :: proc() {
     test_config()
     test_animation_math()
+    test_resize_math()
     test_workspaces()
     test_add_and_focus()
     test_focus_direction()
@@ -160,6 +161,99 @@ test_animation_math :: proc() {
         c.Rect{X = 51, Y = 0, W = 151, H = 75},
         "rect interpolation rounds consistently",
     )
+}
+
+test_resize_math :: proc() {
+    first, second := c.Resize_Pair(500, 500, 200, 100, 100)
+    eq(first, i32(700), "paired resize grows first side")
+    eq(second, i32(300), "paired resize shrinks following side")
+    first, second = c.Resize_Pair(500, 500, 900, 100, 100)
+    eq(first, i32(900), "paired resize honors neighbor minimum")
+    eq(second, i32(100), "paired resize keeps neighbor positive")
+    first, second = c.Resize_Pair(500, 500, 300, 100, 100, 600, 0)
+    eq(first, i32(600), "paired resize honors first maximum")
+    eq(first + second, i32(1000), "paired resize preserves total extent")
+
+    hints := c.Size_Hints{
+        MinW = 100, MinH = 80, MaxW = 500, MaxH = 400,
+        BaseW = 100, BaseH = 80, IncW = 20, IncH = 10,
+    }
+    w, h := c.Constrain_Size(hints, 337, 249)
+    eq(w, i32(320), "size hints apply width base/increment")
+    eq(h, i32(240), "size hints apply height base/increment")
+    w, h = c.Constrain_Size(hints, 20, 900)
+    eq(w, i32(100), "size hints enforce minimum")
+    eq(h, i32(400), "size hints enforce maximum")
+
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    c.Activate_WS(m, c.Ensure_WS(m, 1))
+    a := add_tiled(m, 301)
+    b := add_tiled(m, 302)
+    ws := c.Current_WS(m)
+    ws.Cols[0].Width = 700
+    ws.Cols[1].Width = 1196
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 696, H = 1060}, "custom column width affects every tile")
+    eq(b.Geom, c.Rect{X = 718, Y = 10, W = 1192, H = 1060}, "adjacent resized column follows boundary")
+
+    ok(c.Move_Dir(m, .Left), "resize row fixture stacks windows")
+    a.TileWeight, b.TileWeight = 3, 1
+    c.Arrange_All(m)
+    eq(a.Geom.Y, i32(10), "weighted first row stays at column top")
+    eq(a.Geom.H, i32(788), "weighted first row receives larger share")
+    eq(b.Geom.Y, i32(810), "following row moves with resized boundary")
+    eq(b.Geom.H, i32(260), "following row consumes remaining column height")
+
+    inserted := mk_man()
+    defer c.Destroy_Manager(inserted)
+    c.Activate_WS(inserted, c.Ensure_WS(inserted, 1))
+    ia := add_tiled(inserted, 311)
+    ib := add_tiled(inserted, 312)
+    iws := c.Current_WS(inserted)
+    iws.Cols[0].Width = 700
+    iws.Cols[1].Width = 1196
+    c.Arrange_All(inserted)
+    _ = ia
+    id := add_tiled(inserted, 313)
+    c.Ensure_Active_Focus_Visible(inserted)
+    c.Arrange_All(inserted)
+    // The old left column remains as the real edge preview; the resized focus
+    // and its complementary newcomer occupy the remaining page without partial
+    // columns or an oversized default insertion.
+    eq(ib.Geom, c.Rect{X = 38, Y = 10, W = 1174, H = 1060}, "resized focused column remains visible after insertion")
+    eq(id.Geom, c.Rect{X = 1224, Y = 10, W = 686, H = 1060}, "new column receives complementary page width")
+
+    reordered := mk_man()
+    defer c.Destroy_Manager(reordered)
+    c.Activate_WS(reordered, c.Ensure_WS(reordered, 1))
+    ra := add_tiled(reordered, 321)
+    rb := add_tiled(reordered, 322)
+    rws := c.Current_WS(reordered)
+    rws.Cols[0].Width = 700
+    rws.Cols[1].Width = 1196
+    ok(c.Move_Client_To_Drop(reordered, rb, c.Drop_Target{
+        Kind = .New_Column, Out = rb.Out, Ws = rws, Insert_Index = 0,
+    }), "resized column can be reordered")
+    eq(rws.Cols[0].Wins[0], rb, "reordered client enters requested column position")
+    eq(rws.Cols[0].Width, i32(1196), "horizontal drop carries resized column width")
+    _ = ra
+
+    stacked := mk_man()
+    defer c.Destroy_Manager(stacked)
+    c.Activate_WS(stacked, c.Ensure_WS(stacked, 1))
+    sa := add_tiled(stacked, 331)
+    sb := add_tiled(stacked, 332)
+    sws := c.Current_WS(stacked)
+    sws.Cols[0].Width = 700
+    ok(c.Move_Client_To_Drop(stacked, sa, c.Drop_Target{
+        Kind = .Into_Column, Out = sb.Out, Ws = sws, Col = sws.Cols[1], Row_Index = 0,
+    }), "resized column can be stacked by drop")
+    eq(len(sws.Cols), 1, "stacking drop removes emptied source column")
+    eq(sws.Cols[0].Width, i32(700), "stacking drop preserves explicit source width")
+    c.Arrange_All(stacked)
+    eq(sa.Geom.W, i32(696), "lone resized stack does not expand to full screen")
+    eq(sb.Geom.W, i32(696), "all windows follow the retained column width")
 }
 
 // ----------------------------------------------------------------------------

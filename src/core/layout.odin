@@ -100,6 +100,19 @@ column_has_maximized :: proc(col: ^Column) -> bool {
 
 column_width :: proc(p: Layout_Params, col: ^Column) -> i32 {
     if column_has_maximized(col) { return p.WorkW }
+    if col != nil && col.Width > 0 { return clamp(col.Width, i32(60), p.WorkW) }
+    return p.ColW
+}
+
+Column_Width_At :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, index: int) -> i32 {
+    if m == nil || o == nil || ws == nil || index < 0 || index >= len(ws.Cols) { return 0 }
+    p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+    return column_width(p, ws.Cols[index])
+}
+
+Default_Column_Width :: proc(m: ^Manager, o: ^Output, ws: ^Workspace) -> i32 {
+    if m == nil || o == nil || ws == nil { return 0 }
+    p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
     return p.ColW
 }
 
@@ -195,16 +208,25 @@ scroll_normal_col_rect :: proc(ws: ^Workspace, p: Layout_Params, wanted: int) ->
 
     work_right := p.WorkX + p.WorkW
     count, ordinal := 0, -1
+    desired_total, desired_before, desired_w := i32(0), i32(0), i32(0)
     for col, ci in ws.Cols {
         logical_x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, ci)
         logical_w := column_width(p, col)
         if logical_x < p.WorkX || logical_x + logical_w > work_right { continue }
-        if ci == wanted { ordinal = count }
+        if ci == wanted {
+            ordinal = count
+            desired_before = desired_total
+            desired_w = logical_w
+        }
+        desired_total += logical_w
         count += 1
     }
-    if ordinal < 0 || count == 0 { return 0, 0, false }
-    w = Resolve_Page_Width(main_w, p.Inner, count)
-    x = main_x + i32(ordinal) * (w + p.Inner)
+    if ordinal < 0 || count == 0 || desired_total <= 0 { return 0, 0, false }
+    content_w := max(i32(count), main_w - p.Inner * i32(count - 1))
+    scaled_before := i32(i64(content_w) * i64(desired_before) / i64(desired_total))
+    scaled_end := i32(i64(content_w) * i64(desired_before + desired_w) / i64(desired_total))
+    x = main_x + scaled_before + i32(ordinal) * p.Inner
+    w = max(i32(1), scaled_end - scaled_before)
     return x, w, true
 }
 
@@ -652,19 +674,40 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             avail := p.WorkH
             content := avail - p.Inner * i32(nw - 1)
             if content < i32(nw) { content = i32(nw) }
-            base_h := content / i32(nw)
-            rem := content % i32(nw)
+
+            total_weight := f64(0)
+            for cl in col.Wins {
+                weight := cl.TileWeight
+                if weight <= 0 { weight = 1 }
+                total_weight += weight
+            }
+            heights := make([]i32, nw)
+            used := i32(0)
+            distributable := content - i32(nw)
+            for cl, i in col.Wins {
+                weight := cl.TileWeight
+                if weight <= 0 { weight = 1 }
+                heights[i] = 1 + i32(f64(distributable) * weight / total_weight)
+                used += heights[i]
+            }
+            // Flooring leaves fewer than nw pixels. Match the historic layout
+            // by handing remainder pixels to rows from the top downward.
+            rem := content - used
+            for i := 0; rem > 0; i = (i + 1) % nw {
+                heights[i] += 1
+                rem -= 1
+            }
 
             y := p.WorkY
             for i in 0 ..< nw {
-                h := base_h
-                if i32(i) < rem { h += 1 }
+                h := heights[i]
                 tile := Rect { X = col_left, Y = y, W = col_w, H = h }
                 cl := col.Wins[i]
                 cl.Geom = inset_rect(tile, p.Border)
                 cl.Border = p.Border
                 y += h + p.Inner
             }
+            delete(heights)
         }
     }
 

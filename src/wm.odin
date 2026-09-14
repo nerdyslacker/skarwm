@@ -24,6 +24,17 @@ Client_Animation :: struct {
     Active: bool,
 }
 
+Tiled_Resize_State :: struct {
+    Active: bool,
+    Left, Right: ^c.Column,
+    Upper, Lower: ^c.Client,
+    Left_Start, Right_Start: i32,
+    Default_Column_Width: i32,
+    Upper_Start, Lower_Start: i32,
+    Left_Min, Right_Min, Left_Max, Right_Max: i32,
+    Upper_Min, Lower_Min, Upper_Max, Lower_Max: i32,
+}
+
 // Border colours come from Config.FocusedBorder / Config.UnfocusedBorder
 // (0xRRGGBB), settable from the rc file (norm_outer_border / sel_outer_border).
 
@@ -48,6 +59,7 @@ Wm :: struct {
     mouse_client: ^c.Client,
     mouse_resize: bool,
     mouse_tiled_drag: bool,
+    tiled_resize: Tiled_Resize_State,
     mouse_root_x, mouse_root_y: i16,
     mouse_start: c.Rect,
     drop_windows: [5]u32,
@@ -86,6 +98,10 @@ atom :: proc(name: string) -> u32 {
 // focused column visible; explicit wheel scrolling disables that snap so the
 // viewport can move independently of focus.
 reflow_inner :: proc(ensure_focus_visible, animate: bool) {
+    if g_wm.tiled_resize.Active &&
+       (g_wm.mouse_client == nil || !on_current_ws(g_wm.mouse_client)) {
+        cancel_pointer_operation()
+    }
     if ensure_focus_visible { c.Ensure_Active_Focus_Visible(g_wm.m) }
     c.Arrange_All(g_wm.m)
     push_geoms(animate)
@@ -179,6 +195,7 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     cl := c.New_Client(xid)
     read_client_meta(cl)
     read_client_urgency(cl)
+    read_size_hints(cl)
 
     // select events on the client so we see title changes, strut updates and
     // pointer hovers. (Child unmap/destroy/configure is already reported by the
@@ -348,6 +365,44 @@ read_client_urgency :: proc(cl: ^c.Client) -> bool {
     return changed
 }
 
+P_MIN_SIZE   :: u32(1 << 4)
+P_MAX_SIZE   :: u32(1 << 5)
+P_RESIZE_INC :: u32(1 << 6)
+P_BASE_SIZE  :: u32(1 << 8)
+
+read_size_hints :: proc(cl: ^c.Client) {
+    cl.SizeHints = {}
+    data, ok := get_prop(g_wm.conn, cl.Xid, atom("WM_NORMAL_HINTS"), 0)
+    if !ok { return }
+    defer delete(data)
+    if len(data) < 4 { return }
+    vals := ([^]u32)(raw_data(data))[:len(data) / 4]
+    flags := vals[0]
+    if flags & P_MIN_SIZE != 0 && len(vals) >= 7 {
+        cl.SizeHints.MinW, cl.SizeHints.MinH = i32(vals[5]), i32(vals[6])
+    }
+    if flags & P_MAX_SIZE != 0 && len(vals) >= 9 {
+        cl.SizeHints.MaxW, cl.SizeHints.MaxH = i32(vals[7]), i32(vals[8])
+    }
+    if flags & P_RESIZE_INC != 0 && len(vals) >= 11 {
+        cl.SizeHints.IncW, cl.SizeHints.IncH = i32(vals[9]), i32(vals[10])
+    }
+    if flags & P_BASE_SIZE != 0 && len(vals) >= 17 {
+        cl.SizeHints.BaseW, cl.SizeHints.BaseH = i32(vals[15]), i32(vals[16])
+    }
+}
+
+constrain_floating_rect :: proc(cl: ^c.Client, r: c.Rect) -> c.Rect {
+    result := r
+    b := max(i32(0), cl.Border)
+    content_w := max(i32(1), r.W - 2 * b)
+    content_h := max(i32(1), r.H - 2 * b)
+    content_w, content_h = c.Constrain_Size(cl.SizeHints, content_w, content_h)
+    result.W = content_w + 2 * b
+    result.H = content_h + 2 * b
+    return result
+}
+
 clone_bytes :: proc(s: string) -> string {
     if s == "" { return "" }
     b := make([]byte, len(s))
@@ -379,7 +434,7 @@ get_text_prop :: proc(conn: ^Connection, win, prop, type_id: u32) -> (string, bo
 // unmanage removes the window from the model and frees it, returning the
 // replacement focus (already applied to X) — or nil if none.
 unmanage :: proc(cl: ^c.Client) {
-    if g_wm.mouse_client == cl { cancel_pointer_operation() }
+    if g_wm.mouse_client == cl || g_wm.tiled_resize.Active { cancel_pointer_operation() }
     dock := cl.Dock
     ws := cl.Ws // captured for the empty-workspace announcement below
     was_focused := g_wm.m.Focused == cl
@@ -956,6 +1011,122 @@ regrab_client_buttons :: proc() {
     for cl in g_wm.m.Clients { if !cl.Dock { grab_client_buttons(cl.Xid) } }
 }
 
+column_resize_limits :: proc(col: ^c.Column) -> (minimum, maximum: i32) {
+    minimum = 60
+    if col == nil { return }
+    for cl in col.Wins {
+        minimum = max(minimum, cl.SizeHints.MinW + 2 * max(i32(0), cl.Border))
+        if cl.SizeHints.MaxW > 0 {
+            outer_max := cl.SizeHints.MaxW + 2 * max(i32(0), cl.Border)
+            if maximum == 0 || outer_max < maximum { maximum = outer_max }
+        }
+    }
+    return
+}
+
+row_resize_limits :: proc(cl: ^c.Client) -> (minimum, maximum: i32) {
+    minimum = 40
+    if cl == nil { return }
+    b := 2 * max(i32(0), cl.Border)
+    minimum = max(minimum, cl.SizeHints.MinH + b)
+    if cl.SizeHints.MaxH > 0 { maximum = cl.SizeHints.MaxH + b }
+    return
+}
+
+column_is_maximized :: proc(col: ^c.Column) -> bool {
+    if col == nil { return false }
+    for cl in col.Wins { if cl.Maximized { return true } }
+    return false
+}
+
+begin_tiled_resize :: proc(cl: ^c.Client, root_x, root_y: i32) -> bool {
+    if cl == nil || cl.Floating || cl.Fullscreen || cl.Maximized || !on_current_ws(cl) { return false }
+    ci, col, row := c.Column_Of(cl)
+    if col == nil { return false }
+
+    // Finish any layout transition first so the drag snapshot matches the
+    // geometry beneath the pointer exactly.
+    reflow_immediate()
+    state := Tiled_Resize_State{}
+
+    if len(cl.Ws.Cols) > 1 {
+        left_index, right_index := -1, -1
+        midpoint := cl.Geom.X + cl.Geom.W / 2
+        if root_x < midpoint && ci > 0 {
+            left_index, right_index = ci - 1, ci
+        } else if root_x >= midpoint && ci + 1 < len(cl.Ws.Cols) {
+            left_index, right_index = ci, ci + 1
+        }
+        if left_index >= 0 {
+            left, right := cl.Ws.Cols[left_index], cl.Ws.Cols[right_index]
+            if !column_is_maximized(left) && !column_is_maximized(right) {
+                state.Left, state.Right = left, right
+                state.Left_Start = c.Column_Width_At(g_wm.m, cl.Out, cl.Ws, left_index)
+                state.Right_Start = c.Column_Width_At(g_wm.m, cl.Out, cl.Ws, right_index)
+                state.Default_Column_Width = c.Default_Column_Width(g_wm.m, cl.Out, cl.Ws)
+                state.Left_Min, state.Left_Max = column_resize_limits(left)
+                state.Right_Min, state.Right_Max = column_resize_limits(right)
+            }
+        }
+    }
+
+    if col.Layout == .Stacked && len(col.Wins) > 1 {
+        upper_index, lower_index := -1, -1
+        midpoint := cl.Geom.Y + cl.Geom.H / 2
+        if root_y < midpoint && row > 0 {
+            upper_index, lower_index = row - 1, row
+        } else if root_y >= midpoint && row + 1 < len(col.Wins) {
+            upper_index, lower_index = row, row + 1
+        }
+        if upper_index >= 0 {
+            // Preserve every row's current share; only the selected boundary
+            // changes while the rest of the stack remains stable.
+            for win in col.Wins {
+                win.TileWeight = f64(win.Geom.H + 2 * max(i32(0), win.Border))
+            }
+            state.Upper, state.Lower = col.Wins[upper_index], col.Wins[lower_index]
+            state.Upper_Start = i32(state.Upper.TileWeight)
+            state.Lower_Start = i32(state.Lower.TileWeight)
+            state.Upper_Min, state.Upper_Max = row_resize_limits(state.Upper)
+            state.Lower_Min, state.Lower_Max = row_resize_limits(state.Lower)
+        }
+    }
+
+    state.Active = state.Left != nil || state.Upper != nil
+    if !state.Active { return false }
+    g_wm.tiled_resize = state
+    g_wm.mouse_client = cl
+    g_wm.mouse_root_x = i16(root_x)
+    g_wm.mouse_root_y = i16(root_y)
+    return true
+}
+
+tiled_resize_motion :: proc(root_x, root_y: i32) {
+    state := &g_wm.tiled_resize
+    if !state.Active { return }
+    if state.Left != nil && state.Right != nil {
+        left, right := c.Resize_Pair(
+            state.Left_Start, state.Right_Start,
+            root_x - i32(g_wm.mouse_root_x),
+            state.Left_Min, state.Right_Min, state.Left_Max, state.Right_Max,
+        )
+        // Returning a boundary to the layout's natural split clears the
+        // override. Such a column can expand normally if it later stands
+        // alone, while a genuinely resized column keeps its explicit width.
+        state.Left.Width = left if left != state.Default_Column_Width else 0
+        state.Right.Width = right if right != state.Default_Column_Width else 0
+    }
+    if state.Upper != nil && state.Lower != nil {
+        upper, lower := c.Resize_Pair(
+            state.Upper_Start, state.Lower_Start,
+            root_y - i32(g_wm.mouse_root_y),
+            state.Upper_Min, state.Lower_Min, state.Upper_Max, state.Lower_Max,
+        )
+        state.Upper.TileWeight, state.Lower.TileWeight = f64(upper), f64(lower)
+    }
+    reflow_immediate()
+}
+
 on_button_press :: proc(ev: ^Button_Press_Event) {
     if ev.event == g_wm.help_window {
         help_hide()
@@ -1010,6 +1181,16 @@ on_button_press :: proc(ev: ^Button_Press_Event) {
     modified := g_wm.primary_mod != 0 && clean & g_wm.primary_mod == g_wm.primary_mod
     floating_drag := modified && cl.Floating && !cl.Maximized && (ev.detail == 1 || ev.detail == 3)
     tiled_drag := modified && !cl.Floating && ev.detail == 1
+    tiled_resize := modified && !cl.Floating && !cl.Maximized && ev.detail == 3
+    if tiled_resize {
+        if begin_tiled_resize(cl, i32(ev.root_x), i32(ev.root_y)) {
+            xcb_allow_events(g_wm.conn, ALLOW_ASYNC_POINTER, ev.time)
+        } else {
+            xcb_allow_events(g_wm.conn, ALLOW_REPLAY_POINTER, ev.time)
+        }
+        xcb_flush(g_wm.conn)
+        return
+    }
     if floating_drag || tiled_drag {
         g_wm.mouse_client = cl
         g_wm.mouse_resize = floating_drag && ev.detail == 3
@@ -1035,6 +1216,10 @@ on_motion :: proc(ev: ^Motion_Notify_Event) {
         drop_overlay_update(i32(ev.root_x), i32(ev.root_y))
         return
     }
+    if g_wm.tiled_resize.Active {
+        tiled_resize_motion(i32(ev.root_x), i32(ev.root_y))
+        return
+    }
     if !g_wm.mouse_resize {
         old_ws := cl.Ws
         output := c.Output_At_Point(g_wm.m, i32(ev.root_x), i32(ev.root_y))
@@ -1054,6 +1239,7 @@ on_motion :: proc(ev: ^Motion_Notify_Event) {
         r.X += dx
         r.Y += dy
     }
+    if g_wm.mouse_resize { r = constrain_floating_rect(cl, r) }
     cl.FloatingRect = r
     reflow_immediate()
 }
@@ -1078,15 +1264,19 @@ on_button_release :: proc(ev: ^Button_Press_Event) {
         }
     } else if g_wm.mouse_tiled_drag {
         drop_overlay_hide()
+    } else if cl != nil && g_wm.tiled_resize.Active {
+        ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
     }
     cancel_pointer_operation()
 }
 
 cancel_pointer_operation :: proc() {
+    if g_wm.mouse_client != nil { xcb_ungrab_pointer(g_wm.conn, CURRENT_TIME) }
     if g_wm.mouse_tiled_drag { drop_overlay_hide() }
     g_wm.mouse_client = nil
     g_wm.mouse_resize = false
     g_wm.mouse_tiled_drag = false
+    g_wm.tiled_resize = {}
 }
 
 NOTIFY_MODE_NORMAL :: u8(0)
@@ -1105,6 +1295,10 @@ on_current_ws :: proc(cl: ^c.Client) -> bool {
 on_configure_request :: proc(ev: ^Configure_Request_Event) {
     xid := ev.window
     if cl := g_wm.m.ByXid[xid]; cl != nil {
+        if g_wm.tiled_resize.Active && g_wm.mouse_client == cl {
+            reflow_immediate()
+            return
+        }
         if cl.Floating || cl.Dock {
             // honour floating/dock move/resize requests (a dock keeps the
             // geometry it asks for; tiled windows do not choose theirs)
@@ -1140,6 +1334,7 @@ apply_float_configure :: proc(cl: ^c.Client, ev: ^Configure_Request_Event) {
     if mask & CW_Y != 0 { r.Y = i32(ev.y) }
     if mask & CW_WIDTH != 0 { r.W = i32(ev.width) }
     if mask & CW_HEIGHT != 0 { r.H = i32(ev.height) }
+    if !cl.Dock { r = constrain_floating_rect(cl, r) }
     cl.FloatingRect = r
 }
 
@@ -1164,6 +1359,10 @@ on_property_notify :: proc(ev: ^Property_Notify_Event) {
     }
     if ev.atom == atom("WM_HINTS") {
         if read_client_urgency(cl) { ipc_broadcast_window_event(c.IPC_WINDOW_URGENT, cl) }
+        return
+    }
+    if ev.atom == atom("WM_NORMAL_HINTS") {
+        read_size_hints(cl)
         return
     }
     if cl.Dock && (ev.atom == atom("_NET_WM_STRUT_PARTIAL") || ev.atom == atom("_NET_WM_STRUT")) {

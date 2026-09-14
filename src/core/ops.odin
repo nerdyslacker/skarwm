@@ -229,12 +229,24 @@ attach_new_window :: proc(m: ^Manager, ws: ^Workspace, cl: ^Client) {
     cl.Ws = ws
     cl.Out = Output_Of_WS(m, ws)
     idx := len(ws.Cols)
+    neighbor: ^Column
     if ws.Focus != nil && !ws.Focus.Floating {
-        if ci, _, _ := column_of(ws, ws.Focus); ci >= 0 {
+        if ci, focused_col, _ := column_of(ws, ws.Focus); ci >= 0 {
             idx = ci + 1
+            neighbor = focused_col
         }
     }
     col := new_column()
+    // Once columns have custom widths, a generic default-width insertion can
+    // make both the focused column and its new neighbor only partly visible.
+    // Give the new column the complementary width of that page instead. With
+    // untouched defaults this evaluates to the ordinary page width.
+    if neighbor != nil && len(ws.Cols) >= 2 && cl.Out != nil && !column_has_maximized(neighbor) {
+        p := compute_params(m.Cfg, cl.Out.Geom, len(ws.Cols) + 1, cl.Out.Reserved)
+        neighbor_w := column_width(p, neighbor)
+        complement := p.WorkW - p.Inner - neighbor_w
+        if complement >= 60 { col.Width = complement }
+    }
     append(&col.Wins, cl)
     array_insert_at(&ws.Cols, idx, col)
     col.Focus = cl
@@ -393,6 +405,8 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
         src := cl.Ws
         ci, source, row := column_of(src, cl)
         if source == nil { return false }
+        source_width := source.Width
+        source_removed := source != drop.Col && len(source.Wins) == 1
         insert_at := drop.Row_Index
         if source == drop.Col {
             if len(source.Wins) == 1 { return false }
@@ -403,6 +417,12 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
             ordered_remove(&source.Wins, row)
             if len(source.Wins) == 0 { detach_column_empty(src, ci) }
             if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
+        }
+        // When the drop collapses a resized source column into an otherwise
+        // default destination, retain that horizontal size. In particular,
+        // the resulting lone stack must not unexpectedly fill the screen.
+        if source_removed && source_width > 0 && drop.Col.Width == 0 {
+            drop.Col.Width = source_width
         }
         array_insert_at(&drop.Col.Wins, insert_at, cl)
         drop.Col.Focus = cl
@@ -426,6 +446,7 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
     if source == nil { return false }
     insert_at := drop.Insert_Index
     source_removed := len(source.Wins) == 1
+    source_width := source.Width
 
     if source.Focus == cl { source.Focus = in_column_focus_after_removal(source, row) }
     ordered_remove(&source.Wins, row)
@@ -436,6 +457,9 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
     if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
 
     fresh := new_column()
+    // Width belongs to the visual column being dragged. Carry it into the new
+    // column for both reordering and extracting a window from a stack.
+    fresh.Width = source_width
     append(&fresh.Wins, cl)
     fresh.Focus = cl
     array_insert_at(&drop.Ws.Cols, insert_at, fresh)
@@ -829,10 +853,26 @@ Scroll_Output_Viewport :: proc(m: ^Manager, o: ^Output, dir: int) -> bool {
     ws := o.Current
     if ws == nil || len(ws.Cols) == 0 { return false }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
-    _, step := strip_geometry(p, len(ws.Cols))
-    if step <= 0 { return false }
     sign := i32(dir / abs(dir))
-    next := clamp_workspace_viewport(ws.ViewportX + step * sign, ws, p)
+    next := ws.ViewportX
+    if sign > 0 {
+        for col, ci in ws.Cols {
+            left := workspace_col_left(ws, p, ci)
+            if left > ws.ViewportX {
+                next = left
+                break
+            }
+            if ci + 1 == len(ws.Cols) { next += column_width(p, col) + p.Inner }
+        }
+    } else {
+        next = 0
+        for _, ci in ws.Cols {
+            left := workspace_col_left(ws, p, ci)
+            if left >= ws.ViewportX { break }
+            next = left
+        }
+    }
+    next = clamp_workspace_viewport(next, ws, p)
     if next == ws.ViewportX { return false }
     ws.ViewportX = next
     return true

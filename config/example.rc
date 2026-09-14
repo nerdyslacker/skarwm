@@ -104,7 +104,8 @@ call : mod + Shift + period : move_to_output_next
 # insert vertically in the selected column, while left/right create a horizontal
 # column immediately before/after a neighboring column. The accent fill is translucent
 # when an X compositor is running and falls back to an outline without one.
-# Mod+right-drag resizes floaters.
+# Mod+right-drag resizes floaters. On tiled windows it moves the nearest column
+# and/or stacked-row boundary; every window sharing that split follows.
 
 # ---- dynamic workspaces --------------------------------------------------------
 # A workspace is created on demand the first time it is shown, so ids are not

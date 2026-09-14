@@ -107,13 +107,13 @@ Default interaction highlights:
 - `Super+t`: toggle tabbed mode for the focused column;
 - `Super+/`: show all configured skarwm keybindings;
 - `Super`+wheel: scroll the workspace strip;
-- hover a narrow edge preview: reveal and focus the adjacent hidden window;
 - `Super+,/.`: focus the previous/next monitor;
 - `Super+Shift+,/.`: move the focused window between monitors;
 - middle-click: maximize/restore a managed window within its usable work area;
 - `Super`+left-drag: move a floating window or reposition a tiled window; tiled
   drags show one contextual edge overlay (translucent when a compositor runs);
-- `Super`+right-drag: resize a floating window.
+- `Super`+right-drag: resize a floating window or the nearest tiled split;
+- hover a narrow edge preview: reveal and focus the adjacent hidden window;
 
 Tabbed mode affects only the focused column. Move windows into it with
 `Super+Shift+h/l`, select tabs with `Super+k/j`, and reorder them with

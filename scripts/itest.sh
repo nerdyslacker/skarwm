@@ -183,6 +183,38 @@ wait_geom "$first" "1260x780+10+10" || fail "scroll back to maximized page"
 xdotool click 2 >/dev/null 2>&1
 if wait_for two_side_by_side; then pass "second middle click restores tiled geometry"; else fail "middle-click restore"; fi
 
+# Mod+Button3 on a tiled window moves its nearest split boundary. Resizing the
+# left column wider must shrink and shift the right column, keeping the workarea
+# filled. Restore the split before the drag/drop fixture below.
+second=$(xtops | awk '$2=="624x780+646+10"{print $1; exit}')
+xdotool mousemove 500 400 keydown Super_L mousedown 3 >/dev/null 2>&1
+sleep 0.1
+xdotool mousemove 620 400 >/dev/null 2>&1
+sleep 0.2
+xdotool mouseup 3 keyup Super_L >/dev/null 2>&1
+if wait_geom "$first" "744x780+10+10" && wait_geom "$second" "504x780+766+10"; then
+  pass "tiled resize changes the whole column and following column"
+else
+  fail "tiled column resize"
+fi
+# Opening beside a resized column must use the remaining page width rather than
+# injecting a generic 624px column and leaving partially visible windows.
+key super+Return
+new_after_resize=$(printf '0x%x' "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')")
+if wait_geom "$first" "727x780+10+10" && wait_geom "$new_after_resize" "493x780+749+10"; then
+  pass "new window preserves resized page proportions"
+else
+  fail "new window after column resize (old=$(geom_of "$first"), new=$(geom_of "$new_after_resize"))"
+fi
+key super+shift+q
+wait_for ipc_count_is 2 || fail "close post-resize insertion"
+xdotool mousemove 620 400 keydown Super_L mousedown 3 >/dev/null 2>&1
+sleep 0.1
+xdotool mousemove 500 400 >/dev/null 2>&1
+sleep 0.2
+xdotool mouseup 3 keyup Super_L >/dev/null 2>&1
+if wait_for two_side_by_side; then pass "tiled column resize restores exact split"; else fail "column resize restore"; fi
+
 # ---- 2b. tiled Super+drag shows one contextual zone and drops vertically -----
 before_overlay=$(unnamed_children)
 before_overlay_mapped=$(mapped_unnamed_children)
@@ -274,6 +306,27 @@ fi
 ty_dec=$(printf '%d' "$ty")   # XGetInputFocus returns decimal ids
 by_dec=$(printf '%d' "$by")
 
+# Drag the lower boundary of the top row. The bottom row follows and both rows
+# continue to fill the column; then restore the equal split for later checks.
+xdotool mousemove 640 300 keydown Super_L mousedown 3 >/dev/null 2>&1
+sleep 0.1
+xdotool mousemove 640 400 >/dev/null 2>&1
+sleep 0.2
+xdotool mouseup 3 keyup Super_L >/dev/null 2>&1
+if wait_geom "$ty" "1260x484+10+10" && wait_geom "$by" "1260x284+10+506"; then
+  pass "stack row resize moves the shared boundary"
+else
+  fail "stack row resize"
+fi
+xdotool mousemove 640 300 keydown Super_L mousedown 3 >/dev/null 2>&1
+sleep 0.1
+xdotool mousemove 640 200 >/dev/null 2>&1
+sleep 0.2
+xdotool mouseup 3 keyup Super_L >/dev/null 2>&1
+if wait_for stack_of_two; then pass "stack row resize restores exact split"; else fail "row resize restore"; fi
+# Keep focus-follows-mouse from changing the keyboard fixture as rows swap.
+xdotool mousemove 640 795 >/dev/null 2>&1; sleep 0.3
+
 # ---- 4. focus up/down within the stack ----------------------------------------
 key super+k
 if wait_focus "$ty_dec"; then pass "focus up -> top window"; else fail "focus up -> top"; fi
@@ -290,7 +343,7 @@ key super+t
 if wait_geom "$ty" "1260x756+10+34" && wait_hidden_x "$by"; then
   pass "tabbed layout shows only the active tab at full column size"
 else
-  fail "tabbed active geometry"
+  fail "tabbed active geometry (active=$(geom_of "$ty"), peer=$(geom_of "$by"))"
 fi
 key super+k
 if wait_focus "$by_dec" && wait_geom "$by" "1260x756+10+34" && wait_hidden_x "$ty"; then

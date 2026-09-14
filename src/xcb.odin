@@ -632,6 +632,7 @@ foreign xcb {
     xcb_grab_keyboard :: proc(c: ^Connection, owner_events: u8, grab_window: u32, time: u32, pointer_mode, keyboard_mode: u8) -> Cookie ---
     xcb_grab_keyboard_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Grab_Keyboard_Reply ---
     xcb_ungrab_keyboard :: proc(c: ^Connection, time: u32) -> Cookie ---
+    xcb_ungrab_pointer :: proc(c: ^Connection, time: u32) -> Cookie ---
     xcb_grab_button :: proc(c: ^Connection, owner_events: u8, grab_window: u32, event_mask: u16, pointer_mode, keyboard_mode: u8, confine_to, cursor: u32, button: u8, modifiers: u16) -> Cookie ---
     xcb_ungrab_button :: proc(c: ^Connection, button: u8, grab_window: u32, modifiers: u16) -> Cookie ---
     xcb_allow_events :: proc(c: ^Connection, mode: u8, time: u32) -> Cookie ---
