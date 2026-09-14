@@ -10,6 +10,8 @@ Each column can contain a vertical stack of windows.
 |---|---|---|
 | `Super+h/l` | `focusleft/right` | Focus the neighboring column. |
 | `Super+j/k` | `focusdown/up` | Focus another window in the column. |
+| `Super+Control+h/l` | `resizeleft/right` | Make the focused column narrower/wider. |
+| `Super+Control+k/j` | `resizeup/down` | Make the focused row shorter/taller. |
 | `Super+Shift+h/l` | `moveleft/right` | Move the window into a neighboring column. |
 | `Super+Shift+j/k` | `movedown/up` | Reorder it vertically. |
 
@@ -43,3 +45,10 @@ Fullscreen is borderless and temporarily hides the other workspace windows.
 moves the nearest boundary: neighboring columns resize as a pair, and windows
 in a vertical stack follow their shared row boundary. Size hints and minimums
 are respected. The resized column width survives new windows and drag/drop.
+
+The keyboard equivalent:
+`Super+Control+h/l` makes the focused column 40 pixels narrower/wider, and
+`Super+Control+k/j` makes its stacked row shorter/taller. Columns keep
+independent widths; the other rows share remaining height proportionally.
+These actions are configurable as `resizeleft`, `resizeright`, `resizeup`, and
+`resizedown`.

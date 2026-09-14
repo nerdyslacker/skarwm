@@ -11,7 +11,7 @@ import c "../core"
 
 drop_target_equal :: proc(a, b: c.Drop_Target) -> bool {
     return a.Kind == b.Kind && a.Zone == b.Zone && a.Out == b.Out && a.Ws == b.Ws &&
-           a.Col == b.Col && a.Insert_Index == b.Insert_Index &&
+           a.Col == b.Col && a.Target == b.Target && a.Insert_Index == b.Insert_Index &&
            a.Row_Index == b.Row_Index && a.Geom == b.Geom
 }
 
@@ -67,6 +67,23 @@ drop_overlay_configure_piece :: proc(state: ^State, xid: u32, r: c.Rect) {
     x11.xcb_configure_window(state.Conn, xid, x11.CW_X | x11.CW_Y | x11.CW_WIDTH | x11.CW_HEIGHT | x11.CW_STACK_MODE, &vals[0])
 }
 
+// Keep the translucent fill above the pointer-following drag preview and the
+// opaque outline above the fill. Reasserting the stack on unchanged targets is
+// intentional: the preview window is reconfigured on every motion event.
+drop_overlay_raise :: proc(state: ^State) {
+    stack := x11.STACK_MODE_ABOVE
+    if state.DropHasCompositor {
+        x11.xcb_map_window(state.Conn, state.DropWindows[DROP_OVERLAY_FILL])
+        x11.xcb_configure_window(state.Conn, state.DropWindows[DROP_OVERLAY_FILL], x11.CW_STACK_MODE, &stack)
+    } else {
+        x11.xcb_unmap_window(state.Conn, state.DropWindows[DROP_OVERLAY_FILL])
+    }
+    for i in DROP_OVERLAY_TOP ..< DROP_OVERLAY_COUNT {
+        x11.xcb_map_window(state.Conn, state.DropWindows[i])
+        x11.xcb_configure_window(state.Conn, state.DropWindows[i], x11.CW_STACK_MODE, &stack)
+    }
+}
+
 Show_Drop :: proc(state: ^State, m: ^c.Manager, target: c.Drop_Target) {
     if target.Kind == .None || target.Geom.W <= 0 || target.Geom.H <= 0 {
         Hide_Drop(state)
@@ -86,14 +103,7 @@ Show_Drop :: proc(state: ^State, m: ^c.Manager, target: c.Drop_Target) {
     drop_overlay_configure_piece(state, state.DropWindows[DROP_OVERLAY_LEFT], c.Rect{X = r.X, Y = r.Y + t, W = t, H = max(i32(1), r.H - 2 * t)})
     drop_overlay_configure_piece(state, state.DropWindows[DROP_OVERLAY_RIGHT], c.Rect{X = r.X + r.W - t, Y = r.Y + t, W = t, H = max(i32(1), r.H - 2 * t)})
 
-    if state.DropHasCompositor {
-        x11.xcb_map_window(state.Conn, state.DropWindows[DROP_OVERLAY_FILL])
-    } else {
-        x11.xcb_unmap_window(state.Conn, state.DropWindows[DROP_OVERLAY_FILL])
-    }
-    for i in DROP_OVERLAY_TOP ..< DROP_OVERLAY_COUNT {
-        x11.xcb_map_window(state.Conn, state.DropWindows[i])
-    }
+    drop_overlay_raise(state)
     state.DropVisible = true
     state.DropTarget = target
     x11.xcb_flush(state.Conn)
@@ -105,7 +115,11 @@ Update_Drop :: proc(state: ^State, m: ^c.Manager, mouse_client: ^c.Client, x, y:
         Hide_Drop(state)
         return
     }
-    if state.DropVisible && drop_target_equal(target, state.DropTarget) { return }
+    if state.DropVisible && drop_target_equal(target, state.DropTarget) {
+        drop_overlay_raise(state)
+        x11.xcb_flush(state.Conn)
+        return
+    }
     Show_Drop(state, m, target)
 }
 

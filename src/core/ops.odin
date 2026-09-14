@@ -320,10 +320,10 @@ detach_column_empty :: proc(ws: ^Workspace, ci: int) {
     free_column(col)
 }
 
-// Keep stack sizing as normalized proportions, following Mango's scroller
-// model. A new/default row receives the mean existing weight before the whole
-// stack is normalized; it can therefore never become a one-pixel row beside
-// weights captured from an earlier pixel-based resize.
+// Keep stack sizing as normalized proportions A new/default row receives
+// the mean existing weight before the whole stack is normalized; it can
+// therefore never become a one-pixel row beside weights captured from an
+// earlier pixel-based resize.
 normalize_stack_weights :: proc(col: ^Column) {
     if col == nil || len(col.Wins) == 0 { return }
     sum := f64(0)

@@ -54,6 +54,26 @@ configure_client_geometry :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Ma
     shape_client(state, conn, m, cl, geom, border)
 }
 
+// Preview_Client moves a dragged tile without changing its authoritative core
+// geometry. Synchronizing the animation state lets the eventual drop animate
+// smoothly from this pointer-following preview into its new tiled position.
+Preview_Client :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, cl: ^c.Client, geom: c.Rect) {
+    if state == nil || conn == nil || m == nil || cl == nil { return }
+    st := state.Animations[cl.Xid]
+    if st == nil {
+        st = new(Client_Animation)
+        state.Animations[cl.Xid] = st
+    }
+    st.Start = geom
+    st.Current = geom
+    st.Target = geom
+    st.Start_Border = cl.Border
+    st.Current_Border = cl.Border
+    st.Target_Border = cl.Border
+    st.Active = false
+    configure_client_geometry(state, conn, m, cl, geom, cl.Border)
+}
+
 animation_sample :: proc(st: ^Client_Animation, now: time.Tick) {
     if st == nil || !st.Active { return }
     elapsed := time.tick_diff(st.Started, now)

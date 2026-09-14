@@ -7,6 +7,7 @@ Action_Kind :: enum u8 {
     Spawn,
     Focus_Left, Focus_Right, Focus_Up, Focus_Down,
     Move_Left, Move_Right, Move_Up, Move_Down,
+    Resize_Left, Resize_Right, Resize_Up, Resize_Down,
     Toggle_Floating,
     Toggle_Fullscreen,
     Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,

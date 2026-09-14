@@ -56,6 +56,30 @@ sudo xbps-install -S tigervnc xterm xdotool xwininfo xrandr xprop \
 At runtime skarwm links libxcb plus its RandR and Shape extensions. No shell,
 bar, compositor, or notification daemon is required.
 
+## Recommended companion software
+
+skarwm deliberately provides window management rather than a complete desktop.
+These optional programs cover common session features:
+
+- [picom](https://picom.app/) — X11 compositing, shadows, fading, and true
+  transparency for elements such as the drag/drop overlay
+- [dunst](https://dunst-project.org/) — lightweight notification daemon
+- [kitty](https://sw.kovidgoyal.net/kitty/) — GPU-accelerated terminal
+- [feh](https://feh.finalrewind.org/) — image viewer commonly used to set the
+  X root-window wallpaper
+- [betterlockscreen](https://github.com/betterlockscreen/betterlockscreen) —
+  configurable screen-lock wrapper
+- [brightnessctl](https://github.com/Hummer12007/brightnessctl) — hardware
+  backlight controls
+- [PipeWire](https://pipewire.org/) with WirePlumber, or
+  [PulseAudio](https://www.freedesktop.org/wiki/Software/PulseAudio/) — desktop
+  audio and media-key volume controls
+- [anush](https://github.com/nerdyslacker/anush) — shell crafted for full desktop experience on skarwm
+
+None is required by skarwm. Commented autostart commands and bindings for each
+are available in `assets/example.rc`; enable only the programs installed on
+your system.
+
 ## Build and install
 
 ```sh
@@ -126,6 +150,8 @@ can use the installed `skarwm.desktop` entry.
 Default interaction highlights:
 
 - `Super+h/j/k/l`: focus left/down/up/right;
+- `Super+Control+h/l`: make the focused column narrower/wider;
+- `Super+Control+k/j`: make the focused stacked row shorter/taller;
 - `Super+Shift+h/j/k/l`: move within or between columns;
 - `Super+1` … `Super+9`: switch workspace;
 - `Super+Shift+1` … `Super+Shift+9`: send the focused window;
@@ -139,7 +165,7 @@ Default interaction highlights:
 - `Super+Shift+,/.`: move the focused window between monitors;
 - middle-click: maximize/restore a managed window within its usable work area;
 - `Super`+left-drag: move a floating window or reposition a tiled window; tiled
-  drags show one contextual edge overlay (translucent when a compositor runs);
+  drags show a half-window target overlay;
 - `Super`+right-drag: resize a floating window or the nearest tiled split;
 - hover a narrow edge preview: reveal and focus the adjacent hidden window;
 
