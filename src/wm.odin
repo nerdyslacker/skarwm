@@ -41,7 +41,9 @@ Wm :: struct {
     mouse_tiled_drag: bool,
     mouse_root_x, mouse_root_y: i16,
     mouse_start: c.Rect,
-    drop_windows: [dynamic]u32,
+    drop_windows: [5]u32,
+    drop_overlay_visible: bool,
+    drop_overlay_has_compositor: bool,
     drop_target: c.Drop_Target,
     tabs: [dynamic]Tab_Decoration,
     tab_gc, tab_font: u32,
@@ -382,6 +384,7 @@ get_text_prop :: proc(conn: ^Connection, win, prop, type_id: u32) -> (string, bo
 // unmanage removes the window from the model and frees it, returning the
 // replacement focus (already applied to X) — or nil if none.
 unmanage :: proc(cl: ^c.Client) {
+    if g_wm.mouse_client == cl { cancel_pointer_operation() }
     dock := cl.Dock
     ws := cl.Ws // captured for the empty-workspace announcement below
     was_focused := g_wm.m.Focused == cl
@@ -608,6 +611,9 @@ dir_of :: proc(k: Action_Kind) -> c.Dir {
 dispatch_action :: proc(b: ^Binding) {
     m := g_wm.m
     old_focus := m.Focused
+    // A keyboard action aborts an in-progress pointer operation. In
+    // particular, workspace/layout changes must never leave a stale overlay.
+    if g_wm.mouse_client != nil { cancel_pointer_operation() }
     // Explicit keyboard input takes precedence and suppresses a hover retarget
     // until pointer motion confirms it has left all preview zones.
     g_wm.preview_hover_locked = true
@@ -1061,7 +1067,9 @@ on_button_release :: proc(ev: ^Button_Press_Event) {
     if cl != nil && g_wm.mouse_tiled_drag {
         old_output := cl.Out
         old_ws := cl.Ws
-        target := c.Drop_Target_At_Point(g_wm.m, i32(ev.root_x), i32(ev.root_y), cl)
+        target := c.Drop_Target_At_Point(
+            g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, g_wm.drop_target,
+        )
         drop_overlay_hide()
         if c.Move_Client_To_Drop(g_wm.m, cl, target) {
             if target.Out != old_output {
@@ -1075,6 +1083,11 @@ on_button_release :: proc(ev: ^Button_Press_Event) {
     } else if g_wm.mouse_tiled_drag {
         drop_overlay_hide()
     }
+    cancel_pointer_operation()
+}
+
+cancel_pointer_operation :: proc() {
+    if g_wm.mouse_tiled_drag { drop_overlay_hide() }
     g_wm.mouse_client = nil
     g_wm.mouse_resize = false
     g_wm.mouse_tiled_drag = false

@@ -92,10 +92,11 @@ call : mod + Shift + period : move_to_output_next
 # Fixed mouse actions: middle-click maximizes/restores a managed window.
 # Hovering the exposed edge of an off-screen tiled window reveals and focuses it.
 # Mod+wheel up/down scrolls the workspace strip under the pointer.
-# Mod+left-drag moves floating windows or drops tiled windows
-# into another column; both work across monitors. Tiled dragging shows four
-# choices per monitor: top/bottom insert vertically in the focused column, and
-# left/right create a horizontal column at the corresponding workspace edge.
+# Mod+left-drag moves floating windows or drops tiled windows; both work across
+# monitors. A tiled drag shows only the direction near the pointer: top/bottom
+# insert vertically in the selected column, while left/right create a horizontal
+# column immediately before/after a neighboring column. The accent fill is translucent
+# when an X compositor is running and falls back to an outline without one.
 # Mod+right-drag resizes floaters.
 
 # ---- dynamic workspaces --------------------------------------------------------

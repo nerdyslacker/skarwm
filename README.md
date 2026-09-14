@@ -105,7 +105,8 @@ Default interaction highlights:
 - `Super+,/.`: focus the previous/next monitor;
 - `Super+Shift+,/.`: move the focused window between monitors;
 - middle-click: maximize/restore a managed window within its usable work area;
-- `Super`+left-drag: move a floating window or reposition a tiled window;
+- `Super`+left-drag: move a floating window or reposition a tiled window; tiled
+  drags show one contextual edge overlay (translucent when a compositor runs);
 - `Super`+right-drag: resize a floating window.
 
 Tabbed mode affects only the focused column. Move windows into it with

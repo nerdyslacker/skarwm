@@ -295,14 +295,26 @@ Drop_Kind :: enum u8 {
     New_Column,  // horizontal column inserted at Insert_Index
 }
 
+Drop_Zone :: enum u8 {
+    None,
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+DROP_ZONE_HYSTERESIS  :: i32(12)
+
 Drop_Target :: struct {
     Kind: Drop_Kind,
+    Zone: Drop_Zone,
     Out: ^Output,
     Ws: ^Workspace,
     Col: ^Column,
     Insert_Index: int,
     Row_Index: int,
-    Geom: Rect,
+    Geom: Rect,    // visual/final directional target
+    HitGeom: Rect, // edge activation region
 }
 
 drop_focus_column :: proc(ws: ^Workspace, dragged: ^Client) -> ^Column {
@@ -323,9 +335,33 @@ drop_focus_column :: proc(ws: ^Workspace, dragged: ^Client) -> ^Column {
     return ws.Cols[0]
 }
 
+// drop_horizontal_column chooses the column a left/right drop is relative to.
+// A single-window column moves one position at a time toward that direction;
+// dragging a member out of a stack creates a column immediately beside its
+// source. Cross-workspace/output drops use the destination's focused column.
+drop_horizontal_column :: proc(ws: ^Workspace, dragged: ^Client, zone: Drop_Zone) -> ^Column {
+    if ws == nil || len(ws.Cols) == 0 { return nil }
+    if dragged != nil && dragged.Ws == ws && !dragged.Floating {
+        source_index, source, _ := column_of(ws, dragged)
+        if source != nil {
+            if len(source.Wins) > 1 { return source }
+            if zone == .Left && source_index > 0 { return ws.Cols[source_index - 1] }
+            if zone == .Right && source_index + 1 < len(ws.Cols) { return ws.Cols[source_index + 1] }
+            return source
+        }
+    }
+    return drop_focus_column(ws, dragged)
+}
+
+drop_column_index :: proc(ws: ^Workspace, wanted: ^Column) -> int {
+    if ws == nil || wanted == nil { return -1 }
+    for col, i in ws.Cols { if col == wanted { return i } }
+    return -1
+}
+
 // Drop_Targets creates exactly four targets per output, independent of its
-// window count. Top/bottom insert into the focused column at the corresponding
-// vertical edge; left/right create a horizontal column at the workspace edge.
+// window count. Top/bottom insert into the selected column at the corresponding
+// vertical edge; left/right create a column relative to a neighboring column.
 // On an empty output every target creates its first column.
 Drop_Targets :: proc(m: ^Manager, dragged: ^Client = nil) -> [dynamic]Drop_Target {
     if m == nil { return make([dynamic]Drop_Target, 0) }
@@ -336,44 +372,105 @@ Drop_Targets :: proc(m: ^Manager, dragged: ^Client = nil) -> [dynamic]Drop_Targe
         p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
         work := Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}
         if rect_empty(work) { continue }
-        // Cover the whole work area without cross-shaped dead space: a top
-        // band, a middle band split left/right, and a bottom band. Remainders
-        // go to the bottom/right zones so every pixel belongs to one target.
+        // Preserve the existing directional target geometry, but activate it
+        // only near the corresponding workarea edge. The center intentionally
+        // has no target so an ordinary drag does not display or apply a snap.
         top_h := max(i32(1), work.H / 3)
         middle_h := max(i32(1), work.H / 3)
         if top_h + middle_h >= work.H { middle_h = max(i32(0), work.H - top_h) }
         bottom_h := work.H - top_h - middle_h
-        left_w := max(i32(1), work.W / 2)
-        right_w := work.W - left_w
+        // Keep the four directional indicators visually balanced: horizontal
+        // side width matches the vertical top-zone height.
+        side_w := min(work.W, top_h)
         top := Rect{X = work.X, Y = work.Y, W = work.W, H = top_h}
-        left := Rect{X = work.X, Y = work.Y + top_h, W = left_w, H = middle_h}
-        right := Rect{X = work.X + left_w, Y = work.Y + top_h, W = right_w, H = middle_h}
+        left := Rect{X = work.X, Y = work.Y, W = side_w, H = work.H}
+        right := Rect{X = work.X + work.W - side_w, Y = work.Y, W = side_w, H = work.H}
         bottom := Rect{X = work.X, Y = work.Y + top_h + middle_h, W = work.W, H = bottom_h}
+        // Activation and visualization deliberately share the same rectangle:
+        // the overlay appears exactly as the drag crosses its inner boundary.
+        left_hit := left
+        right_hit := right
+        top_hit := top
+        bottom_hit := bottom
 
-        col := drop_focus_column(ws, dragged)
-        if col == nil {
-            empty_targets := [4]Rect{top, bottom, left, right}
-            for r in empty_targets {
-                append(&targets, Drop_Target{Kind = .New_Column, Out = o, Ws = ws, Insert_Index = 0, Geom = r})
-            }
+        vertical_col := drop_focus_column(ws, dragged)
+        if vertical_col == nil {
+            append(&targets, Drop_Target{Kind = .New_Column, Zone = .Left, Out = o, Ws = ws, Insert_Index = 0, Geom = left, HitGeom = left_hit})
+            append(&targets, Drop_Target{Kind = .New_Column, Zone = .Right, Out = o, Ws = ws, Insert_Index = 0, Geom = right, HitGeom = right_hit})
+            append(&targets, Drop_Target{Kind = .New_Column, Zone = .Top, Out = o, Ws = ws, Insert_Index = 0, Geom = top, HitGeom = top_hit})
+            append(&targets, Drop_Target{Kind = .New_Column, Zone = .Bottom, Out = o, Ws = ws, Insert_Index = 0, Geom = bottom, HitGeom = bottom_hit})
         } else {
-            append(&targets, Drop_Target{Kind = .Into_Column, Out = o, Ws = ws, Col = col, Row_Index = 0, Geom = top})
-            append(&targets, Drop_Target{Kind = .Into_Column, Out = o, Ws = ws, Col = col, Row_Index = len(col.Wins), Geom = bottom})
-            append(&targets, Drop_Target{Kind = .New_Column, Out = o, Ws = ws, Insert_Index = 0, Geom = left})
-            append(&targets, Drop_Target{Kind = .New_Column, Out = o, Ws = ws, Insert_Index = len(ws.Cols), Geom = right})
+            left_col := drop_horizontal_column(ws, dragged, .Left)
+            right_col := drop_horizontal_column(ws, dragged, .Right)
+            left_index := drop_column_index(ws, left_col)
+            right_index := drop_column_index(ws, right_col)
+            append(&targets, Drop_Target{Kind = .New_Column, Zone = .Left, Out = o, Ws = ws, Col = left_col, Insert_Index = max(0, left_index), Geom = left, HitGeom = left_hit})
+            append(&targets, Drop_Target{Kind = .New_Column, Zone = .Right, Out = o, Ws = ws, Col = right_col, Insert_Index = max(0, right_index + 1), Geom = right, HitGeom = right_hit})
+            append(&targets, Drop_Target{Kind = .Into_Column, Zone = .Top, Out = o, Ws = ws, Col = vertical_col, Row_Index = 0, Geom = top, HitGeom = top_hit})
+            append(&targets, Drop_Target{Kind = .Into_Column, Zone = .Bottom, Out = o, Ws = ws, Col = vertical_col, Row_Index = len(vertical_col.Wins), Geom = bottom, HitGeom = bottom_hit})
         }
     }
     return targets
 }
 
-Drop_Target_At_Point :: proc(m: ^Manager, x, y: i32, dragged: ^Client = nil) -> Drop_Target {
+drop_rect_contains :: proc(r: Rect, x, y: i32) -> bool {
+    return x >= r.X && x < r.X + r.W && y >= r.Y && y < r.Y + r.H
+}
+
+drop_hit_with_hysteresis :: proc(target: Drop_Target) -> Rect {
+    r := target.HitGeom
+    switch target.Zone {
+    case .Left:   r.W += DROP_ZONE_HYSTERESIS
+    case .Right:  r.X -= DROP_ZONE_HYSTERESIS; r.W += DROP_ZONE_HYSTERESIS
+    case .Top:    r.H += DROP_ZONE_HYSTERESIS
+    case .Bottom: r.Y -= DROP_ZONE_HYSTERESIS; r.H += DROP_ZONE_HYSTERESIS
+    case .None:
+    }
+    return r
+}
+
+drop_edge_distance :: proc(target: Drop_Target, x, y: i32) -> i32 {
+    switch target.Zone {
+    case .Left:   return x - target.HitGeom.X
+    case .Right:  return target.HitGeom.X + target.HitGeom.W - 1 - x
+    case .Top:    return y - target.HitGeom.Y
+    case .Bottom: return target.HitGeom.Y + target.HitGeom.H - 1 - y
+    case .None:   return max(i32)
+    }
+    return max(i32)
+}
+
+Drop_Target_At_Point :: proc(
+    m: ^Manager,
+    x, y: i32,
+    dragged: ^Client = nil,
+    current: Drop_Target = {},
+) -> Drop_Target {
     targets := Drop_Targets(m, dragged)
     defer delete(targets)
-    for target in targets {
-        r := target.Geom
-        if x >= r.X && x < r.X + r.W && y >= r.Y && y < r.Y + r.H { return target }
+
+    // Retain an active direction for a few extra pixels toward the center.
+    // A fresh target is returned so monitor/workarea and row metadata cannot
+    // become stale while a drag is in progress.
+    if current.Zone != .None {
+        for target in targets {
+            if target.Out == current.Out && target.Zone == current.Zone &&
+               drop_rect_contains(drop_hit_with_hysteresis(target), x, y) {
+                return target
+            }
+        }
     }
-    return {}
+
+    best := Drop_Target{}
+    best_distance := max(i32)
+    for target in targets {
+        if !drop_rect_contains(target.HitGeom, x, y) { continue }
+        distance := drop_edge_distance(target, x, y)
+        if distance < best_distance {
+            best, best_distance = target, distance
+        }
+    }
+    return best
 }
 
 // Compatibility helper for callers that specifically want a vertical target.

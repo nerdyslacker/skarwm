@@ -373,8 +373,8 @@ Move_Client_To_Column :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output, dst: ^Wo
 }
 
 // Move_Client_To_Drop applies a four-way tiled drop target. Top/bottom zones
-// insert at the corresponding end of the focused vertical stack; left/right
-// zones create a new horizontal column at the workspace edge.
+// insert at the corresponding end of the selected vertical stack; left/right
+// create a horizontal column before/after the selected neighboring column.
 Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool {
     if drop.Kind == .Into_Column {
         if m == nil || cl == nil || cl.Ws == nil || cl.Floating || cl.Fullscreen ||

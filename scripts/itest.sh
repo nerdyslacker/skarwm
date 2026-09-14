@@ -40,6 +40,7 @@ export SKARWM_SOCKET="${TMPDIR:-/tmp}/skarwm-itest.sock"
 # back to its built-in defaults, no matter what config lives in the real $HOME.
 XDGC="${TMPDIR:-/tmp}/skarwm_itest_xdg"
 export XDG_CONFIG_HOME="$XDGC"
+PICOM_PID=""
 
 say() { printf '%s\n' "$*"; }
 pass() { PASS=$((PASS+1)); say "PASS  $*"; }
@@ -62,6 +63,14 @@ geom_of() { xtops | awk -v id="$1" '$1==id{print $2; exit}'; }
 count_tiled() { xtops | awk '$2 ~ /^(1260|624|610|596)x/{n++} END{print n+0}'; }
 first_tiled_id() { xtops | awk '$2 ~ /^(1260|624|610|596)x/{print $1; exit}'; }
 unnamed_children() { xwininfo -root -tree 2>/dev/null | grep -c '(has no name)' || true; }
+unnamed_ids() { xwininfo -root -tree 2>/dev/null | awk '/\(has no name\)/{print $1}'; }
+mapped_unnamed_children() {
+  n=0
+  while read -r id; do
+    [ -n "$id" ] && xwininfo -id "$id" 2>/dev/null | grep -q 'Map State: IsViewable' && n=$((n+1))
+  done < <(unnamed_ids)
+  printf '%s\n' "$n"
+}
 
 # geosplit <WxH+X+Y> sets $gw $gh $gx $gy
 geosplit() {
@@ -107,7 +116,13 @@ die_display() {
   [ -f "$WM_LOG" ] && { say "--- WM log ---"; cat "$WM_LOG"; }
   exit 1
 }
-cleanup() { pkill -x skarwm 2>/dev/null; pkill -x xterm 2>/dev/null; pkill -x Xvnc 2>/dev/null; rm -f "$SKARWM_SOCKET"; }
+cleanup() {
+  if [ -n "$PICOM_PID" ]; then kill "$PICOM_PID" 2>/dev/null || true; PICOM_PID=""; fi
+  pkill -x skarwm 2>/dev/null
+  pkill -x xterm 2>/dev/null
+  pkill -x Xvnc 2>/dev/null
+  rm -f "$SKARWM_SOCKET"
+}
 trap cleanup EXIT
 
 # ---------------------------------------------------------------------------
@@ -168,19 +183,67 @@ wait_geom "$first" "1260x780+10+10" || fail "scroll back to maximized page"
 xdotool click 2 >/dev/null 2>&1
 if wait_for two_side_by_side; then pass "second middle click restores tiled geometry"; else fail "middle-click restore"; fi
 
-# ---- 2b. tiled Super+drag shows four zones and drops vertically --------------
+# ---- 2b. tiled Super+drag shows one contextual zone and drops vertically -----
 before_overlay=$(unnamed_children)
+before_overlay_mapped=$(mapped_unnamed_children)
 xdotool mousemove 950 400 keydown Super_L mousedown 1 >/dev/null 2>&1
 sleep 0.3
-xdotool mousemove 640 100 >/dev/null 2>&1
+if [ "$(unnamed_children)" -eq "$before_overlay" ] && [ "$(mapped_unnamed_children)" -eq "$before_overlay_mapped" ]; then
+  pass "tiled drag in center shows no drop overlay"
+else
+  fail "center drag unexpectedly showed an overlay"
+fi
+
+# Enter the left activation edge. Exactly one reusable five-window overlay is
+# created (one translucent fill + four border pieces), rather than four
+# directional outlines. Without a compositor the fill remains safely unmapped.
+# The workarea starts at x=8 and the side overlay is 261px wide, so x=268 is
+# its last pixel. This is deliberately much earlier than the old 72px trigger.
+xdotool mousemove 268 400 >/dev/null 2>&1
 sleep 0.3
 during_overlay=$(unnamed_children)
-if [ $((during_overlay - before_overlay)) -eq 16 ]; then pass "tiled drag shows exactly four drop-zone outlines"; else fail "fixed four-way drop-zone overlay"; fi
+active_overlay_mapped=$(mapped_unnamed_children)
+if [ $((during_overlay - before_overlay)) -eq 5 ] && [ $((active_overlay_mapped - before_overlay_mapped)) -eq 4 ]; then
+  pass "left edge shows one outline and safely omits fill without compositor"
+else
+  fail "single active overlay fallback"
+fi
+opacity_windows=0
+for id in $(unnamed_ids); do
+  xprop -id "$id" _NET_WM_WINDOW_OPACITY 2>/dev/null | grep -q '= ' && opacity_windows=$((opacity_windows+1))
+done
+if [ "$opacity_windows" -eq 1 ]; then pass "overlay fill publishes compositor opacity"; else fail "overlay fill opacity property"; fi
+
+# Start a compositor when available; the next direction update should add the
+# translucent fill without recreating the overlay.
+if command -v picom >/dev/null 2>&1; then
+  picom --config /dev/null --backend xrender --no-vsync >/tmp/picom_itest.log 2>&1 &
+  PICOM_PID=$!
+  sleep 0.8
+fi
+
+# Leaving the threshold hides the overlay; changing direction reuses the same
+# windows rather than destroying/recreating them.
+xdotool mousemove 640 400 >/dev/null 2>&1; sleep 0.3
+if [ "$(mapped_unnamed_children)" -eq "$before_overlay_mapped" ]; then pass "leaving edge hides active overlay"; else fail "overlay hide in center"; fi
+xdotool mousemove 1260 400 >/dev/null 2>&1; sleep 0.3
+if [ "$(unnamed_children)" -eq "$during_overlay" ] && [ $(( $(mapped_unnamed_children) - before_overlay_mapped )) -ge 4 ]; then
+  pass "switching direction reuses the active overlay"
+else
+  fail "overlay reuse across directions"
+fi
+if [ -n "$PICOM_PID" ] && kill -0 "$PICOM_PID" 2>/dev/null; then
+  if [ $(( $(mapped_unnamed_children) - before_overlay_mapped )) -eq 5 ]; then pass "compositor maps translucent overlay fill"; else fail "compositor-backed overlay fill"; fi
+fi
+
+# Finish in the top activation edge and retain the existing vertical drop.
+xdotool mousemove 640 20 >/dev/null 2>&1
+sleep 0.3
 xdotool mouseup 1 keyup Super_L >/dev/null 2>&1
 if wait_for stack_of_two; then pass "tiled drag top zone stacks vertically"; else fail "tiled drag vertical drop"; fi
 sleep 0.3
-after_overlay=$(unnamed_children)
-if [ "$after_overlay" -le "$before_overlay" ]; then pass "drop-zone overlays close after drop"; else fail "drop-zone overlay cleanup"; fi
+after_overlay_mapped=$(mapped_unnamed_children)
+if [ "$after_overlay_mapped" -eq "$before_overlay_mapped" ]; then pass "drop hides the reusable overlay"; else fail "drop-zone overlay cleanup"; fi
 
 # Toggle to tabbed and back to split the test stack into two horizontal columns,
 # restoring the fixture expected by the keyboard movement checks below.

@@ -44,6 +44,7 @@ main :: proc() {
     test_focus_direction()
     test_move_dir()
     test_pointer_column_move()
+    test_relative_column_drop()
     test_unmanage()
     test_floating()
     test_fullscreen()
@@ -329,8 +330,12 @@ test_pointer_column_move :: proc() {
     c.Focus_Client(m, target)
     c.Arrange_All(m)
 
+    center := c.Drop_Target_At_Point(m, right.Geom.X + right.Geom.W / 2, right.Geom.Y + right.Geom.H / 2)
+    eq(center.Kind, c.Drop_Kind.None, "drag center has no active drop zone")
+
     vertical := c.Drop_Target_At_Point(m, right.Geom.X + right.Geom.W / 2, right.Geom.Y + 10)
     eq(vertical.Kind, c.Drop_Kind.Into_Column, "top chooser selects vertical drop")
+    eq(vertical.Zone, c.Drop_Zone.Top, "top edge reports one explicit direction")
     eq(vertical.Out, right, "drop hit resolves destination output")
     eq(vertical.Ws, right.Current, "drop hit resolves visible destination workspace")
     ok(vertical.Col != nil, "drop hit resolves destination column")
@@ -348,15 +353,49 @@ test_pointer_column_move :: proc() {
 
     c.Arrange_All(m)
     bottom := c.Drop_Target_At_Point(m, right.Geom.X + right.Geom.W / 2, right.Geom.Y + right.Geom.H - 10)
+    eq(bottom.Zone, c.Drop_Zone.Bottom, "bottom edge reports one explicit direction")
     ok(c.Move_Client_To_Drop(m, moving, bottom), "bottom chooser reorders within the vertical column")
     eq(vertical.Col.Wins[len(vertical.Col.Wins) - 1], moving, "bottom drop inserts client below destination windows")
 
     horizontal := c.Drop_Target_At_Point(m, right.Geom.X + 10, right.Geom.Y + right.Geom.H / 2)
     eq(horizontal.Kind, c.Drop_Kind.New_Column, "left chooser selects horizontal drop")
+    eq(horizontal.Zone, c.Drop_Zone.Left, "left edge reports one explicit direction")
+    eq(horizontal.Geom, c.Rect{X = 1288, Y = 8, W = 261, H = 784}, "left width matches top height and spans the workarea")
+    eq(horizontal.Geom.W, vertical.Geom.H, "side overlay width equals top overlay height")
+    at_overlay_border := c.Drop_Target_At_Point(
+        m, horizontal.Geom.X + horizontal.Geom.W - 1, right.Geom.Y + right.Geom.H / 2,
+    )
+    eq(at_overlay_border.Zone, c.Drop_Zone.Left, "overlay activates through its inner boundary pixel")
+    past_overlay_border := c.Drop_Target_At_Point(
+        m, horizontal.Geom.X + horizontal.Geom.W, right.Geom.Y + right.Geom.H / 2,
+    )
+    eq(past_overlay_border.Kind, c.Drop_Kind.None, "fresh drag position outside overlay boundary stays inactive")
+    no_sticky := c.Drop_Target_At_Point(
+        m, horizontal.Geom.X + horizontal.Geom.W + 6, right.Geom.Y + right.Geom.H / 2,
+    )
+    eq(no_sticky.Kind, c.Drop_Kind.None, "pointer beyond enter threshold has no fresh target")
+    sticky := c.Drop_Target_At_Point(
+        m, horizontal.Geom.X + horizontal.Geom.W + 6, right.Geom.Y + right.Geom.H / 2,
+        nil, horizontal,
+    )
+    eq(sticky.Zone, c.Drop_Zone.Left, "active zone remains stable inside hysteresis margin")
+    released := c.Drop_Target_At_Point(
+        m, horizontal.Geom.X + horizontal.Geom.W + c.DROP_ZONE_HYSTERESIS + 1,
+        right.Geom.Y + right.Geom.H / 2, nil, horizontal,
+    )
+    eq(released.Kind, c.Drop_Kind.None, "active zone releases beyond hysteresis margin")
     ok(c.Move_Client_To_Drop(m, moving, horizontal), "tiled client creates a horizontal column on the same output")
     eq(len(right.Current.Cols), 3, "horizontal drop adds a destination column")
     eq(len(right.Current.Cols[0].Wins), 1, "new horizontal column contains only dropped client")
     eq(right.Current.Cols[0].Wins[0], moving, "horizontal column inserted at left edge")
+
+    right_edge := c.Drop_Target_At_Point(
+        m, right.Geom.X + right.Geom.W - 10, right.Geom.Y + right.Geom.H / 2, moving,
+    )
+    eq(right_edge.Zone, c.Drop_Zone.Right, "right edge reports one explicit direction")
+    eq(right_edge.Geom, c.Rect{X = 2291, Y = 8, W = 261, H = 784}, "right width matches top height and spans the workarea")
+    ok(c.Move_Client_To_Drop(m, moving, right_edge), "right chooser reorders the tiled client")
+    eq(right.Current.Cols[1].Wins[0], moving, "right drop moves client immediately after its neighboring column")
 
     empty_drop := c.Drop_Target_At_Point(m, empty.Geom.X + 10, empty.Geom.Y + empty.Geom.H / 2)
     eq(empty_drop.Kind, c.Drop_Kind.New_Column, "empty output exposes a first-column target")
@@ -374,6 +413,34 @@ test_pointer_column_move :: proc() {
     eq(floater.Ws, right.Current, "floating drag changes workspace ownership")
     eq(floater.FloatingRect.X, 1400, "floating drag preserves root-coordinate position")
     eq(c.Active_Output(m), right, "focus follows cross-output floating drag")
+}
+
+test_relative_column_drop :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    a := add_tiled(m, 100)
+    b := add_tiled(m, 101)
+    d := add_tiled(m, 102)
+    c.Arrange_All(m)
+    _, b_col, _ := c.Column_Of(b)
+
+    left := c.Drop_Target_At_Point(m, 10, 540, d)
+    eq(left.Zone, c.Drop_Zone.Left, "third column finds a relative left drop")
+    eq(left.Col, b_col, "relative left drop targets the immediately preceding column")
+    eq(left.Insert_Index, 1, "relative left drop inserts before the preceding target")
+    ok(c.Move_Client_To_Drop(m, d, left), "third column can move between the first two")
+    eq(ws.Cols[0].Wins[0], a, "first column stays first after relative drop")
+    eq(ws.Cols[1].Wins[0], d, "dragged third column becomes the middle column")
+    eq(ws.Cols[2].Wins[0], b, "former middle column shifts right")
+
+    right := c.Drop_Target_At_Point(m, 1910, 540, d)
+    eq(right.Col, b_col, "relative right drop targets the immediately following column")
+    ok(c.Move_Client_To_Drop(m, d, right), "middle column can move right again")
+    eq(ws.Cols[0].Wins[0], a, "first column remains stable after right drop")
+    eq(ws.Cols[1].Wins[0], b, "following column shifts into the middle")
+    eq(ws.Cols[2].Wins[0], d, "dragged column moves immediately after its neighbor")
 }
 
 // ----------------------------------------------------------------------------
@@ -1077,6 +1144,13 @@ test_dock_geometry_and_struts :: proc() {
     eq(a.Geom, c.Rect { X = 10, Y = 34, W = 1900, H = 1008 }, "bottom strut keeps the outer gap too")
     eq(bdock.Geom, c.Rect { X = 0, Y = 1052, W = 1920, H = 28 }, "bottom dock sits at its rect")
     eq(o.Reserved, c.Insets { Top = 24, Bottom = 28 }, "per-side max across docks")
+    drop_targets := c.Drop_Targets(m)
+    eq(len(drop_targets), 4, "dock workarea still exposes four directional targets")
+    for target in drop_targets {
+        ok(target.HitGeom.Y >= 32 && target.HitGeom.Y + target.HitGeom.H <= 1044,
+           "drop activation remains inside top/bottom struts")
+    }
+    delete(drop_targets)
 
     // a dock without client geometry defaults to a 24 px top strip
     naked := add_dock(m, 302, c.Insets {}, c.Rect {})
