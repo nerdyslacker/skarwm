@@ -104,6 +104,50 @@ column_width :: proc(p: Layout_Params, col: ^Column) -> i32 {
     return p.ColW
 }
 
+workspace_has_custom_widths :: proc(ws: ^Workspace) -> bool {
+    if ws == nil { return false }
+    for col in ws.Cols { if col.Width > 0 { return true } }
+    return false
+}
+
+// custom_partial_columns reports full-size custom columns whose natural strip
+// geometry already crosses a work-area edge. Those intersections are the best
+// previews: no column needs to be scaled or relocated.
+custom_partial_columns :: proc(ws: ^Workspace, p: Layout_Params) -> (left, right: int) {
+    left, right = -1, -1
+    if ws == nil { return }
+    work_right := p.WorkX + p.WorkW
+    for col, ci in ws.Cols {
+        x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, ci)
+        w := column_width(p, col)
+        if x < p.WorkX && x + w > p.WorkX { left = ci }
+        if right < 0 && x < work_right && x + w > work_right { right = ci }
+    }
+    return
+}
+
+// If a custom-width strip naturally intersects one edge but leaves the next
+// column just outside the opposite edge, shift the viewport enough to expose a
+// real preview plus its normal gap. This preserves full column widths and
+// avoids placing a synthetic preview over an already visible window.
+expose_missing_custom_preview :: proc(ws: ^Workspace, p: Layout_Params) {
+    if ws == nil || !workspace_has_custom_widths(ws) { return }
+    partial_left, partial_right := custom_partial_columns(ws, p)
+    hidden_left, hidden_right := scroll_preview_columns(ws, p)
+    next := ws.ViewportX
+    if partial_left >= 0 && partial_right < 0 && hidden_right >= 0 {
+        hidden_x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, hidden_right)
+        desired_x := p.WorkX + p.WorkW - SCROLL_PREVIEW_WIDTH
+        if hidden_x > desired_x { next += hidden_x - desired_x }
+    } else if partial_right >= 0 && partial_left < 0 && hidden_left >= 0 {
+        hidden_x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, hidden_left)
+        hidden_right_x := hidden_x + column_width(p, ws.Cols[hidden_left])
+        desired_right := p.WorkX + SCROLL_PREVIEW_WIDTH
+        if hidden_right_x < desired_right { next -= desired_right - hidden_right_x }
+    }
+    ws.ViewportX = clamp_workspace_viewport(next, ws, p)
+}
+
 Column_Width_At :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, index: int) -> i32 {
     if m == nil || o == nil || ws == nil || index < 0 || index >= len(ws.Cols) { return 0 }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
@@ -238,6 +282,46 @@ Scroll_Previews :: proc(m: ^Manager, o: ^Output) -> [dynamic]Scroll_Preview {
     if m == nil || o == nil || o.Current == nil { return result }
     ws := o.Current
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+    partial_left, partial_right := custom_partial_columns(ws, p)
+    if workspace_has_custom_widths(ws) && (partial_left >= 0 || partial_right >= 0) {
+        hidden_left, hidden_right := scroll_preview_columns(ws, p)
+        work_right := p.WorkX + p.WorkW
+        indices := [2]int{
+            partial_left if partial_left >= 0 else hidden_left,
+            partial_right if partial_right >= 0 else hidden_right,
+        }
+        for ci, edge in indices {
+            if ci < 0 { continue }
+            if edge == 1 && ci == indices[0] { continue }
+            col := ws.Cols[ci]
+            col_left := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, ci)
+            col_right := col_left + column_width(p, col)
+            side := Scroll_Preview_Side.Left if edge == 0 else .Right
+            zone_x, zone_w := i32(0), i32(0)
+            if edge == 0 && partial_left >= 0 {
+                zone_x = p.WorkX
+                zone_w = min(SCROLL_PREVIEW_WIDTH, col_right - p.WorkX)
+            } else if edge == 1 && partial_right >= 0 {
+                zone_w = min(SCROLL_PREVIEW_WIDTH, work_right - col_left)
+                zone_x = work_right - zone_w
+            } else {
+                zone_w = min(SCROLL_PREVIEW_WIDTH, column_width(p, col))
+                zone_x = p.WorkX if edge == 0 else work_right - zone_w
+            }
+            if zone_w <= 0 { continue }
+            for cl in col.Wins {
+                if cl.Geom.X <= HIDE_X { continue }
+                top := max(p.WorkY, cl.Geom.Y - cl.Border)
+                bottom := min(p.WorkY + p.WorkH, cl.Geom.Y + cl.Geom.H + cl.Border)
+                if bottom <= top { continue }
+                append(&result, Scroll_Preview{
+                    Side = side, Client = cl,
+                    Geom = Rect{X = zone_x, Y = top, W = zone_w, H = bottom - top},
+                })
+            }
+        }
+        return result
+    }
     left, right := scroll_preview_columns(ws, p)
     indices := [2]int{left, right}
     for ci in indices {
@@ -293,7 +377,11 @@ Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) ->
     col_w := column_width(p, ws.Cols[col_index])
     x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, col_index)
     preview_left, preview_right := scroll_preview_columns(ws, p)
-    if (preview_left >= 0 || preview_right >= 0) && !column_has_maximized(ws.Cols[col_index]) {
+    custom_partial_left, custom_partial_right := custom_partial_columns(ws, p)
+    contiguous_custom := workspace_has_custom_widths(ws) &&
+        (custom_partial_left >= 0 || custom_partial_right >= 0)
+    if !contiguous_custom &&
+       (preview_left >= 0 || preview_right >= 0) && !column_has_maximized(ws.Cols[col_index]) {
         if rendered_x, rendered_w, visible := scroll_normal_col_rect(ws, p, col_index); visible {
             x, col_w = rendered_x, rendered_w
         }
@@ -575,6 +663,12 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
     }
 
     // Active workspace.
+    // Structural changes can shorten the strip while retaining its old
+    // viewport. Pull the complete strip back against the nearest edge so a
+    // hidden neighbor fills any newly exposed space without changing width.
+    ws.ViewportX = clamp_workspace_viewport(ws.ViewportX, ws, p)
+    expose_missing_custom_preview(ws, p)
+
     // 1) fullscreen cover
     if ws.Focus != nil && ws.Focus.Fullscreen && find_client_in_ws(ws, ws.Focus.Xid) != nil {
         fs := ws.Focus
@@ -596,7 +690,15 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
     if n_cols > 0 && p.ColW > 0 && p.WorkH > 0 {
         base_x := p.WorkX - ws.ViewportX
         hide := Rect { X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H }
-        preview_left, preview_right := scroll_preview_columns(ws, p)
+        custom_widths := workspace_has_custom_widths(ws)
+        custom_partial_left, custom_partial_right := custom_partial_columns(ws, p)
+        contiguous_custom := custom_widths &&
+            (custom_partial_left >= 0 || custom_partial_right >= 0)
+        preview_left, preview_right := -1, -1
+        hidden_left, hidden_right := scroll_preview_columns(ws, p)
+        if !contiguous_custom {
+            preview_left, preview_right = hidden_left, hidden_right
+        }
         for ci in 0 ..< n_cols {
             col := ws.Cols[ci]
             nw := len(col.Wins)
@@ -604,7 +706,18 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             col_w := column_width(p, col)
             col_left := base_x + workspace_col_left(ws, p, ci)
             is_preview := ci == preview_left || ci == preview_right
-            if ci == preview_left {
+            if contiguous_custom {
+                // Keep the resized strip contiguous. Intersecting columns stay
+                // at full size and the root/output edge reveals only the part
+                // that actually fits in the available area.
+                if col_left + col_w <= p.WorkX || col_left >= p.WorkX + p.WorkW {
+                    for cl in col.Wins {
+                        cl.Geom = hide
+                        cl.Border = p.Border
+                    }
+                    continue
+                }
+            } else if ci == preview_left {
                 col_left = p.WorkX + min(SCROLL_PREVIEW_WIDTH, col_w) - col_w
             } else if ci == preview_right {
                 col_left = p.WorkX + p.WorkW - min(SCROLL_PREVIEW_WIDTH, col_w)
@@ -644,7 +757,8 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             // RandR outputs share one root window, so a normal column outside
             // this output would otherwise remain visible on a neighbouring one.
             // Park normal columns unless their complete tile belongs to this page.
-            if !is_preview && (col_left < p.WorkX || col_left + col_w > p.WorkX + p.WorkW) {
+            if !contiguous_custom && !is_preview &&
+               (col_left < p.WorkX || col_left + col_w > p.WorkX + p.WorkW) {
                 for cl in col.Wins {
                     cl.Geom = hide
                     cl.Border = p.Border

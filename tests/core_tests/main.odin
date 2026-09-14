@@ -219,11 +219,18 @@ test_resize_math :: proc() {
     id := add_tiled(inserted, 313)
     c.Ensure_Active_Focus_Visible(inserted)
     c.Arrange_All(inserted)
-    // The old left column remains as the real edge preview; the resized focus
-    // and its complementary newcomer occupy the remaining page without partial
-    // columns or an oversized default insertion.
-    eq(ib.Geom, c.Rect{X = 38, Y = 10, W = 1174, H = 1060}, "resized focused column remains visible after insertion")
-    eq(id.Geom, c.Rect{X = 1224, Y = 10, W = 686, H = 1060}, "new column receives complementary page width")
+    // With no natural edge intersection, reserve the narrow hover preview and
+    // fit the visible page between it. When spare space exists elsewhere, the
+    // contiguous custom-width path below keeps all widths unchanged instead.
+    eq(ib.Geom, c.Rect{X = 38, Y = 10, W = 1174, H = 1060}, "resized page reserves its hidden-neighbor preview")
+    eq(id.Geom, c.Rect{X = 1224, Y = 10, W = 686, H = 1060}, "new column keeps the normal gap inside the reserved page")
+    inserted_previews := c.Scroll_Previews(inserted, c.Active_Output(inserted))
+    eq(len(inserted_previews), 1, "fully hidden neighbor retains a hover preview after resizing")
+    if len(inserted_previews) == 1 {
+        eq(inserted_previews[0].Client, ia, "resized page preview targets the hidden neighboring window")
+        eq(inserted_previews[0].Side, c.Scroll_Preview_Side.Left, "hidden neighbor is exposed on the correct edge")
+    }
+    delete(inserted_previews)
 
     reordered := mk_man()
     defer c.Destroy_Manager(reordered)
@@ -277,18 +284,48 @@ test_resize_math :: proc() {
     ca := add_tiled(close_after_resize, 351)
     cb := add_tiled(close_after_resize, 352)
     cc := add_tiled(close_after_resize, 353)
+    cd := add_tiled(close_after_resize, 354)
     cws := c.Current_WS(close_after_resize)
     cws.Cols[0].Width = 700
     cws.Cols[1].Width = 1196
     c.Unmanage_Client(close_after_resize, cb)
+    cws.ViewportX = 0
+    c.Arrange_All(close_after_resize)
+    eq(cws.Cols[0].Width, i32(700), "closing a column does not resize a visible survivor")
+    eq(cws.Cols[1].Width, i32(0), "closing a column does not resize a hidden survivor")
+    eq(cws.Cols[2].Width, i32(0), "later hidden columns retain their natural width")
+    first_gap := (cc.Geom.X - cc.Border) - (ca.Geom.X + ca.Geom.W + ca.Border)
+    next_gap := (cd.Geom.X - cd.Border) - (cc.Geom.X + cc.Geom.W + cc.Border)
+    eq(first_gap, close_after_resize.Cfg.InnerGap,
+       "surviving column moves directly beside the resized column")
+    eq(next_gap, close_after_resize.Cfg.InnerGap,
+       "partially visible next column continues with the normal gap")
+    ok(cd.Geom.X < 1920 && cd.Geom.X + cd.Geom.W > 1920,
+       "next hidden column fills the remaining area without being resized")
+    custom_previews := c.Scroll_Previews(close_after_resize, c.Active_Output(close_after_resize))
+    eq(len(custom_previews), 1, "partially visible custom-width neighbor remains hoverable")
+    if len(custom_previews) == 1 {
+        eq(custom_previews[0].Client, cd, "custom-width preview targets the real intersecting window")
+        eq(custom_previews[0].Side, c.Scroll_Preview_Side.Right, "custom-width continuation uses the right edge")
+    }
+    delete(custom_previews)
+
+    cws.ViewportX = 9999
+    c.Arrange_All(close_after_resize)
     co := c.Active_Output(close_after_resize)
     cwork_w := co.Geom.W - 2 * close_after_resize.Cfg.OuterGap - co.Reserved.Left - co.Reserved.Right
-    eq(cws.Cols[0].Width + close_after_resize.Cfg.InnerGap + cws.Cols[1].Width,
-       cwork_w, "closing a resized column rebalances the survivors to one exact page")
-    ok(cws.Cols[0].Width < cws.Cols[1].Width,
-       "column rebalance retains the prior resized proportion")
+    content_w := c.Column_Width_At(close_after_resize, co, cws, 0) +
+        c.Column_Width_At(close_after_resize, co, cws, 1) +
+        c.Column_Width_At(close_after_resize, co, cws, 2) +
+        2 * close_after_resize.Cfg.InnerGap
+    eq(cws.ViewportX, content_w - cwork_w,
+       "stale viewport clamps so the strip cannot leave empty space at the right")
+    eq(cd.Geom.X + cd.Geom.W + cd.Border,
+       co.Geom.X + co.Geom.W - close_after_resize.Cfg.OuterGap - co.Reserved.Right,
+       "last unchanged column is pulled flush to the work-area edge")
     _ = ca
     _ = cc
+    _ = cd
 
     rows_after_resize := mk_man()
     defer c.Destroy_Manager(rows_after_resize)
@@ -325,6 +362,38 @@ test_resize_math :: proc() {
     remaining_gap := (vb.Geom.Y - vb.Border) - (va.Geom.Y + va.Geom.H + va.Border)
     eq(remaining_gap, rows_after_resize.Cfg.InnerGap,
        "rows retain the normal gap after closing a resized neighbor")
+
+    vertical_preview := mk_man()
+    defer c.Destroy_Manager(vertical_preview)
+    c.Activate_WS(vertical_preview, c.Ensure_WS(vertical_preview, 1))
+    pa := add_tiled(vertical_preview, 371)
+    pb := add_tiled(vertical_preview, 372)
+    pc := add_tiled(vertical_preview, 373)
+    pd := add_tiled(vertical_preview, 374)
+    pe := add_tiled(vertical_preview, 375)
+    pws := c.Current_WS(vertical_preview)
+    for col in pws.Cols { col.Width = 700 }
+    ok(c.Move_Client_To_Drop(vertical_preview, pd, c.Drop_Target{
+        Kind = .Into_Column, Out = pd.Out, Ws = pws, Col = pws.Cols[2], Row_Index = 1,
+    }), "vertical preview fixture creates a middle stack")
+    ok(c.Move_Dir(vertical_preview, .Up), "middle stack can be reordered vertically")
+    c.Ensure_Active_Focus_Visible(vertical_preview)
+    c.Arrange_All(vertical_preview)
+    mixed_previews := c.Scroll_Previews(vertical_preview, c.Active_Output(vertical_preview))
+    saw_left, saw_right := false, false
+    for preview in mixed_previews {
+        if preview.Side == .Left && preview.Client == pa { saw_left = true }
+        if preview.Side == .Right && preview.Client == pe { saw_right = true }
+    }
+    ok(saw_left, "vertical reorder retains the natural partial preview")
+    ok(saw_right, "vertical reorder reveals the previously hidden opposite preview")
+    left_preview_gap := (pb.Geom.X - pb.Border) - (pa.Geom.X + pa.Geom.W + pa.Border)
+    right_preview_gap := (pe.Geom.X - pe.Border) - (pc.Geom.X + pc.Geom.W + pc.Border)
+    eq(left_preview_gap, vertical_preview.Cfg.InnerGap,
+       "left preview remains a contiguous neighbor instead of overlapping")
+    eq(right_preview_gap, vertical_preview.Cfg.InnerGap,
+       "right preview remains a contiguous neighbor instead of overlapping")
+    delete(mixed_previews)
 }
 
 // ----------------------------------------------------------------------------
