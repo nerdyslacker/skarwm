@@ -38,6 +38,7 @@ Ipc_Type :: enum u32 {
     Event_Workspace = 0x80000000,
     Event_Output    = 0x80000001,
     Event_Window    = 0x80000003,
+    Event_Ui        = 0x80000100,
 }
 
 // The workspace-event "change" values skarwm emits (i3 semantics).
@@ -66,6 +67,7 @@ Ipc_Action :: enum {
     Scratchpad_Target_AppId, Scratchpad_Target_Class,
     Scratchpad_Target_Instance, Scratchpad_Target_Title,
     Show_Bindings,
+    Reminder_Add,
     Focus_Output_Next, Focus_Output_Prev,
     Move_To_Output_Next, Move_To_Output_Prev,
     Close, Reload, Quit,
@@ -515,15 +517,16 @@ ipc_command_reply_payload :: proc(success: bool, err: string) -> []byte {
 // event names. Any name is accepted (i3 replies success to unknown names too;
 // skarwm simply never emits the events behind them). Returns which of the two
 // event kinds skarwm does emit — workspace / output — were requested, and ok
-// = false for malformed payloads (non-array, unquoted tokens, trailing junk).
-ipc_parse_subscribe :: proc(data: []byte) -> (workspace: bool, output: bool, window: bool, ok: bool) {
+// event kinds skarwm emits were requested, and ok = false for malformed
+// payloads (non-array, unquoted tokens, trailing junk).
+ipc_parse_subscribe :: proc(data: []byte) -> (workspace: bool, output: bool, window: bool, ui: bool, ok: bool) {
     n := len(data)
     p := 0
     for p < n && is_json_ws(data[p]) { p += 1 }
-    if p >= n || data[p] != '[' { return false, false, false, false }
+    if p >= n || data[p] != '[' { return false, false, false, false, false }
     p += 1
 
-    ws, out, win := false, false, false
+    ws, out, win, shell_ui := false, false, false, false
     expecting_name := true
     seen_name := false
     after_comma := false
@@ -532,20 +535,20 @@ ipc_parse_subscribe :: proc(data: []byte) -> (workspace: bool, output: bool, win
         if expecting_name {
             if is_json_ws(c) { p += 1; continue }
             if c == ']' { // only valid for the genuinely empty list
-                if seen_name || after_comma { return false, false, false, false }
+                if seen_name || after_comma { return false, false, false, false, false }
                 p += 1
                 for p < n && is_json_ws(data[p]) { p += 1 }
-                if p != n { return false, false, false, false }
-                return ws, out, win, true
+                if p != n { return false, false, false, false, false }
+                return ws, out, win, shell_ui, true
             }
-            if c != '"' { return false, false, false, false }
+            if c != '"' { return false, false, false, false, false }
             p += 1
             start := p
             for p < n && data[p] != '"' {
                 if data[p] == '\\' && p + 1 < n { p += 1 }
                 p += 1
             }
-            if p >= n { return false, false, false, false } // unterminated string
+            if p >= n { return false, false, false, false, false } // unterminated string
             name := string(data[start:p])
             seen_name = true
             after_comma = false
@@ -554,6 +557,7 @@ ipc_parse_subscribe :: proc(data: []byte) -> (workspace: bool, output: bool, win
             case "workspace": ws = true
             case "output":    out = true
             case "window":    win = true
+            case "ui":        shell_ui = true
             }
             expecting_name = false
         } else {
@@ -562,13 +566,13 @@ ipc_parse_subscribe :: proc(data: []byte) -> (workspace: bool, output: bool, win
             if c == ']' {
                 p += 1
                 for p < n && is_json_ws(data[p]) { p += 1 }
-                if p != n { return false, false, false, false }
-                return ws, out, win, true
+                if p != n { return false, false, false, false, false }
+                return ws, out, win, shell_ui, true
             }
-            return false, false, false, false
+            return false, false, false, false, false
         }
     }
-    return false, false, false, false // never closed
+    return false, false, false, false, false // never closed
 }
 
 // ipc_parse_command parses the compact command language shared by RUN_COMMAND
@@ -675,6 +679,30 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
         }
         if valid { return Ipc_Command{action = .Set_Gaps, arg = value}, "", true }
         return {}, strings.clone("gaps: expected a value from 0 to 100"), false
+    }
+
+    if len(tokens) >= 4 && tokens[0] == "reminder" && tokens[1] == "add" {
+        minutes := 0
+        valid := len(tokens[2]) > 0
+        for ch in tokens[2] {
+            if ch < '0' || ch > '9' { valid = false; break }
+            minutes = minutes * 10 + int(ch - '0')
+            if minutes > 525600 { valid = false; break }
+        }
+        if !valid || minutes < 1 {
+            return {}, strings.clone("reminder add: minutes must be from 1 to 525600"), false
+        }
+        message_start := starts[3]
+        message_end := n
+        for message_end > message_start && is_json_ws(data[message_end - 1]) { message_end -= 1 }
+        if message_end <= message_start {
+            return {}, strings.clone("reminder add: message cannot be empty"), false
+        }
+        return Ipc_Command{
+            action = .Reminder_Add,
+            arg = minutes,
+            text = string(data[message_start:message_end]),
+        }, "", true
     }
 
     if len(tokens) == 3 && tokens[0] == "scratchpad" {

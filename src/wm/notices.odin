@@ -44,14 +44,23 @@ notice_battery_text :: proc() -> string {
     return strings.clone("Battery status unavailable")
 }
 
+notice_show :: proc(text: string, persistent: bool) {
+    if ipc_notice_event(text, persistent) { return }
+    if persistent {
+        ui.Show_Persistent_Notice(&g_wm.ui, g_wm.m, text)
+    } else {
+        ui.Show_Notice(&g_wm.ui, g_wm.m, text)
+    }
+}
+
 show_date_time_notice :: proc() {
     text := notice_date_time_text()
     defer delete(text)
-    ui.Show_Notice(&g_wm.ui, g_wm.m, text)
+    notice_show(text, false)
 }
 
 show_battery_notice :: proc() {
     text := notice_battery_text()
     defer delete(text)
-    ui.Show_Notice(&g_wm.ui, g_wm.m, text)
+    notice_show(text, false)
 }

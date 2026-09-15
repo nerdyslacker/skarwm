@@ -17,7 +17,7 @@ HELP_LINE_H   :: i32(18)
 HELP_COL_MIN  :: i32(260)
 HELP_COL_WANT :: i32(330)
 
-binding_description :: proc(b: ^input.Binding) -> string {
+Binding_Description :: proc(b: ^input.Binding) -> string {
     switch b.action {
     case .Spawn:               return fmt.aprintf("launch %s", b.cmd)
     case .Focus_Left:          return fmt.aprintf("focus left")
@@ -70,7 +70,7 @@ binding_description :: proc(b: ^input.Binding) -> string {
 binding_lines :: proc(bindings: []input.Binding) -> [dynamic]string {
     lines := make([dynamic]string, 0, len(bindings) + 4)
     for &b in bindings {
-        description := binding_description(&b)
+        description := Binding_Description(&b)
         append(&lines, fmt.aprintf("%s  -  %s", b.combo, description))
         delete(description)
     }
