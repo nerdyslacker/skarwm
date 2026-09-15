@@ -362,6 +362,12 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
          "notice_datetime":  base.action = .Show_Date_Time;    return base, ""
     case "show_battery",
          "notice_battery":   base.action = .Show_Battery;      return base, ""
+    case "reminder_new",
+         "set_reminder":     base.action = .Reminder_New;      return base, ""
+    case "reminder_show_all",
+         "show_reminders":   base.action = .Reminder_Show_All; return base, ""
+    case "reminder_clear_all",
+         "clear_reminders":  base.action = .Reminder_Clear_All; return base, ""
     case "close_window",
          "close":            base.action = .Close;             return base, ""
     case "reload_config",
@@ -836,6 +842,7 @@ cfg_apply :: proc(r: ^Config_Result, label: string) {
     g_wm.primary_mod = r.primary_mod
 
     ui.Hide_Help(&g_wm.ui)
+    reminder_dialog_end()
     release_bindings(&g_wm.bindings)
     g_wm.bindings = r.bindings
     r.bindings = {}
@@ -958,6 +965,9 @@ cfg_apply_default :: proc() {
     add_bind_def(sc, "Mod4+Control+Alt+h", "show_bindings", "")
     add_bind_def(sc, "Mod4+Control+Alt+t", "show_datetime", "")
     add_bind_def(sc, "Mod4+Control+Alt+b", "show_battery", "")
+    add_bind_def(sc, "Mod4+Control+r", "reminder_new", "")
+    add_bind_def(sc, "Mod4+Control+Alt+r", "reminder_show_all", "")
+    add_bind_def(sc, "Mod4+Control+Shift+r", "reminder_clear_all", "")
     add_bind_def(sc, "Mod4+grave", "scratchpad_toggle", "", 1)
     add_bind_def(sc, "Mod4+Shift+grave", "scratchpad_toggle_float", "", 2)
     add_bind_def(sc, "Mod4+Control+grave", "scratchpad_remove", "", 1)

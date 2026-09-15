@@ -4,6 +4,9 @@ skarwm can display small temporary status overlays without a bar or external
 notification daemon. They close automatically after 2.5 seconds and can also
 be dismissed with a click.
 
+Expired reminder notices are intentionally different: they remain visible
+until clicked and cannot be replaced by temporary status notices.
+
 | Default binding | Action | Meaning |
 |---|---|---|
 | `Super+Ctrl+Alt+h` | `show_bindings` | Show or hide the keybindings help overlay. |

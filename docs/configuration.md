@@ -37,6 +37,9 @@ call : mod + f : togglefullscreen
 call : mod + Control + Alt + h : show_bindings
 call : mod + Control + Alt + t : show_datetime
 call : mod + Control + Alt + b : show_battery
+call : mod + Control + r : reminder_new
+call : mod + Control + Alt + r : reminder_show_all
+call : mod + Control + Shift + r : reminder_clear_all
 workspace : mod + 1 : view 1
 workspace : mod + Shift + 1 : tag 1
 autostart : "xsetroot -solid '#202020'"

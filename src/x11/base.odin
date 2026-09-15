@@ -617,6 +617,7 @@ foreign xcb {
     xcb_map_window     :: proc(c: ^Connection, window: u32) -> Cookie ---
     xcb_unmap_window   :: proc(c: ^Connection, window: u32) -> Cookie ---
     xcb_configure_window :: proc(c: ^Connection, window: u32, value_mask: u32, value_list: ^u32) -> Cookie ---
+    xcb_clear_area :: proc(c: ^Connection, exposures: u8, window: u32, x, y: i16, width, height: u16) -> Cookie ---
 
     xcb_open_font :: proc(c: ^Connection, fid: u32, name_len: u16, name: cstring) -> Cookie ---
     xcb_close_font :: proc(c: ^Connection, font: u32) -> Cookie ---

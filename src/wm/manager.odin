@@ -55,6 +55,8 @@ Wm :: struct {
     tab_spawn_target: u32,
     tab_spawn_started: time.Tick,
     overview_active: bool,
+    reminder_dialog_active: bool,
+    reminders: [dynamic]Reminder,
     preview_hover_locked: bool,
     preview_hover_target: u32,
     rendering: rendering.State,
@@ -498,6 +500,10 @@ grab_all_keys :: proc() {
 
 // key press dispatch: match by exact (mods,keycode) after stripping Lock/NumLock.
 on_keypress :: proc(ev: ^x11.Key_Press_Event) {
+    if g_wm.reminder_dialog_active {
+        reminder_dialog_keypress(ev)
+        return
+    }
     if g_wm.overview_active {
         overview_keypress(ev)
         return
@@ -705,6 +711,12 @@ dispatch_action :: proc(b: ^input.Binding) {
         show_date_time_notice()
     case .Show_Battery:
         show_battery_notice()
+    case .Reminder_New:
+        reminder_dialog_begin()
+    case .Reminder_Show_All:
+        reminder_show_all()
+    case .Reminder_Clear_All:
+        reminder_clear_all()
     case .Close:
         close_focused()
     case .WS_Next:
@@ -1041,6 +1053,14 @@ tiled_resize_motion :: proc(root_x, root_y: i32) {
 }
 
 on_button_press :: proc(ev: ^x11.Button_Press_Event) {
+    if field, ok := ui.Reminder_Input_At_Window(&g_wm.ui, ev.event); ok {
+        ui.Set_Reminder_Field(&g_wm.ui, g_wm.m, field)
+        return
+    }
+    if ev.event == g_wm.ui.ReminderWindow {
+        if g_wm.ui.ReminderListMode { ui.Hide_Reminder_Panel(&g_wm.ui) }
+        return
+    }
     if ev.event == g_wm.ui.HelpWindow {
         ui.Hide_Help(&g_wm.ui)
         return

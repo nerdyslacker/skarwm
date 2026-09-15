@@ -40,7 +40,7 @@ Draw_Notice :: proc(state: ^State, m: ^c.Manager) {
     x11.xcb_flush(state.Conn)
 }
 
-Show_Notice :: proc(state: ^State, m: ^c.Manager, text: string) {
+show_notice_internal :: proc(state: ^State, m: ^c.Manager, text: string, persistent: bool) {
     if state == nil || state.Conn == nil || m == nil || text == "" { return }
     Hide_Notice(state)
     Init_Tabs(state)
@@ -65,13 +65,33 @@ Show_Notice :: proc(state: ^State, m: ^c.Manager, text: string) {
     }
     state.NoticeWindow = xid
     state.NoticeText = strings.clone(text)
-    state.NoticeUntil = time.tick_add(time.tick_now(), NOTICE_DURATION)
+    state.NoticePersistent = persistent
+    if !persistent {
+        state.NoticeUntil = time.tick_add(time.tick_now(), NOTICE_DURATION)
+    }
     x11.set_prop_text(state.Conn, xid, atom(state, "_NET_WM_NAME"), atom(state, "UTF8_STRING"), "skarwm notice")
     x11.set_prop_text(state.Conn, xid, atom(state, "WM_NAME"), atom(state, "STRING"), "skarwm notice")
     x11.xcb_map_window(state.Conn, xid)
     stack := x11.STACK_MODE_ABOVE
     x11.xcb_configure_window(state.Conn, xid, x11.CW_STACK_MODE, &stack)
     Draw_Notice(state, m)
+}
+
+Show_Notice :: proc(state: ^State, m: ^c.Manager, text: string) {
+    // Status feedback must not silently dismiss an unread reminder.
+    if state != nil && state.NoticeWindow != 0 && state.NoticePersistent { return }
+    show_notice_internal(state, m, text, false)
+}
+
+Show_Persistent_Notice :: proc(state: ^State, m: ^c.Manager, text: string) {
+    if state == nil || text == "" { return }
+    if state.NoticeWindow != 0 && state.NoticePersistent && state.NoticeText != "" {
+        combined := strings.concatenate({state.NoticeText, "; ", text})
+        defer delete(combined)
+        show_notice_internal(state, m, combined, true)
+        return
+    }
+    show_notice_internal(state, m, text, true)
 }
 
 Hide_Notice :: proc(state: ^State) {
@@ -83,11 +103,12 @@ Hide_Notice :: proc(state: ^State) {
     if state.NoticeText != "" { delete(state.NoticeText) }
     state.NoticeText = ""
     state.NoticeUntil = {}
+    state.NoticePersistent = false
     if state.Conn != nil { x11.xcb_flush(state.Conn) }
 }
 
 Notice_Poll_Timeout_Ms :: proc(state: ^State) -> i32 {
-    if state == nil || state.NoticeWindow == 0 { return -1 }
+    if state == nil || state.NoticeWindow == 0 || state.NoticePersistent { return -1 }
     remaining := time.tick_diff(time.tick_now(), state.NoticeUntil)
     if remaining <= 0 { return 0 }
     ns := i64(remaining)
@@ -95,7 +116,7 @@ Notice_Poll_Timeout_Ms :: proc(state: ^State) -> i32 {
 }
 
 Hide_Due_Notice :: proc(state: ^State) {
-    if state == nil || state.NoticeWindow == 0 { return }
+    if state == nil || state.NoticeWindow == 0 || state.NoticePersistent { return }
     if time.tick_diff(state.NoticeUntil, time.tick_now()) >= 0 {
         Hide_Notice(state)
     }
