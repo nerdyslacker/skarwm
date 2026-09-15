@@ -532,6 +532,70 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
     return true
 }
 
+// Move_Client_To_Tabbed_Drop joins the destination column and changes that
+// column to tabbed presentation. The regular drop operation retains all
+// source cleanup, resized-width preservation, cross-output ownership, and
+// focus behavior.
+Move_Client_To_Tabbed_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool {
+    if drop.Kind != .Into_Column || drop.Col == nil || drop.Target == nil ||
+       drop.Target == cl {
+        return false
+    }
+    target := drop.Col
+    if !Move_Client_To_Drop(m, cl, drop) { return false }
+    target.Layout = .Tabbed
+    target.Focus = cl
+    return true
+}
+
+// Move_Tabbed_Column_To_Drop reorders the whole tab group represented by
+// `member`. The Column allocation itself is moved, retaining tab order,
+// active tab, layout, row weights, and any explicit width.
+Move_Tabbed_Column_To_Drop :: proc(m: ^Manager, member: ^Client, drop: Drop_Target) -> bool {
+    if m == nil || member == nil || member.Ws == nil || drop.Kind != .New_Column ||
+       drop.Out == nil || drop.Ws == nil || drop.Out.Current != drop.Ws {
+        return false
+    }
+    dst_index := Output_Index(m, drop.Out)
+    if dst_index < 0 || drop.Insert_Index < 0 || drop.Insert_Index > len(drop.Ws.Cols) {
+        return false
+    }
+    src := member.Ws
+    source_index, source, _ := column_of(src, member)
+    if source == nil || source.Layout != .Tabbed || len(source.Wins) == 0 { return false }
+
+    if drop.Col != nil {
+        found := false
+        for candidate in drop.Ws.Cols {
+            if candidate == drop.Col { found = true; break }
+        }
+        if !found || drop.Col == source { return false }
+    }
+
+    insert_at := drop.Insert_Index
+    if src == drop.Ws && source_index < insert_at { insert_at -= 1 }
+    if src == drop.Ws && insert_at == source_index { return false }
+
+    source_had_ws_focus := false
+    if src.Focus != nil {
+        _, focused_col, _ := column_of(src, src.Focus)
+        source_had_ws_focus = focused_col == source
+    }
+    ordered_remove(&src.Cols, source_index)
+    if source_had_ws_focus { src.Focus = fallback_focus_for_ws(src) }
+
+    array_insert_at(&drop.Ws.Cols, insert_at, source)
+    for win in source.Wins {
+        win.Ws = drop.Ws
+        win.Out = drop.Out
+    }
+    if source.Focus == nil { source.Focus = member }
+    drop.Ws.Focus = source.Focus
+    m.Active = dst_index
+    m.Focused = source.Focus
+    return true
+}
+
 // Move_Floating_To_Output transfers a floating client to another output's
 // visible workspace without changing its root-coordinate drag rectangle.
 Move_Floating_To_Output :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output) -> bool {

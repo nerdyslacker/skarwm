@@ -45,6 +45,8 @@ Wm :: struct {
     mouse_client: ^c.Client,
     mouse_resize: bool,
     mouse_tiled_drag: bool,
+    mouse_tabbed_drag: bool,
+    mouse_column_drag: bool,
     tiled_resize: Tiled_Resize_State,
     mouse_root_x, mouse_root_y: i16,
     mouse_start: c.Rect,
@@ -992,23 +994,31 @@ begin_tiled_resize :: proc(cl: ^c.Client, root_x, root_y: i32) -> bool {
 // Temporarily presents a tiled drag as a small window following the pointer.
 // Keep the model untouched until drop; the next reflow restores or places
 // the real tiled geometry atomically.
-show_tiled_drag_preview :: proc(cl: ^c.Client, root_x, root_y: i32) {
-    if cl == nil { return }
+show_tiled_drag_preview :: proc(cl: ^c.Client, root_x, root_y: i32, header_height: i32 = 0) -> c.Rect {
+    if cl == nil { return {} }
     size := TILED_DRAG_PREVIEW_SIZE
     if cl.SizeHints.MinW > 0 { size = max(size, cl.SizeHints.MinW) }
     if cl.SizeHints.MinH > 0 { size = max(size, cl.SizeHints.MinH) }
     width, height := size, size
     if cl.SizeHints.MaxW > 0 { width = min(width, cl.SizeHints.MaxW) }
     if cl.SizeHints.MaxH > 0 { height = min(height, cl.SizeHints.MaxH) }
+    header_h := max(i32(0), header_height)
+    preview := c.Rect{
+        X = root_x - width / 2,
+        Y = root_y - (height + header_h) / 2,
+        W = max(i32(1), width),
+        H = max(i32(1), height + header_h),
+    }
     rendering.Preview_Client(
         &g_wm.rendering, g_wm.conn, g_wm.m, cl,
         c.Rect{
-            X = root_x - width / 2,
-            Y = root_y - height / 2,
-            W = max(i32(1), width),
-            H = max(i32(1), height),
+            X = preview.X,
+            Y = preview.Y + header_h,
+            W = preview.W,
+            H = max(i32(1), preview.H - header_h),
         },
     )
+    return preview
 }
 
 tiled_resize_motion :: proc(root_x, root_y: i32) {
@@ -1031,7 +1041,28 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
         ui.Hide_Help(&g_wm.ui)
         return
     }
+    clean := ev.state & ~(g_wm.lock | g_wm.numlock)
+    modified := g_wm.primary_mod != 0 && clean & g_wm.primary_mod == g_wm.primary_mod
     if tab := ui.Tab_Client(&g_wm.ui, ev.event); tab != nil {
+        if modified && ev.detail == 1 {
+            _, col, _ := c.Column_Of(tab)
+            if col != nil && col.Layout == .Tabbed && col.Focus != nil {
+                g_wm.mouse_client = col.Focus
+                g_wm.mouse_tiled_drag = true
+                g_wm.mouse_column_drag = true
+                g_wm.mouse_root_x = ev.root_x
+                g_wm.mouse_root_y = ev.root_y
+                preview := show_tiled_drag_preview(
+                    col.Focus, i32(ev.root_x), i32(ev.root_y), c.TAB_BAR_HEIGHT,
+                )
+                stack := x11.STACK_MODE_ABOVE
+                x11.xcb_configure_window(g_wm.conn, col.Focus.Xid, x11.CW_STACK_MODE, &stack)
+                ui.Preview_Tab_Group(&g_wm.ui, col.Focus, preview)
+                ui.Update_Column_Drop(&g_wm.ui, g_wm.m, col.Focus, i32(ev.root_x), i32(ev.root_y))
+                x11.xcb_flush(g_wm.conn)
+                return
+            }
+        }
         if ev.detail == 2 {
             toggle_client_maximized(tab)
             return
@@ -1044,7 +1075,6 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
         return
     }
 
-    clean := ev.state & ~(g_wm.lock | g_wm.numlock)
     if g_wm.primary_mod != 0 && clean == g_wm.primary_mod && (ev.detail == 4 || ev.detail == 5) {
         // Do not let geometry moving beneath this explicit wheel action turn
         // the same stationary pointer into a second, implicit scroll.
@@ -1077,9 +1107,10 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
         reflow_immediate()
         ipc_broadcast_focus_change(old, cl)
     }
-    modified := g_wm.primary_mod != 0 && clean & g_wm.primary_mod == g_wm.primary_mod
     floating_drag := modified && cl.Floating && !cl.Maximized && (ev.detail == 1 || ev.detail == 3)
     tiled_drag := modified && !cl.Floating && ev.detail == 1
+    tabbed_drag := tiled_drag && clean & x11.MOD_MASK_MOD1 != 0 &&
+        g_wm.primary_mod & x11.MOD_MASK_MOD1 == 0
     tiled_resize := modified && !cl.Floating && !cl.Maximized && ev.detail == 3
     if tiled_resize {
         if begin_tiled_resize(cl, i32(ev.root_x), i32(ev.root_y)) {
@@ -1094,13 +1125,18 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
         g_wm.mouse_client = cl
         g_wm.mouse_resize = floating_drag && ev.detail == 3
         g_wm.mouse_tiled_drag = tiled_drag
+        g_wm.mouse_tabbed_drag = tabbed_drag
         g_wm.mouse_root_x = ev.root_x
         g_wm.mouse_root_y = ev.root_y
         g_wm.mouse_start = cl.FloatingRect
         if tiled_drag {
             show_tiled_drag_preview(cl, i32(ev.root_x), i32(ev.root_y))
             raise_focused()
-            ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+            if tabbed_drag {
+                ui.Update_Tabbed_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+            } else {
+                ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+            }
         }
         x11.xcb_allow_events(g_wm.conn, x11.ALLOW_ASYNC_POINTER, ev.time)
     } else {
@@ -1116,8 +1152,22 @@ on_motion :: proc(ev: ^x11.Motion_Notify_Event) {
         return
     }
     if g_wm.mouse_tiled_drag {
-        show_tiled_drag_preview(cl, i32(ev.root_x), i32(ev.root_y))
-        ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+        if g_wm.mouse_column_drag {
+            preview := show_tiled_drag_preview(
+                cl, i32(ev.root_x), i32(ev.root_y), c.TAB_BAR_HEIGHT,
+            )
+            stack := x11.STACK_MODE_ABOVE
+            x11.xcb_configure_window(g_wm.conn, cl.Xid, x11.CW_STACK_MODE, &stack)
+            ui.Preview_Tab_Group(&g_wm.ui, cl, preview)
+            ui.Update_Column_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+        } else {
+            show_tiled_drag_preview(cl, i32(ev.root_x), i32(ev.root_y))
+            if g_wm.mouse_tabbed_drag {
+                ui.Update_Tabbed_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+            } else {
+                ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+            }
+        }
         return
     }
     if g_wm.tiled_resize.Active {
@@ -1153,11 +1203,22 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
     if cl != nil && g_wm.mouse_tiled_drag {
         old_output := cl.Out
         old_ws := cl.Ws
-        target := c.Drop_Target_At_Point(
-            g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, g_wm.ui.DropTarget,
-        )
+        target := g_wm.ui.DropTarget
         ui.Hide_Drop(&g_wm.ui)
-        if c.Move_Client_To_Drop(g_wm.m, cl, target) {
+        moved := false
+        if g_wm.mouse_column_drag {
+            moved = c.Move_Tabbed_Column_To_Drop(g_wm.m, cl, target)
+        } else if g_wm.mouse_tabbed_drag {
+            moved = c.Move_Client_To_Tabbed_Drop(g_wm.m, cl, target)
+        } else {
+            // Re-resolve directional targets at release to retain hysteresis
+            // when the final motion event arrived just before the button event.
+            target = c.Drop_Target_At_Point(
+                g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, target,
+            )
+            moved = c.Move_Client_To_Drop(g_wm.m, cl, target)
+        }
+        if moved {
             if target.Out != old_output {
                 ipc_broadcast_output_event("focus", target.Out.Name)
                 ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, target.Ws, old_ws)
@@ -1165,6 +1226,10 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
             reflow()
             raise_focused()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
+        } else if g_wm.mouse_column_drag {
+            // Restore both the client and its WM-owned header strip when the
+            // group was released without a valid destination.
+            reflow()
         }
     } else if g_wm.mouse_tiled_drag {
         ui.Hide_Drop(&g_wm.ui)
@@ -1180,6 +1245,8 @@ cancel_pointer_operation :: proc() {
     g_wm.mouse_client = nil
     g_wm.mouse_resize = false
     g_wm.mouse_tiled_drag = false
+    g_wm.mouse_tabbed_drag = false
+    g_wm.mouse_column_drag = false
     g_wm.tiled_resize = {}
 }
 

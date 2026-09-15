@@ -518,7 +518,10 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         return true
     case "border_width":
         n, ok := parse_i32_value(value)
-        if !ok { append(errs, fmt.aprintf("border_width: bad number %q", value)); return false }
+        if !ok || n < 0 || n > 4096 {
+            append(errs, fmt.aprintf("border_width: expected 0..4096, got %q", value))
+            return false
+        }
         sc.border = n; sc.border_set = true
         return true
     case "corner_radius":

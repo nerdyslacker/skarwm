@@ -46,6 +46,8 @@ main :: proc() {
     test_focus_direction()
     test_move_dir()
     test_pointer_column_move()
+    test_pointer_tabbed_drop()
+    test_pointer_tabbed_column_drop()
     test_relative_column_drop()
     test_unmanage()
     test_floating()
@@ -58,6 +60,7 @@ main :: proc() {
     test_scrolling()
     test_scroll_previews()
     test_two_columns_fit()
+    test_borderless_layout()
     test_arrange_hidden()
     test_move_to_ws()
     test_scratchpads()
@@ -192,13 +195,13 @@ test_resize_math :: proc() {
     kha := add_tiled(keyboard_horizontal, 291)
     khb := add_tiled(keyboard_horizontal, 292)
     c.Arrange_All(keyboard_horizontal)
-    kha_before := kha.Geom.W + 2 * kha.Border
-    khb_before := khb.Geom.W + 2 * khb.Border
+    kha_before := kha.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
+    khb_before := khb.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
     ok(c.Resize_Focused(keyboard_horizontal, .Left),
        "keyboard left resize grows the focused column")
     c.Arrange_All(keyboard_horizontal)
-    kha_after := kha.Geom.W + 2 * kha.Border
-    khb_after := khb.Geom.W + 2 * khb.Border
+    kha_after := kha.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
+    khb_after := khb.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
     eq(kha_after, kha_before,
        "keyboard width resize leaves neighboring columns unchanged")
     eq(khb_after, khb_before - c.KEYBOARD_RESIZE_STEP,
@@ -206,7 +209,7 @@ test_resize_math :: proc() {
     ok(c.Resize_Focused(keyboard_horizontal, .Right),
        "keyboard right resize grows the focused column again")
     c.Arrange_All(keyboard_horizontal)
-    eq(khb.Geom.W + 2 * khb.Border, khb_before,
+    eq(khb.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth, khb_before,
        "opposite keyboard width steps are reversible")
 
     keyboard_vertical := mk_man()
@@ -217,13 +220,13 @@ test_resize_math :: proc() {
     ok(c.Move_Dir(keyboard_vertical, .Left),
        "keyboard row resize fixture creates a vertical stack")
     c.Arrange_All(keyboard_vertical)
-    kva_before := kva.Geom.H + 2 * kva.Border
-    kvb_before := kvb.Geom.H + 2 * kvb.Border
+    kva_before := kva.Geom.H + 2 * keyboard_vertical.Cfg.BorderWidth
+    kvb_before := kvb.Geom.H + 2 * keyboard_vertical.Cfg.BorderWidth
     ok(c.Resize_Focused(keyboard_vertical, .Up),
        "keyboard up resize grows the focused stacked row")
     c.Arrange_All(keyboard_vertical)
-    kva_after := kva.Geom.H + 2 * kva.Border
-    kvb_after := kvb.Geom.H + 2 * kvb.Border
+    kva_after := kva.Geom.H + 2 * keyboard_vertical.Cfg.BorderWidth
+    kvb_after := kvb.Geom.H + 2 * keyboard_vertical.Cfg.BorderWidth
     ok(abs((kva_after - kva_before) - c.KEYBOARD_RESIZE_STEP) <= 1,
        "other rows proportionally receive the released height")
     ok(abs((kvb_before - kvb_after) - c.KEYBOARD_RESIZE_STEP) <= 1,
@@ -233,7 +236,7 @@ test_resize_math :: proc() {
     ok(c.Resize_Focused(keyboard_vertical, .Down),
        "keyboard down resize grows the focused row again")
     c.Arrange_All(keyboard_vertical)
-    ok(abs((kvb.Geom.H + 2 * kvb.Border) - kvb_before) <= 1,
+    ok(abs((kvb.Geom.H + 2 * keyboard_vertical.Cfg.BorderWidth) - kvb_before) <= 1,
        "opposite keyboard height steps are reversible")
 
     m := mk_man()
@@ -245,14 +248,14 @@ test_resize_math :: proc() {
     ws.Cols[0].Width = 700
     ws.Cols[1].Width = 1196
     c.Arrange_All(m)
-    eq(a.Geom, c.Rect{X = 8, Y = 8, W = 700, H = 1064}, "unfocused resized tile uses its full outer geometry")
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 696, H = 1060}, "unfocused resized tile reserves the border inset")
     eq(b.Geom, c.Rect{X = 718, Y = 10, W = 1192, H = 1060}, "adjacent resized column follows boundary")
 
     ok(c.Move_Dir(m, .Left), "resize row fixture stacks windows")
     a.TileWeight, b.TileWeight = 3, 1
     c.Arrange_All(m)
-    eq(a.Geom.Y, i32(8), "unfocused weighted row stays at column top")
-    eq(a.Geom.H, i32(792), "unfocused weighted row receives its complete tile share")
+    eq(a.Geom.Y, i32(10), "unfocused weighted row reserves its border inset")
+    eq(a.Geom.H, i32(788), "unfocused weighted row keeps stable bordered geometry")
     eq(b.Geom.Y, i32(810), "following row moves with resized boundary")
     eq(b.Geom.H, i32(260), "following row consumes remaining column height")
 
@@ -272,7 +275,7 @@ test_resize_math :: proc() {
     // With no natural edge intersection, reserve the narrow hover preview and
     // fit the visible page between it. When spare space exists elsewhere, the
     // contiguous custom-width path below keeps all widths unchanged instead.
-    eq(ib.Geom, c.Rect{X = 36, Y = 8, W = 1178, H = 1064}, "resized page reserves its hidden-neighbor preview")
+    eq(ib.Geom, c.Rect{X = 38, Y = 10, W = 1174, H = 1060}, "resized page reserves its hidden-neighbor preview")
     eq(id.Geom, c.Rect{X = 1224, Y = 10, W = 686, H = 1060}, "new column keeps the normal gap inside the reserved page")
     inserted_previews := c.Scroll_Previews(inserted, c.Active_Output(inserted))
     eq(len(inserted_previews), 1, "fully hidden neighbor retains a hover preview after resizing")
@@ -311,7 +314,7 @@ test_resize_math :: proc() {
     eq(sws.Cols[0].Width, i32(700), "stacking drop preserves explicit source width")
     c.Arrange_All(stacked)
     eq(sa.Geom.W, i32(696), "lone resized stack does not expand to full screen")
-    eq(sb.Geom.W, i32(700), "unfocused windows use the retained column's complete width")
+    eq(sb.Geom.W, i32(696), "unfocused windows reserve the same border inset")
 
     new_after_resize := mk_man()
     defer c.Destroy_Manager(new_after_resize)
@@ -344,8 +347,9 @@ test_resize_math :: proc() {
     eq(cws.Cols[0].Width, i32(700), "closing a column does not resize a visible survivor")
     eq(cws.Cols[1].Width, i32(0), "closing a column does not resize a hidden survivor")
     eq(cws.Cols[2].Width, i32(0), "later hidden columns retain their natural width")
-    first_gap := (cc.Geom.X - cc.Border) - (ca.Geom.X + ca.Geom.W + ca.Border)
-    next_gap := (cd.Geom.X - cd.Border) - (cc.Geom.X + cc.Geom.W + cc.Border)
+    cborder := close_after_resize.Cfg.BorderWidth
+    first_gap := (cc.Geom.X - cborder) - (ca.Geom.X + ca.Geom.W + cborder)
+    next_gap := (cd.Geom.X - cborder) - (cc.Geom.X + cc.Geom.W + cborder)
     eq(first_gap, close_after_resize.Cfg.InnerGap,
        "surviving column moves directly beside the resized column")
     eq(next_gap, close_after_resize.Cfg.InnerGap,
@@ -370,7 +374,7 @@ test_resize_math :: proc() {
         2 * close_after_resize.Cfg.InnerGap
     eq(cws.ViewportX, content_w - cwork_w,
        "stale viewport clamps so the strip cannot leave empty space at the right")
-    eq(cd.Geom.X + cd.Geom.W + cd.Border,
+    eq(cd.Geom.X + cd.Geom.W + cborder,
        co.Geom.X + co.Geom.W - close_after_resize.Cfg.OuterGap - co.Reserved.Right,
        "last unchanged column is pulled flush to the work-area edge")
     _ = ca
@@ -391,8 +395,9 @@ test_resize_math :: proc() {
     ok(abs(weight_sum - 1) < 0.000001, "stack membership change normalizes resize weights")
     ok(vc.TileWeight > 0.25, "new row receives a useful share instead of pixel weight one")
     c.Arrange_All(rows_after_resize)
-    vb_gap := (vb.Geom.Y - vb.Border) - (va.Geom.Y + va.Geom.H + va.Border)
-    vc_gap := (vc.Geom.Y - vc.Border) - (vb.Geom.Y + vb.Geom.H + vb.Border)
+    vborder := rows_after_resize.Cfg.BorderWidth
+    vb_gap := (vb.Geom.Y - vborder) - (va.Geom.Y + va.Geom.H + vborder)
+    vc_gap := (vc.Geom.Y - vborder) - (vb.Geom.Y + vb.Geom.H + vborder)
     eq(vb_gap, rows_after_resize.Cfg.InnerGap, "existing and inserted rows retain the normal gap")
     eq(vc_gap, rows_after_resize.Cfg.InnerGap, "new row aligns with the same normal gap")
     va.TileWeight, vb.TileWeight, vc.TileWeight = 600, 300, 100
@@ -409,7 +414,7 @@ test_resize_math :: proc() {
     c.Arrange_All(rows_after_resize)
     ok(abs(va.TileWeight + vb.TileWeight - 1) < 0.000001,
        "closing a resized row renormalizes the surviving proportions")
-    remaining_gap := (vb.Geom.Y - vb.Border) - (va.Geom.Y + va.Geom.H + va.Border)
+    remaining_gap := (vb.Geom.Y - vborder) - (va.Geom.Y + va.Geom.H + vborder)
     eq(remaining_gap, rows_after_resize.Cfg.InnerGap,
        "rows retain the normal gap after closing a resized neighbor")
 
@@ -437,8 +442,9 @@ test_resize_math :: proc() {
     }
     ok(saw_left, "vertical reorder retains the natural partial preview")
     ok(saw_right, "vertical reorder reveals the previously hidden opposite preview")
-    left_preview_gap := (pb.Geom.X - pb.Border) - (pa.Geom.X + pa.Geom.W + pa.Border)
-    right_preview_gap := (pe.Geom.X - pe.Border) - (pc.Geom.X + pc.Geom.W + pc.Border)
+    pborder := vertical_preview.Cfg.BorderWidth
+    left_preview_gap := (pb.Geom.X - pborder) - (pa.Geom.X + pa.Geom.W + pborder)
+    right_preview_gap := (pe.Geom.X - pborder) - (pc.Geom.X + pc.Geom.W + pborder)
     eq(left_preview_gap, vertical_preview.Cfg.InnerGap,
        "left preview remains a contiguous neighbor instead of overlapping")
     eq(right_preview_gap, vertical_preview.Cfg.InnerGap,
@@ -728,6 +734,80 @@ test_pointer_column_move :: proc() {
     eq(c.Active_Output(m), right, "focus follows cross-output floating drag")
 }
 
+test_pointer_tabbed_drop :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    a := add_tiled(m, 100)
+    b := add_tiled(m, 101)
+    c.Arrange_All(m)
+
+    target := c.Tabbed_Drop_Target_At_Point(
+        m, a.Geom.X + a.Geom.W / 2, a.Geom.Y + a.Geom.H / 2, b,
+    )
+    eq(target.Kind, c.Drop_Kind.Into_Column, "tab gesture targets the window beneath the pointer")
+    eq(target.Target, a, "tab gesture records the destination client")
+    eq(target.Col, ws.Cols[0], "tab gesture records the destination column")
+    eq(target.Row_Index, 1, "tab gesture inserts after its destination client")
+    eq(target.Geom, c.Rect{X = 8, Y = 8, W = 948, H = 1064}, "tab overlay covers the complete destination tile")
+
+    gap := c.Tabbed_Drop_Target_At_Point(m, 960, 540, b)
+    eq(gap.Kind, c.Drop_Kind.None, "tab gesture requires the pointer to be on a window")
+    self := c.Tabbed_Drop_Target_At_Point(
+        m, b.Geom.X + b.Geom.W / 2, b.Geom.Y + b.Geom.H / 2, b,
+    )
+    eq(self.Kind, c.Drop_Kind.None, "drag preview cannot target its own tiled position")
+
+    ok(c.Move_Client_To_Tabbed_Drop(m, b, target), "tab gesture joins the destination column")
+    eq(len(ws.Cols), 1, "tab drop removes the empty source column")
+    eq(len(ws.Cols[0].Wins), 2, "tab drop groups both clients")
+    eq(ws.Cols[0].Wins[0], a, "destination tab keeps its position")
+    eq(ws.Cols[0].Wins[1], b, "dragged client follows the destination tab")
+    eq(ws.Cols[0].Layout, c.Column_Layout.Tabbed, "tab drop enables tabbed layout")
+    eq(ws.Cols[0].Focus, b, "dragged client becomes the active tab")
+    eq(m.Focused, b, "keyboard focus follows the tab drop")
+}
+
+test_pointer_tabbed_column_drop :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    a := add_tiled(m, 100)
+    b := add_tiled(m, 101)
+    ok(c.Move_Dir(m, .Left), "column drag fixture groups two windows")
+    ok(c.Set_Column_Layout(m, .Tabbed), "column drag fixture enables tabs")
+    group := ws.Cols[0]
+    group.Width = 700
+    d := add_tiled(m, 102)
+    c.Arrange_All(m)
+
+    self := c.Column_Drop_Target_At_Point(
+        m, b.Geom.X + b.Geom.W / 2, b.Geom.Y + b.Geom.H / 2, b,
+    )
+    eq(self.Kind, c.Drop_Kind.None, "tab-header drag does not target its own group")
+
+    target := c.Column_Drop_Target_At_Point(
+        m, d.Geom.X + 3 * d.Geom.W / 4, d.Geom.Y + d.Geom.H / 2, b,
+    )
+    eq(target.Kind, c.Drop_Kind.New_Column, "tab-header drag targets another column")
+    eq(target.Zone, c.Drop_Zone.Right, "right half places the tab group after its target")
+    eq(target.Col, ws.Cols[1], "column drop records the neighboring column")
+    eq(target.Target, d, "column drop records a visible destination client")
+
+    ok(c.Move_Tabbed_Column_To_Drop(m, b, target), "tab header moves the complete group")
+    eq(len(ws.Cols), 2, "whole-column reorder keeps the column count")
+    eq(ws.Cols[0].Wins[0], d, "destination column moves before the group")
+    eq(ws.Cols[1], group, "the original column allocation is retained")
+    eq(len(group.Wins), 2, "every tab moves with the group")
+    eq(group.Wins[0], a, "first tab retains its order")
+    eq(group.Wins[1], b, "second tab retains its order")
+    eq(group.Layout, c.Column_Layout.Tabbed, "moved group remains tabbed")
+    eq(group.Focus, b, "moved group retains its active tab")
+    eq(group.Width, i32(700), "moved group retains its resized width")
+}
+
 test_relative_column_drop :: proc() {
     m := mk_man()
     defer c.Destroy_Manager(m)
@@ -907,7 +987,7 @@ test_maximize :: proc() {
     eq(a.Geom, c.Rect{X = 10, Y = 10, W = 1900, H = 1060}, "layout reflow preserves maximize override")
     ok(c.Toggle_Maximized(a), "restore tiled client")
     c.Arrange_All(m)
-    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 944, H = 1060}, "restored focused tile regains its border inset")
+    eq(a.Geom, original, "focus changes do not alter restored client geometry")
 
     c.Focus_Client(m, b)
     ok(c.Set_Maximized(b, true), "maximize right tiled client")
@@ -916,7 +996,7 @@ test_maximize :: proc() {
     eq(b.Geom, c.Rect{X = 10, Y = 10, W = 1900, H = 1060}, "right maximized column expands left to fill its page")
     ok(c.Scroll_Viewport(m, -1), "scroll left from right maximized column")
     c.Arrange_All(m)
-    eq(a.Geom, c.Rect{X = 8, Y = 8, W = 948, H = 1064}, "unfocused left neighbor remains visible beside right maximized page")
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 944, H = 1060}, "unfocused left neighbor keeps its reserved border inset")
     eq(b.Geom, c.Rect{X = 966, Y = 10, W = 1900, H = 1060}, "right maximized page stays full-width while partially visible")
     c.Set_Maximized(b, false)
     ws.ViewportX = 0
@@ -1134,7 +1214,7 @@ test_multi_output_scrolling :: proc() {
     eq(right.Current.ViewportX, 0, "right output viewport remains unchanged")
     eq(c.Active_Output(m), right, "pointer scrolling does not steal active output")
     c.Arrange_All(m)
-    eq(left_first.Geom.X, -1880, "left output exposes its unfocused left neighbor after scrolling")
+    eq(left_first.Geom.X, -1878, "left output exposes its unfocused left neighbor after scrolling")
     ok(left_third.Geom.X >= left.Geom.X && left_third.Geom.X < left.Geom.X + left.Geom.W,
        "newly visible left column stays within its output")
 }
@@ -1160,11 +1240,11 @@ test_layout_geometry :: proc() {
     c.Move_Dir(m, .Left)
     c.Arrange_All(m)
     eq(len(ws.Cols[0].Wins), 2, "two in a column")
-    eq(a.Geom.H, b.Geom.H + 2 * b.Border, "stacked windows have equal outer tile heights")
-    eq(a.Geom.H, 528, "unfocused client fills its complete half-height tile")
-    eq(a.Geom.W, 1904, "unfocused client fills the complete merged column")
+    eq(a.Geom.H, b.Geom.H, "stacked client surfaces remain equal across focus")
+    eq(a.Geom.H, 524, "each client permanently reserves the border inset")
+    eq(a.Geom.W, 1900, "unfocused client keeps the same inset width as focused")
     eq(b.Geom.Y, 546, "b sits below a with inner gap + borders")
-    eq(b.Geom.Y - b.Border, a.Geom.Y + a.Geom.H + a.Border + 8, "outer tile gap remains the configured inner gap")
+    eq(b.Geom.Y, a.Geom.Y + a.Geom.H + 12, "rows retain inner gap plus reserved border space")
 }
 
 // ----------------------------------------------------------------------------
@@ -1209,7 +1289,7 @@ test_scrolling :: proc() {
     c.Ensure_Active_Focus_Visible(m)
     c.Arrange_All(m)
     eq(d.Geom.X, 980, "right column leaves a normal gap beside the left preview")
-    eq(a.Geom.X, -920, "unfocused scrolled-off column leaves a narrow left preview")
+    eq(a.Geom.X, -918, "unfocused scrolled-off column leaves a narrow left preview")
     _, first_bar_visible := c.Tab_Bar_Rect(m, c.Active_Output(m), ws, 0)
     ok(!first_bar_visible, "scrolled-off column does not expose a tab decoration")
 }
@@ -1247,7 +1327,7 @@ test_scroll_previews :: proc() {
         eq(previews[0].Side, c.Scroll_Preview_Side.Left, "preview points left")
         eq(previews[0].Client, a, "left preview targets nearest hidden client")
         eq(previews[0].Geom, c.Rect{X = 8, Y = 8, W = 20, H = 1064}, "left preview uses actual workarea edge")
-        eq(a.Geom.W, i32(948), "unfocused left neighbor keeps its full tile width")
+        eq(a.Geom.W, i32(944), "unfocused left neighbor keeps stable inset width")
         ok(a.Geom.X < 0, "left neighbor continues naturally beyond the screen")
     }
     delete(previews)
@@ -1262,8 +1342,8 @@ test_scroll_previews :: proc() {
     if len(previews) == 2 {
         eq(previews[0].Client, a, "left preview still targets nearest hidden client")
         eq(previews[1].Client, e, "right preview targets nearest hidden client")
-        eq(b.Geom.X - b.Border - (previews[0].Geom.X + previews[0].Geom.W), i32(8), "left preview keeps the normal inner gap")
-        eq(previews[1].Geom.X - (d.Geom.X + d.Geom.W + d.Border), i32(8), "right preview keeps the normal inner gap")
+        eq(b.Geom.X - m.Cfg.BorderWidth - (previews[0].Geom.X + previews[0].Geom.W), i32(8), "left preview keeps the normal inner gap")
+        eq(previews[1].Geom.X - (d.Geom.X + d.Geom.W + m.Cfg.BorderWidth), i32(8), "right preview keeps the normal inner gap")
     }
     delete(previews)
 
@@ -1292,8 +1372,44 @@ test_two_columns_fit :: proc() {
 
     c.Arrange_All(m)
     ok(a.Geom.X >= 0 && b.Geom.X >= 0, "both columns on screen")
-    eq(a.Geom.X, 8, "unfocused left column starts at work_x without a border inset")
+    eq(a.Geom.X, 10, "unfocused left column reserves the configured border inset")
     eq(b.Geom.X, 966, "right column at work_x + (948+8) + border, fully visible")
+    a_before, b_before := a.Geom, b.Geom
+    eq(a.Border, i32(0), "unfocused window does not draw its reserved border")
+    eq(b.Border, m.Cfg.BorderWidth, "focused window draws the configured border")
+    c.Focus_Client(m, a)
+    c.Arrange_All(m)
+    eq(a.Geom, a_before, "focusing a window does not resize its client surface")
+    eq(b.Geom, b_before, "unfocusing a window does not resize its client surface")
+    eq(a.Border, m.Cfg.BorderWidth, "new focus activates its reserved border")
+    eq(b.Border, i32(0), "old focus hides its border without changing geometry")
+}
+
+// A zero border width removes both the decoration and the normally reserved
+// inset. Focus changes must not add either one back.
+test_borderless_layout :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    m.Cfg.BorderWidth = 0
+    c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+
+    a := add_tiled(m, 100)
+    b := add_tiled(m, 101)
+    c.Arrange_All(m)
+
+    eq(a.Geom, c.Rect{X = 8, Y = 8, W = 948, H = 1064}, "borderless left client occupies its complete tile")
+    eq(b.Geom, c.Rect{X = 964, Y = 8, W = 948, H = 1064}, "borderless right client occupies its complete tile")
+    eq(a.Border, i32(0), "unfocused border remains disabled")
+    eq(b.Border, i32(0), "focused border remains disabled")
+
+    a_before, b_before := a.Geom, b.Geom
+    c.Focus_Client(m, a)
+    c.Arrange_All(m)
+    eq(a.Geom, a_before, "borderless focus keeps the new client geometry")
+    eq(b.Geom, b_before, "borderless focus keeps the old client geometry")
+    eq(a.Border, i32(0), "new focus does not enable a border")
+    eq(b.Border, i32(0), "old focus remains borderless")
 }
 
 // ----------------------------------------------------------------------------

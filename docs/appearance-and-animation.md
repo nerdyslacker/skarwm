@@ -18,7 +18,9 @@ animation_easing : ease_out_cubic
 
 `outer_gap` surrounds the work area and `inner_gap` separates windows. `gap`
 sets both at once. Only the focused window draws `border_width`; unfocused
-windows expand into the same outer tile, so focus changes never alter gaps.
+windows reserve the same inset without drawing it, so focus changes alter
+neither client size nor gaps. Set `border_width : 0` to disable both the border
+and its reserved inset, allowing client surfaces to occupy the complete tile.
 `sel_outer_border` is its `#RRGGBB` colour. `norm_outer_border` remains accepted
 for configuration compatibility.
 

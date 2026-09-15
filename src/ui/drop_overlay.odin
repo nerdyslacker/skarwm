@@ -111,6 +111,20 @@ Show_Drop :: proc(state: ^State, m: ^c.Manager, target: c.Drop_Target) {
 
 Update_Drop :: proc(state: ^State, m: ^c.Manager, mouse_client: ^c.Client, x, y: i32) {
     target := c.Drop_Target_At_Point(m, x, y, mouse_client, state.DropTarget)
+    Update_Drop_Target(state, m, target)
+}
+
+Update_Tabbed_Drop :: proc(state: ^State, m: ^c.Manager, mouse_client: ^c.Client, x, y: i32) {
+    target := c.Tabbed_Drop_Target_At_Point(m, x, y, mouse_client)
+    Update_Drop_Target(state, m, target)
+}
+
+Update_Column_Drop :: proc(state: ^State, m: ^c.Manager, mouse_client: ^c.Client, x, y: i32) {
+    target := c.Column_Drop_Target_At_Point(m, x, y, mouse_client)
+    Update_Drop_Target(state, m, target)
+}
+
+Update_Drop_Target :: proc(state: ^State, m: ^c.Manager, target: c.Drop_Target) {
     if target.Kind == .None {
         Hide_Drop(state)
         return

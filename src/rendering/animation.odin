@@ -94,6 +94,24 @@ animation_is_parked :: proc(cl: ^c.Client, geom: c.Rect) -> bool {
     return geom.X <= cl.Out.Geom.X + c.HIDE_X / 2
 }
 
+animation_outer_rect :: proc(geom: c.Rect, border: i32) -> c.Rect {
+    b := max(i32(0), border)
+    return c.Rect{
+        X = geom.X - b,
+        Y = geom.Y - b,
+        W = geom.W + 2 * b,
+        H = geom.H + 2 * b,
+    }
+}
+
+animation_is_decoration_only :: proc(st: ^Client_Animation, geom: c.Rect, border: i32) -> bool {
+    if st == nil || st.Active || (st.Target == geom && st.Target_Border == border) { return false }
+    // Focused-only borders reserve their inset in core geometry even while
+    // hidden, so the common focus path changes only the X border width.
+    if st.Target == geom { return true }
+    return animation_outer_rect(st.Target, st.Target_Border) == animation_outer_rect(geom, border)
+}
+
 animation_frame_interval :: proc(m: ^c.Manager) -> time.Duration {
     fps := max(i32(1), m.Cfg.AnimationFps)
     return time.Duration(i64(time.Second) / i64(fps))
@@ -152,7 +170,9 @@ Commit :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, request_anim
             // exact displayed rectangle becomes the new start, avoiding jumps.
             animation_sample(st, now)
             changed := st.Target != cl.Geom || st.Target_Border != cl.Border
-            snap := !enabled || animation_is_parked(cl, st.Current) || animation_is_parked(cl, cl.Geom)
+            decoration_only := animation_is_decoration_only(st, cl.Geom, cl.Border)
+            snap := !enabled || decoration_only ||
+                animation_is_parked(cl, st.Current) || animation_is_parked(cl, cl.Geom)
             if changed && !snap {
                 st.Start = st.Current
                 st.Start_Border = st.Current_Border

@@ -20,8 +20,9 @@ mod_key : super
 # Pixels of empty space around the work area / between tiled windows.
 outer_gap : 8
 inner_gap : 8
-# `gap : N` seeds both outer_gap and inner_gap at once. Only the focused
-# window draws a border; unfocused windows still occupy the complete tile.
+# `gap : N` seeds both outer_gap and inner_gap at once. Every window reserves
+# the border inset so focus never resizes it; only the focused border is drawn.
+# Set border_width to 0 to disable borders and their reserved inset completely.
 border_width : 2
 # Rounded client corners in pixels. Set to 0 for square windows. Fullscreen
 # windows and bars remain square.
@@ -145,6 +146,9 @@ call : mod + Shift + period : move_to_output_next
 # pointer: left/right inserts a column beside it, while top/bottom inserts a row
 # immediately above/below it. The active half-window overlay is translucent
 # with a compositor and falls back to an outline without one.
+# Mod+Alt+left-drag onto a tiled window joins its column in tabbed mode and
+# makes the dragged window the active tab.
+# Mod+left-drag on a tab header reorders the complete tabbed column.
 # Mod+right-drag resizes floaters. On tiled windows, dragging outward from the
 # starting side grows its column/row and dragging inward shrinks it.
 

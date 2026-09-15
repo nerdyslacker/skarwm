@@ -23,6 +23,10 @@ window at a time with a WM-owned tab bar.
 - `Super+t` / `toggle_tabbed` toggles the focused column.
 - `layout_tabbed` and `layout_stacked` select a mode directly.
 - In tabbed mode, `Super+j/k` selects tabs and `Super+Shift+j/k` reorders them.
+- `Super+Alt`+left-drag onto a tiled window joins its column and activates the
+  dragged window as a tab.
+- `Super`+left-drag on a tab header reorders the complete tabbed column while
+  preserving its tabs and width.
 - The otherwise-unbound Shift variant of a spawn binding opens the new window
   in the active tab group. With the default launcher this is `Super+Shift+Return`.
 - Toggling a multi-window tab group off splits its tabs back into columns.

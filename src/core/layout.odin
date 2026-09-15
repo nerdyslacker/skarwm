@@ -311,8 +311,8 @@ Scroll_Previews :: proc(m: ^Manager, o: ^Output) -> [dynamic]Scroll_Preview {
             if zone_w <= 0 { continue }
             for cl in col.Wins {
                 if cl.Geom.X <= HIDE_X { continue }
-                top := max(p.WorkY, cl.Geom.Y - cl.Border)
-                bottom := min(p.WorkY + p.WorkH, cl.Geom.Y + cl.Geom.H + cl.Border)
+                top := max(p.WorkY, cl.Geom.Y - p.Border)
+                bottom := min(p.WorkY + p.WorkH, cl.Geom.Y + cl.Geom.H + p.Border)
                 if bottom <= top { continue }
                 append(&result, Scroll_Preview{
                     Side = side, Client = cl,
@@ -335,8 +335,8 @@ Scroll_Previews :: proc(m: ^Manager, o: ^Output) -> [dynamic]Scroll_Preview {
         zone_w := min(SCROLL_PREVIEW_WIDTH, column_width(p, ws.Cols[ci]))
         for cl in ws.Cols[ci].Wins {
             if cl.Geom.X <= HIDE_X { continue }
-            top := max(p.WorkY, cl.Geom.Y - cl.Border)
-            bottom := min(p.WorkY + p.WorkH, cl.Geom.Y + cl.Geom.H + cl.Border)
+            top := max(p.WorkY, cl.Geom.Y - p.Border)
+            bottom := min(p.WorkY + p.WorkH, cl.Geom.Y + cl.Geom.H + p.Border)
             if bottom <= top { continue }
             append(&result, Scroll_Preview{
                 Side = side,
@@ -428,9 +428,9 @@ Drop_Target :: struct {
     HitGeom: Rect, // edge activation region
 }
 
-client_outer_rect :: proc(cl: ^Client) -> Rect {
+client_outer_rect :: proc(cl: ^Client, border_width: i32) -> Rect {
     if cl == nil { return {} }
-    border := max(i32(0), cl.Border)
+    border := max(i32(0), border_width)
     return Rect{
         X = cl.Geom.X - border,
         Y = cl.Geom.Y - border,
@@ -451,7 +451,7 @@ drop_target_at_point :: proc(m: ^Manager, x, y: i32, dragged: ^Client) -> Drop_T
     for col in ws.Cols {
         for win in col.Wins {
             if win == dragged || win.Floating || win.Fullscreen || win.Maximized { continue }
-            r := client_outer_rect(win)
+            r := client_outer_rect(win, m.Cfg.BorderWidth)
             if r.W <= 0 || r.H <= 0 ||
                r.X + r.W <= o.Geom.X || r.X >= o.Geom.X + o.Geom.W ||
                r.Y + r.H <= o.Geom.Y || r.Y >= o.Geom.Y + o.Geom.H {
@@ -497,7 +497,7 @@ drop_target_at_point :: proc(m: ^Manager, x, y: i32, dragged: ^Client) -> Drop_T
 
     ci, col, row := column_of(ws, closest)
     if col == nil { return {} }
-    r := client_outer_rect(closest)
+    r := client_outer_rect(closest, m.Cfg.BorderWidth)
     left_distance := abs(x - r.X)
     right_distance := abs(r.X + r.W - x)
     top_distance := abs(y - r.Y)
@@ -691,6 +691,100 @@ Drop_Target_At_Point :: proc(
     return best
 }
 
+// Tabbed_Drop_Target_At_Point resolves only an actual tiled window beneath the
+// pointer. Unlike directional drops it does not choose a nearby edge: the
+// complete destination window is the target and the dragged client is placed
+// immediately after it before the column switches to tabbed layout.
+Tabbed_Drop_Target_At_Point :: proc(m: ^Manager, x, y: i32, dragged: ^Client) -> Drop_Target {
+    if m == nil || dragged == nil { return {} }
+    o := Output_At_Point(m, x, y)
+    if o == nil || o.Current == nil { return {} }
+    ws := o.Current
+    for col in ws.Cols {
+        for win, row in col.Wins {
+            if win == nil || win == dragged || win.Floating || win.Fullscreen || win.Maximized {
+                continue
+            }
+            // Only the active member of an existing tab group is visible and
+            // may receive a pointer drop.
+            if col.Layout == .Tabbed && col.Focus != win { continue }
+            r := client_outer_rect(win, m.Cfg.BorderWidth)
+            if r.W <= 0 || r.H <= 0 ||
+               r.X + r.W <= o.Geom.X || r.X >= o.Geom.X + o.Geom.W ||
+               r.Y + r.H <= o.Geom.Y || r.Y >= o.Geom.Y + o.Geom.H ||
+               !drop_rect_contains(r, x, y) {
+                continue
+            }
+            return Drop_Target{
+                Kind = .Into_Column,
+                Out = o,
+                Ws = ws,
+                Col = col,
+                Target = win,
+                Row_Index = row + 1,
+                Geom = r,
+                HitGeom = r,
+            }
+        }
+    }
+    return {}
+}
+
+// Column_Drop_Target_At_Point is used when a drag starts on a tab header. The
+// source is the complete tabbed column, so only other columns are candidates
+// and the pointer selects insertion before or after the destination column.
+Column_Drop_Target_At_Point :: proc(m: ^Manager, x, y: i32, member: ^Client) -> Drop_Target {
+    if m == nil || member == nil || member.Ws == nil { return {} }
+    _, source, _ := column_of(member.Ws, member)
+    if source == nil || source.Layout != .Tabbed { return {} }
+    o := Output_At_Point(m, x, y)
+    if o == nil || o.Current == nil { return {} }
+    ws := o.Current
+    p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+
+    if len(ws.Cols) == 0 {
+        r := Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}
+        if rect_empty(r) || !drop_rect_contains(r, x, y) { return {} }
+        return Drop_Target{
+            Kind = .New_Column, Zone = .Left, Out = o, Ws = ws,
+            Insert_Index = 0, Geom = r, HitGeom = r,
+        }
+    }
+
+    for col, ci in ws.Cols {
+        if ws == member.Ws && col == source { continue }
+        representative: ^Client
+        for win in col.Wins {
+            if win == nil || win.Floating || win.Fullscreen || win.Maximized ||
+               win.Geom.X <= HIDE_X {
+                continue
+            }
+            if col.Layout == .Tabbed && col.Focus != win { continue }
+            representative = win
+            break
+        }
+        if representative == nil { continue }
+        outer := client_outer_rect(representative, m.Cfg.BorderWidth)
+        r := Rect{X = outer.X, Y = p.WorkY, W = outer.W, H = p.WorkH}
+        if rect_empty(r) || !drop_rect_contains(r, x, y) { continue }
+        zone := Drop_Zone.Left
+        insert_at := ci
+        geom := r
+        geom.W /= 2
+        if x >= r.X + r.W / 2 {
+            zone = .Right
+            insert_at = ci + 1
+            geom.X = r.X + r.W - geom.W
+        }
+        return Drop_Target{
+            Kind = .New_Column, Zone = zone, Out = o, Ws = ws, Col = col,
+            Target = representative, Insert_Index = insert_at,
+            Geom = geom, HitGeom = r,
+        }
+    }
+    return {}
+}
+
 // Compatibility helper for callers that specifically want a vertical target.
 Column_At_Point :: proc(m: ^Manager, x, y: i32) -> (o: ^Output, ws: ^Workspace, col: ^Column) {
     target := Drop_Target_At_Point(m, x, y)
@@ -744,13 +838,14 @@ inset_rect :: proc(tile: Rect, border: i32) -> Rect {
     }
 }
 
-// Only the workspace focus owns the configured X border. Expanding every
-// other client to the complete tile keeps outer geometry and gaps unchanged.
+// Every client reserves the configured border inset, so changing focus never
+// resizes its application surface. Only the workspace focus draws the actual
+// X border; for other clients the reserved ring simply remains empty.
 place_client_in_tile :: proc(ws: ^Workspace, cl: ^Client, tile: Rect, border: i32) {
     if cl == nil { return }
     cl.Border = 0
     if ws != nil && ws.Focus == cl { cl.Border = border }
-    cl.Geom = inset_rect(tile, cl.Border)
+    cl.Geom = inset_rect(tile, border)
 }
 
 // ----------------------------------------------------------------------------
