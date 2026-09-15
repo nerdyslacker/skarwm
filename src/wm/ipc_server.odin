@@ -3,6 +3,7 @@ package wm
 import process "../process"
 import logger "../log"
 import input "../input"
+import ui "../ui"
 import c "../core"
 import x11 "../x11"
 
@@ -22,6 +23,7 @@ import x11 "../x11"
 // unaffected); g_ipc.listen == -1 means new connections are disabled.
 
 import "core:os"
+import "core:fmt"
 import "core:strings"
 import "core:sys/posix"
 import cc "core:c" // c.char / c.size_t (c is taken by the skarwm core package)
@@ -31,6 +33,7 @@ Ipc_Client :: struct {
     ws_sub:  bool, // subscribed to "workspace" events
     out_sub: bool, // subscribed to RandR topology/geometry/focus events
     win_sub: bool, // subscribed to window lifecycle/focus/title events
+    ui_sub:  bool, // subscribed to shell-owned overlays and notices
     reader:  c.Ipc_Reader, // partial-frame reassembly (owns its buffer)
     out:     [dynamic]u8, // bytes queued for the socket
     off:     int,         // out[off:] is still unsent
@@ -261,7 +264,7 @@ ipc_handle_frame :: proc(cl: ^Ipc_Client, f: c.Ipc_Frame) -> bool {
     msg := c.Ipc_Type(f.typ)
     switch msg {
     case .Subscribe:
-        ws, out, win, good := c.ipc_parse_subscribe(f.payload)
+        ws, out, win, shell_ui, good := c.ipc_parse_subscribe(f.payload)
         if !good {
             pl := c.ipc_command_reply_payload(false, "expected a JSON array of quoted event names")
             ipc_send(cl, msg, pl)
@@ -271,6 +274,7 @@ ipc_handle_frame :: proc(cl: ^Ipc_Client, f: c.Ipc_Frame) -> bool {
         cl.ws_sub = cl.ws_sub || ws // subscriptions accumulate
         cl.out_sub = cl.out_sub || out
         cl.win_sub = cl.win_sub || win
+        cl.ui_sub = cl.ui_sub || shell_ui
         pl := c.ipc_command_reply_payload(true, "")
         ipc_send(cl, msg, pl)
         delete(pl)
@@ -309,7 +313,7 @@ ipc_handle_frame :: proc(cl: ^Ipc_Client, f: c.Ipc_Frame) -> bool {
         ipc_send(cl, msg, pl)
         delete(pl)
 
-    case .Event_Workspace, .Event_Output, .Event_Window:
+    case .Event_Workspace, .Event_Output, .Event_Window, .Event_Ui:
         // x11.Event frames are server→client traffic; a client that sends one
         // gets the same empty-body reply as any other unknown type.
         ipc_send(cl, msg, nil)
@@ -382,6 +386,12 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
         ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, g_wm.m.Focused)
         return
     case .Show_Bindings:     b.action = .Show_Bindings
+    case .Reminder_Add:
+        reminder_add(i64(cmd.arg), cmd.text)
+        suffix := "s"
+        if cmd.arg == 1 { suffix = "" }
+        notice_show(fmt.tprintf("Reminder set for %d minute%s", cmd.arg, suffix), false)
+        return
     case .Focus_Output_Next: b.action = .Focus_Output_Next
     case .Focus_Output_Prev: b.action = .Focus_Output_Prev
     case .Move_To_Output_Next: b.action = .Move_To_Output_Next
@@ -479,4 +489,102 @@ ipc_broadcast_window_event :: proc(change: string, cl: ^c.Client) {
 ipc_broadcast_focus_change :: proc(old, current: ^c.Client) {
     if old == current { return }
     ipc_broadcast_window_event(c.IPC_WINDOW_FOCUS, current)
+}
+
+ipc_active_output_name :: proc() -> string {
+    if output := c.Active_Output(g_wm.m); output != nil { return output.Name }
+    return ""
+}
+
+ipc_broadcast_ui_payload :: proc(payload: []byte) -> bool {
+    delivered := false
+    for peer in g_ipc.clients {
+        if peer.ui_sub {
+            ipc_send(peer, .Event_Ui, payload)
+            delivered = true
+        }
+    }
+    return delivered
+}
+
+ipc_notice_event :: proc(text: string, persistent: bool) -> bool {
+    sb := strings.builder_make()
+    defer strings.builder_destroy(&sb)
+    strings.write_string(&sb, `{"change":"ui-notice","output":`)
+    c.ipc_json_string(&sb, ipc_active_output_name())
+    strings.write_string(&sb, `,"text":`)
+    c.ipc_json_string(&sb, text)
+    strings.write_string(&sb, `,"persistent":`)
+    c.json_bool(&sb, persistent)
+    strings.write_string(&sb, "}")
+    return ipc_broadcast_ui_payload(transmute([]byte)strings.to_string(sb))
+}
+
+ipc_simple_ui_event :: proc(change: string) -> bool {
+    sb := strings.builder_make()
+    defer strings.builder_destroy(&sb)
+    strings.write_string(&sb, `{"change":`)
+    c.ipc_json_string(&sb, change)
+    strings.write_string(&sb, `,"output":`)
+    c.ipc_json_string(&sb, ipc_active_output_name())
+    strings.write_string(&sb, "}")
+    return ipc_broadcast_ui_payload(transmute([]byte)strings.to_string(sb))
+}
+
+ipc_reminders_event :: proc(lines: []string) -> bool {
+    sb := strings.builder_make()
+    defer strings.builder_destroy(&sb)
+    strings.write_string(&sb, `{"change":"ui-reminders-show","output":`)
+    c.ipc_json_string(&sb, ipc_active_output_name())
+    strings.write_string(&sb, `,"reminders":[`)
+    for line, i in lines {
+        if i > 0 { strings.write_string(&sb, ",") }
+        c.ipc_json_string(&sb, line)
+    }
+    strings.write_string(&sb, "]}")
+    return ipc_broadcast_ui_payload(transmute([]byte)strings.to_string(sb))
+}
+
+ipc_write_binding_entry :: proc(sb: ^strings.Builder, first: ^bool, combo, description: string) {
+    if !first^ { strings.write_string(sb, ",") }
+    first^ = false
+    strings.write_string(sb, `{"combo":`)
+    c.ipc_json_string(sb, combo)
+    strings.write_string(sb, `,"description":`)
+    c.ipc_json_string(sb, description)
+    strings.write_string(sb, "}")
+}
+
+ipc_bindings_event :: proc() -> bool {
+    sb := strings.builder_make()
+    defer strings.builder_destroy(&sb)
+    strings.write_string(&sb, `{"change":"ui-bindings-toggle","output":`)
+    c.ipc_json_string(&sb, ipc_active_output_name())
+    strings.write_string(&sb, `,"bindings":[`)
+    first := true
+    for &binding in g_wm.bindings {
+        description := ui.Binding_Description(&binding)
+        ipc_write_binding_entry(&sb, &first, binding.combo, description)
+        delete(description)
+    }
+    for &binding in g_wm.bindings {
+        if binding.action != .Spawn || binding.effective_mods & x11.MOD_MASK_SHIFT != 0 { continue }
+        derived := binding.effective_mods | x11.MOD_MASK_SHIFT
+        claimed := false
+        for &other in g_wm.bindings {
+            if other.keycode == binding.keycode && other.effective_mods == derived {
+                claimed = true
+                break
+            }
+        }
+        if !claimed {
+            combo := fmt.aprintf("Shift + %s", binding.combo)
+            description := fmt.aprintf("launch as tab: %s", binding.cmd)
+            ipc_write_binding_entry(&sb, &first, combo, description)
+            delete(combo)
+            delete(description)
+        }
+    }
+    strings.write_string(&sb, "]}")
+    return ipc_broadcast_ui_payload(transmute([]byte)strings.to_string(sb))
 }

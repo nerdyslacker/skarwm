@@ -15,3 +15,7 @@ until clicked and cannot be replaced by temporary status notices.
 
 Battery information comes from `/sys/class/power_supply`. On desktops without
 a battery, the notice reports that battery status is unavailable.
+
+Shells may subscribe to the IPC `ui` event stream to replace these surfaces and
+the bindings overlay. The built-in windows remain the automatic fallback when
+there is no UI subscriber.

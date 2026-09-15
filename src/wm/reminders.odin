@@ -26,6 +26,10 @@ reminder_dialog_end :: proc() {
 }
 
 reminder_dialog_begin :: proc() {
+    if ipc_simple_ui_event("ui-reminder-new") {
+        reminder_dialog_end()
+        return
+    }
     if g_wm.reminder_dialog_active {
         reminder_dialog_end()
         return
@@ -80,7 +84,7 @@ reminder_submit_dialog :: proc() {
     confirmation := fmt.aprintf("Reminder set for %d minute%s", minutes, "" if minutes == 1 else "s")
     defer delete(confirmation)
     reminder_dialog_end()
-    ui.Show_Notice(&g_wm.ui, g_wm.m, confirmation)
+    notice_show(confirmation, false)
 }
 
 reminder_dialog_keypress :: proc(ev: ^x11.Key_Press_Event) {
@@ -132,7 +136,7 @@ reminder_show_all :: proc() {
         return
     }
     if len(g_wm.reminders) == 0 {
-        ui.Show_Notice(&g_wm.ui, g_wm.m, "No pending reminders")
+        notice_show("No pending reminders", false)
         return
     }
     lines := make([dynamic]string, 0, len(g_wm.reminders))
@@ -142,7 +146,9 @@ reminder_show_all :: proc() {
         append(&lines, fmt.aprintf("%d. %s - %s", i + 1, remaining, reminder.Message))
         delete(remaining)
     }
-    ui.Show_Reminder_List(&g_wm.ui, g_wm.m, lines[:])
+    if !ipc_reminders_event(lines[:]) {
+        ui.Show_Reminder_List(&g_wm.ui, g_wm.m, lines[:])
+    }
     for line in lines { delete(line) }
     delete(lines)
 }
@@ -153,9 +159,9 @@ reminder_clear_all :: proc() {
     clear(&g_wm.reminders)
     ui.Hide_Reminder_Panel(&g_wm.ui)
     if count == 0 {
-        ui.Show_Notice(&g_wm.ui, g_wm.m, "No pending reminders")
+        notice_show("No pending reminders", false)
     } else {
-        ui.Show_Notice(&g_wm.ui, g_wm.m, fmt.tprintf("Cleared %d reminder%s", count, "" if count == 1 else "s"))
+        notice_show(fmt.tprintf("Cleared %d reminder%s", count, "" if count == 1 else "s"), false)
     }
 }
 
@@ -193,7 +199,7 @@ reminder_run_due :: proc() {
         ordered_remove(&g_wm.reminders, i)
         due_count += 1
     }
-    if due_count > 0 { ui.Show_Persistent_Notice(&g_wm.ui, g_wm.m, text) }
+    if due_count > 0 { notice_show(text, true) }
     delete(text)
 }
 

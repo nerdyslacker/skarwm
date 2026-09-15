@@ -22,6 +22,7 @@ skarwm-msg toggle-fullscreen
 skarwm-msg layout tabbed|stacked|toggle
 skarwm-msg toggle-tabbed
 skarwm-msg show-bindings
+skarwm-msg reminder add MINUTES MESSAGE
 skarwm-msg scratchpad toggle N
 skarwm-msg scratchpad toggle-float N
 skarwm-msg scratchpad remove N
@@ -73,7 +74,7 @@ version information.
 ## Events
 
 ```text
-skarwm-msg subscribe workspace window output
+skarwm-msg subscribe workspace window output ui
 ```
 
 The subscription first prints its success reply, then one JSON event per line.
@@ -81,6 +82,14 @@ Workspace changes are `init`, `focus`, and `empty`. Window changes are `new`,
 `close`, `focus`, `title`, `urgent`, and `layout`. Output events contain an
 `output` name and a `change` of `connected`, `disconnected`, `geometry`, or
 `focus`; consumers should refresh `get-outputs` when one arrives.
+
+The optional `ui` stream lets a desktop shell replace skarwm's minimal native
+overlays without making the shell a runtime dependency. Its events use
+`ui-bindings-toggle`, `ui-notice`, `ui-reminder-new`, and `ui-reminders-show`.
+They include the active output name plus the structured binding, notice, or
+reminder data needed to render the surface. When no client subscribes to `ui`,
+skarwm continues to use its built-in X11 overlays. A shell submits its reminder
+form with `reminder add MINUTES MESSAGE`.
 
 The socket server is nonblocking and shares skarwm's poll loop. A malformed or
 slow IPC peer therefore cannot block X event handling; individual clients are

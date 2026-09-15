@@ -21,7 +21,7 @@ spawn a command when no match exists. See [IPC.md](IPC.md).
 
 ## Overview integration
 
-The overview action is a controller for an external shell UI such as Anush. It
+The overview action is a controller for an external shell UI such as anush. It
 grabs the keyboard and emits window events; it does not draw thumbnails itself.
 
 ```rc

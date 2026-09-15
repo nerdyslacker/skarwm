@@ -706,7 +706,11 @@ dispatch_action :: proc(b: ^input.Binding) {
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
     case .Show_Bindings:
-        ui.Toggle_Help(&g_wm.ui, g_wm.m, g_wm.bindings[:], g_wm.scr_w, g_wm.scr_h)
+        if ipc_bindings_event() {
+            ui.Hide_Help(&g_wm.ui)
+        } else {
+            ui.Toggle_Help(&g_wm.ui, g_wm.m, g_wm.bindings[:], g_wm.scr_w, g_wm.scr_h)
+        }
     case .Show_Date_Time:
         show_date_time_notice()
     case .Show_Battery:

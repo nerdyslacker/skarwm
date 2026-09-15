@@ -14,3 +14,7 @@ The editor has `Minutes` and `Message` inputs. Use `Tab` or `Enter` to move to
 the message, `Shift+Tab` to move back, `Enter` from the message to save,
 `Backspace` to edit, and `Escape` to cancel. Minutes must be a positive whole
 number. The pending-reminder list can be dismissed with a click.
+
+Shells may subscribe to the IPC `ui` event stream to render the editor, list,
+and expired notices themselves. skarwm automatically retains this native UI as
+a fallback when no shell UI subscriber is connected.
