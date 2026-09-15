@@ -80,7 +80,11 @@ Render_Tabs :: proc(state: ^State, m: ^c.Manager) {
                 bg := cfg.UnfocusedBorder
                 if col.Focus == cl { bg = cfg.FocusedBorder }
                 xid := x11.xcb_generate_id(state.Conn)
-                vals := [4]u32{bg, cfg.UnfocusedBorder, 1, x11.EVENT_MASK_EXPOSURE | x11.EVENT_MASK_BUTTON_PRESS}
+                vals := [4]u32{
+                    bg, cfg.UnfocusedBorder, 1,
+                    x11.EVENT_MASK_EXPOSURE | x11.EVENT_MASK_BUTTON_PRESS |
+                        x11.EVENT_MASK_BUTTON_RELEASE | x11.EVENT_MASK_POINTER_MOTION,
+                }
                 x11.xcb_create_window(
                     state.Conn, 0, xid, state.Root,
                     i16(x), i16(bar.Y), u16(max(i32(1), width - 2)), u16(max(i32(1), bar.H - 2)),
@@ -99,4 +103,41 @@ Render_Tabs :: proc(state: ^State, m: ^c.Manager) {
 Tab_Client :: proc(state: ^State, xid: u32) -> ^c.Client {
     for tab in state.Tabs { if tab.Xid == xid { return tab.Client } }
     return nil
+}
+
+// Preview_Tab_Group moves the existing header windows as one strip above a
+// pointer-following column preview. Render_Tabs recreates them at authoritative
+// layout positions when the drag finishes.
+Preview_Tab_Group :: proc(state: ^State, member: ^c.Client, preview: c.Rect) {
+    if state == nil || member == nil || preview.W <= 0 || preview.H <= c.TAB_BAR_HEIGHT {
+        return
+    }
+    _, col, _ := c.Column_Of(member)
+    if col == nil || col.Layout != .Tabbed || len(col.Wins) == 0 { return }
+    count := len(col.Wins)
+    base_w := preview.W / i32(count)
+    rem := preview.W % i32(count)
+    x := preview.X
+    for win, i in col.Wins {
+        width := base_w
+        if i32(i) < rem { width += 1 }
+        for &tab in state.Tabs {
+            if tab.Client != win { continue }
+            vals := [5]u32{
+                u32(i16(x)), u32(i16(preview.Y)),
+                u32(max(i32(1), width - 2)),
+                u32(max(i32(1), c.TAB_BAR_HEIGHT - 2)),
+                x11.STACK_MODE_ABOVE,
+            }
+            x11.xcb_configure_window(
+                state.Conn, tab.Xid,
+                x11.CW_X | x11.CW_Y | x11.CW_WIDTH | x11.CW_HEIGHT | x11.CW_STACK_MODE,
+                &vals[0],
+            )
+            tab.Width = width
+            Draw_Tab(state, tab.Xid)
+            break
+        }
+        x += width
+    }
 }

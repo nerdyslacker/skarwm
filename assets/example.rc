@@ -146,6 +146,9 @@ call : mod + Shift + period : move_to_output_next
 # pointer: left/right inserts a column beside it, while top/bottom inserts a row
 # immediately above/below it. The active half-window overlay is translucent
 # with a compositor and falls back to an outline without one.
+# Mod+Alt+left-drag onto a tiled window joins its column in tabbed mode and
+# makes the dragged window the active tab.
+# Mod+left-drag on a tab header reorders the complete tabbed column.
 # Mod+right-drag resizes floaters. On tiled windows, dragging outward from the
 # starting side grows its column/row and dragging inward shrinks it.
 

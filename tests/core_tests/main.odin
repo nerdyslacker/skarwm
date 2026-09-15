@@ -46,6 +46,8 @@ main :: proc() {
     test_focus_direction()
     test_move_dir()
     test_pointer_column_move()
+    test_pointer_tabbed_drop()
+    test_pointer_tabbed_column_drop()
     test_relative_column_drop()
     test_unmanage()
     test_floating()
@@ -730,6 +732,80 @@ test_pointer_column_move :: proc() {
     eq(floater.Ws, right.Current, "floating drag changes workspace ownership")
     eq(floater.FloatingRect.X, 1400, "floating drag preserves root-coordinate position")
     eq(c.Active_Output(m), right, "focus follows cross-output floating drag")
+}
+
+test_pointer_tabbed_drop :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    a := add_tiled(m, 100)
+    b := add_tiled(m, 101)
+    c.Arrange_All(m)
+
+    target := c.Tabbed_Drop_Target_At_Point(
+        m, a.Geom.X + a.Geom.W / 2, a.Geom.Y + a.Geom.H / 2, b,
+    )
+    eq(target.Kind, c.Drop_Kind.Into_Column, "tab gesture targets the window beneath the pointer")
+    eq(target.Target, a, "tab gesture records the destination client")
+    eq(target.Col, ws.Cols[0], "tab gesture records the destination column")
+    eq(target.Row_Index, 1, "tab gesture inserts after its destination client")
+    eq(target.Geom, c.Rect{X = 8, Y = 8, W = 948, H = 1064}, "tab overlay covers the complete destination tile")
+
+    gap := c.Tabbed_Drop_Target_At_Point(m, 960, 540, b)
+    eq(gap.Kind, c.Drop_Kind.None, "tab gesture requires the pointer to be on a window")
+    self := c.Tabbed_Drop_Target_At_Point(
+        m, b.Geom.X + b.Geom.W / 2, b.Geom.Y + b.Geom.H / 2, b,
+    )
+    eq(self.Kind, c.Drop_Kind.None, "drag preview cannot target its own tiled position")
+
+    ok(c.Move_Client_To_Tabbed_Drop(m, b, target), "tab gesture joins the destination column")
+    eq(len(ws.Cols), 1, "tab drop removes the empty source column")
+    eq(len(ws.Cols[0].Wins), 2, "tab drop groups both clients")
+    eq(ws.Cols[0].Wins[0], a, "destination tab keeps its position")
+    eq(ws.Cols[0].Wins[1], b, "dragged client follows the destination tab")
+    eq(ws.Cols[0].Layout, c.Column_Layout.Tabbed, "tab drop enables tabbed layout")
+    eq(ws.Cols[0].Focus, b, "dragged client becomes the active tab")
+    eq(m.Focused, b, "keyboard focus follows the tab drop")
+}
+
+test_pointer_tabbed_column_drop :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    a := add_tiled(m, 100)
+    b := add_tiled(m, 101)
+    ok(c.Move_Dir(m, .Left), "column drag fixture groups two windows")
+    ok(c.Set_Column_Layout(m, .Tabbed), "column drag fixture enables tabs")
+    group := ws.Cols[0]
+    group.Width = 700
+    d := add_tiled(m, 102)
+    c.Arrange_All(m)
+
+    self := c.Column_Drop_Target_At_Point(
+        m, b.Geom.X + b.Geom.W / 2, b.Geom.Y + b.Geom.H / 2, b,
+    )
+    eq(self.Kind, c.Drop_Kind.None, "tab-header drag does not target its own group")
+
+    target := c.Column_Drop_Target_At_Point(
+        m, d.Geom.X + 3 * d.Geom.W / 4, d.Geom.Y + d.Geom.H / 2, b,
+    )
+    eq(target.Kind, c.Drop_Kind.New_Column, "tab-header drag targets another column")
+    eq(target.Zone, c.Drop_Zone.Right, "right half places the tab group after its target")
+    eq(target.Col, ws.Cols[1], "column drop records the neighboring column")
+    eq(target.Target, d, "column drop records a visible destination client")
+
+    ok(c.Move_Tabbed_Column_To_Drop(m, b, target), "tab header moves the complete group")
+    eq(len(ws.Cols), 2, "whole-column reorder keeps the column count")
+    eq(ws.Cols[0].Wins[0], d, "destination column moves before the group")
+    eq(ws.Cols[1], group, "the original column allocation is retained")
+    eq(len(group.Wins), 2, "every tab moves with the group")
+    eq(group.Wins[0], a, "first tab retains its order")
+    eq(group.Wins[1], b, "second tab retains its order")
+    eq(group.Layout, c.Column_Layout.Tabbed, "moved group remains tabbed")
+    eq(group.Focus, b, "moved group retains its active tab")
+    eq(group.Width, i32(700), "moved group retains its resized width")
 }
 
 test_relative_column_drop :: proc() {

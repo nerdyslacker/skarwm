@@ -167,6 +167,9 @@ Default interaction highlights:
 - middle-click: maximize/restore a managed window within its usable work area;
 - `Super`+left-drag: move a floating window or reposition a tiled window; tiled
   drags show a half-window target overlay;
+- `Super+Alt`+left-drag: drop a tiled window onto another one to make it the
+  active tab in that window's column;
+- `Super`+left-drag on a tab header: reorder the complete tabbed column;
 - `Super`+right-drag: resize a floating window or the nearest tiled split;
 - hover a narrow edge preview: reveal and focus the adjacent hidden window;
 

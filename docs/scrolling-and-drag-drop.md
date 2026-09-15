@@ -28,6 +28,14 @@ of that target:
   vertical column.
 - A drop can cross outputs; the destination output and workspace receive focus.
 
+Hold `Super+Alt` and left-drag onto a tiled window to join its column as a tab.
+The full-window overlay identifies the destination, and the dragged window
+becomes the active tab after the drop.
+
+Hold `Super` and left-drag a tab header to move its complete tabbed column.
+Dropping on the left or right half of another column inserts the group before
+or after it without changing tab order, the active tab, or resized width.
+
 The overlay uses a translucent fill when a compositor is available and an
 opaque outline otherwise. Resized column widths are retained when reordered.
 
