@@ -132,6 +132,9 @@ cleanup_all :: proc() {
     ui.Hide_Drop(&g_wm.ui)
     ui.Destroy_Drop(&g_wm.ui)
     ui.Hide_Help(&g_wm.ui)
+    ui.Hide_Notice(&g_wm.ui)
+    reminder_destroy_all()
+    ui.Shutdown_Reminder_Panel(&g_wm.ui)
     ui.Shutdown_Tabs(&g_wm.ui)
     release_bindings(&g_wm.bindings)
     release_rules(&g_wm.rules)
@@ -228,7 +231,16 @@ event_loop :: proc() {
             i += 1
         }
 
-        if posix.poll(raw_data(pfds), posix.nfds_t(len(pfds)), rendering.Poll_Timeout_Ms(&g_wm.rendering)) < 0 {
+        timeout := rendering.Poll_Timeout_Ms(&g_wm.rendering)
+        notice_timeout := ui.Notice_Poll_Timeout_Ms(&g_wm.ui)
+        if timeout < 0 || (notice_timeout >= 0 && notice_timeout < timeout) {
+            timeout = notice_timeout
+        }
+        reminder_timeout := reminder_poll_timeout_ms()
+        if timeout < 0 || (reminder_timeout >= 0 && reminder_timeout < timeout) {
+            timeout = reminder_timeout
+        }
+        if posix.poll(raw_data(pfds), posix.nfds_t(len(pfds)), timeout) < 0 {
             delete(pfds) // EINTR or a signal: repoll
             continue
         }
@@ -241,6 +253,8 @@ event_loop :: proc() {
                 handle_event(ev)
                 x11.free_libc(ev)
                 rendering.Run_Due_Frame(&g_wm.rendering, g_wm.conn, g_wm.m)
+                ui.Hide_Due_Notice(&g_wm.ui)
+                reminder_run_due()
             }
         }
 
@@ -274,6 +288,8 @@ event_loop :: proc() {
         // A busy X or IPC stream cannot starve animation frames: check the
         // monotonic deadline after dispatch as well as through poll's timeout.
         rendering.Run_Due_Frame(&g_wm.rendering, g_wm.conn, g_wm.m)
+        ui.Hide_Due_Notice(&g_wm.ui)
+        reminder_run_due()
     }
 }
 
@@ -339,6 +355,10 @@ handle_event :: proc(ev: ^x11.Event) {
         xid := (^x11.Expose_Event)(ev).window
         if xid == g_wm.ui.HelpWindow {
             ui.Draw_Help(&g_wm.ui, g_wm.m, g_wm.bindings[:], g_wm.scr_w, g_wm.scr_h)
+        } else if xid == g_wm.ui.NoticeWindow {
+            ui.Draw_Notice(&g_wm.ui, g_wm.m)
+        } else if ui.Is_Reminder_Panel_Window(&g_wm.ui, xid) {
+            ui.Draw_Reminder_Panel(&g_wm.ui, g_wm.m)
         } else {
             ui.Draw_Tab(&g_wm.ui, xid)
         }

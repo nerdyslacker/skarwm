@@ -89,13 +89,16 @@ keysym_at_level :: proc(kb: ^Kbd_Map, keycode: u8, level: int = 0) -> u32 {
 }
 
 // keysym_to_keycode finds the keycode whose keysym list contains `ks` and
-// returns it plus the level at which it matched. A level of 1 means Shift must
-// be held to produce the symbol (grab callers OR in the shift modifier).
+// returns it plus the level at which it matched. Search each level across the
+// complete keyboard before considering the next one: XKB exposes alternate
+// layouts in later columns, and a keycode-first scan could otherwise select an
+// alternate-layout punctuation key instead of the primary-layout key. A level
+// of 1 means Shift must be held to produce the symbol.
 keysym_to_keycode :: proc(kb: ^Kbd_Map, ks: u32) -> (keycode: u8, level: int) {
     if kb.syms == nil || kb.keysyms_per_keycode <= 0 { return 0, 0 }
-    for kc in int(MIN_KEYCODE) ..= 255 {
-        base := (kc - int(MIN_KEYCODE)) * kb.keysyms_per_keycode
-        for lv in 0 ..< kb.keysyms_per_keycode {
+    for lv in 0 ..< kb.keysyms_per_keycode {
+        for kc in int(MIN_KEYCODE) ..= 255 {
+            base := (kc - int(MIN_KEYCODE)) * kb.keysyms_per_keycode
             if kb.syms[base + lv] == ks {
                 return u8(kc), lv
             }

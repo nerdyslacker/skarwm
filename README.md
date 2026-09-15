@@ -160,6 +160,12 @@ Default interaction highlights:
 - `Super+Control+n/p`: send to the next/previous workspace;
 - `Super+Space`: toggle floating;
 - `Super+t`: toggle tabbed mode for the focused column;
+- `Super+Ctrl+Alt+h`: show or hide the keybindings help overlay;
+- `Super+Ctrl+Alt+t`: show local date and time in a temporary notice;
+- `Super+Ctrl+Alt+b`: show battery percentage and charging state;
+- `Super+Ctrl+r`: open the countdown reminder editor;
+- `Super+Ctrl+Alt+r`: show all pending reminders;
+- `Super+Ctrl+Shift+r`: clear all pending reminders;
 - `Super+/`: show all configured skarwm keybindings;
 - `Super`+wheel: scroll the workspace strip;
 - `Super+,/.`: focus the previous/next monitor;
