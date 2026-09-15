@@ -19,7 +19,7 @@ Without a file, built-in settings and bindings are used. Copy
 | `outer_gap : 8` | Space around the output work area. |
 | `inner_gap : 8` | Space between columns and stacked windows. |
 | `gap : 8` | Convenience value that sets both gaps. |
-| `border_width : 2` | Focused-window border width; unfocused windows have none. |
+| `border_width : 2` | Focused-window border width; `0` disables borders and their reserved inset. |
 | `corner_radius : 0` | Rounded-corner radius; `0` disables shaping. |
 | `norm_outer_border : #504D47` | Compatibility colour; unfocused borders are hidden. |
 | `sel_outer_border : #FF5F00` | Focused border colour. |

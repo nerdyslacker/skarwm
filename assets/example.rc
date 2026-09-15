@@ -20,8 +20,9 @@ mod_key : super
 # Pixels of empty space around the work area / between tiled windows.
 outer_gap : 8
 inner_gap : 8
-# `gap : N` seeds both outer_gap and inner_gap at once. Only the focused
-# window draws a border; unfocused windows still occupy the complete tile.
+# `gap : N` seeds both outer_gap and inner_gap at once. Every window reserves
+# the border inset so focus never resizes it; only the focused border is drawn.
+# Set border_width to 0 to disable borders and their reserved inset completely.
 border_width : 2
 # Rounded client corners in pixels. Set to 0 for square windows. Fullscreen
 # windows and bars remain square.
