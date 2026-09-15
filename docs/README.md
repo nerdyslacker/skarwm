@@ -6,6 +6,7 @@
 - [Workspaces and outputs](workspaces-and-outputs.md) — dynamic workspaces and RandR monitors.
 - [Scratchpads and overview](scratchpads-and-overview.md) — session registers and shell-driven overview events.
 - [Appearance and animation](appearance-and-animation.md) — gaps, borders, rounded corners, and transitions.
+- [Notices](notices.md) — temporary date/time and battery overlays without a bar.
 - [X11 integration](x11-integration.md) — EWMH/ICCCM, docks, focus, and window rules.
 - [IPC reference](ipc.md) — `skarwm-msg`, queries, commands, and subscriptions.
 - [Architecture](architecture.md) — packages, dependency direction, and source ownership.

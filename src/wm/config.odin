@@ -358,6 +358,10 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
         base.action = .Scratchpad_Remove; base.arg = rb.argi; return base, ""
     case "show_bindings",
          "bindings_help":    base.action = .Show_Bindings;     return base, ""
+    case "show_datetime",
+         "notice_datetime":  base.action = .Show_Date_Time;    return base, ""
+    case "show_battery",
+         "notice_battery":   base.action = .Show_Battery;      return base, ""
     case "close_window",
          "close":            base.action = .Close;             return base, ""
     case "reload_config",
@@ -951,6 +955,9 @@ cfg_apply_default :: proc() {
     add_bind_def(sc, "Mod4+f", "togglefullscreen", "")
     add_bind_def(sc, "Mod4+t", "toggle_tabbed", "")
     add_bind_def(sc, "Mod4+slash", "show_bindings", "")
+    add_bind_def(sc, "Mod4+Control+Alt+h", "show_bindings", "")
+    add_bind_def(sc, "Mod4+Control+Alt+t", "show_datetime", "")
+    add_bind_def(sc, "Mod4+Control+Alt+b", "show_battery", "")
     add_bind_def(sc, "Mod4+grave", "scratchpad_toggle", "", 1)
     add_bind_def(sc, "Mod4+Shift+grave", "scratchpad_toggle_float", "", 2)
     add_bind_def(sc, "Mod4+Control+grave", "scratchpad_remove", "", 1)

@@ -68,7 +68,8 @@ autostart : "xsetroot -solid '#202020'"
 # Action tokens: focusleft/right/up/down resizeleft/right/up/down
 # moveleft/right/up/down ws_up ws_down
 # ws_next ws_prev togglefloating togglefullscreen layout_tabbed layout_stacked
-# toggle_tabbed show_bindings focus_output_next/prev move_to_output_next/prev
+# toggle_tabbed show_bindings show_datetime show_battery
+# focus_output_next/prev move_to_output_next/prev
 # scratchpad_toggle N scratchpad_toggle_float N scratchpad_remove N
 # close_window reload_config quit.
 
@@ -93,7 +94,9 @@ call : mod + Shift + l : moveright
 call : mod + space : togglefloating
 call : mod + f     : togglefullscreen
 call : mod + t     : toggle_tabbed
-call : mod + slash : show_bindings
+call : mod + Control + Alt + h : show_bindings
+call : mod + Control + Alt + t : show_datetime
+call : mod + Control + Alt + b : show_battery
 # `layout_tabbed` and `layout_stacked` select a mode directly. In tabbed mode,
 # only the focused column becomes a tab group. Move chosen windows into that
 # column with mod+Shift+h/l; mod+k/j selects tabs and mod+Shift+k/j reorders.

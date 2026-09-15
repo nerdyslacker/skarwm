@@ -14,6 +14,7 @@ Action_Kind :: enum u8 {
     Overview_Next, Overview_Prev,
     Scratchpad_Toggle, Scratchpad_Toggle_Float, Scratchpad_Remove,
     Show_Bindings,
+    Show_Date_Time, Show_Battery,
     Close,
     Reload,
     Quit,

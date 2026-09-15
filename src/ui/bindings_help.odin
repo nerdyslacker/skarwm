@@ -44,6 +44,8 @@ binding_description :: proc(b: ^input.Binding) -> string {
     case .Scratchpad_Toggle_Float: return fmt.aprintf("toggle floating scratchpad %d", b.arg)
     case .Scratchpad_Remove:   return fmt.aprintf("remove scratchpad %d", b.arg)
     case .Show_Bindings:       return fmt.aprintf("show or hide keybindings")
+    case .Show_Date_Time:      return fmt.aprintf("show date and time notice")
+    case .Show_Battery:        return fmt.aprintf("show battery notice")
     case .Close:               return fmt.aprintf("close focused window")
     case .Reload:              return fmt.aprintf("reload configuration")
     case .Quit:                return fmt.aprintf("quit skarwm")

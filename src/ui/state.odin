@@ -2,6 +2,7 @@ package ui
 
 import c "../core"
 import x11 "../x11"
+import "core:time"
 
 Tab_Decoration :: struct {
     Xid: u32,
@@ -19,6 +20,9 @@ State :: struct {
     Tabs: [dynamic]Tab_Decoration,
     TabGC, TabFont: u32,
     HelpWindow: u32,
+    NoticeWindow: u32,
+    NoticeText: string,
+    NoticeUntil: time.Tick,
 
     DropWindows: [5]u32,
     DropVisible: bool,

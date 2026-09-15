@@ -34,6 +34,9 @@ Without a file, built-in settings and bindings are used. Copy
 ```rc
 bind : mod + Return : "xterm"
 call : mod + f : togglefullscreen
+call : mod + Control + Alt + h : show_bindings
+call : mod + Control + Alt + t : show_datetime
+call : mod + Control + Alt + b : show_battery
 workspace : mod + 1 : view 1
 workspace : mod + Shift + 1 : tag 1
 autostart : "xsetroot -solid '#202020'"

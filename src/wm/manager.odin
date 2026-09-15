@@ -701,6 +701,10 @@ dispatch_action :: proc(b: ^input.Binding) {
         }
     case .Show_Bindings:
         ui.Toggle_Help(&g_wm.ui, g_wm.m, g_wm.bindings[:], g_wm.scr_w, g_wm.scr_h)
+    case .Show_Date_Time:
+        show_date_time_notice()
+    case .Show_Battery:
+        show_battery_notice()
     case .Close:
         close_focused()
     case .WS_Next:
@@ -1039,6 +1043,10 @@ tiled_resize_motion :: proc(root_x, root_y: i32) {
 on_button_press :: proc(ev: ^x11.Button_Press_Event) {
     if ev.event == g_wm.ui.HelpWindow {
         ui.Hide_Help(&g_wm.ui)
+        return
+    }
+    if ev.event == g_wm.ui.NoticeWindow {
+        ui.Hide_Notice(&g_wm.ui)
         return
     }
     clean := ev.state & ~(g_wm.lock | g_wm.numlock)
