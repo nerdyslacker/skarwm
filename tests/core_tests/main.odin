@@ -1215,8 +1215,36 @@ test_multi_output_scrolling :: proc() {
     eq(c.Active_Output(m), right, "pointer scrolling does not steal active output")
     c.Arrange_All(m)
     eq(left_first.Geom.X, -1878, "left output exposes its unfocused left neighbor after scrolling")
+    left_rendered, _ := c.Clip_Tiled_Geometry(left_first.Geom, left_first.Border, left.Geom)
+    ok(left_rendered.X >= left.Geom.X && left_rendered.X + left_rendered.W <= left.Geom.X + left.Geom.W,
+       "left edge preview renders only on its owning output")
     ok(left_third.Geom.X >= left.Geom.X && left_third.Geom.X < left.Geom.X + left.Geom.W,
        "newly visible left column stays within its output")
+
+    left_viewport := left.Current.ViewportX
+    ok(c.Scroll_Output_Viewport(m, right, 1), "wheel can scroll the right output independently")
+    eq(left.Current.ViewportX, left_viewport, "right-output scroll leaves the left viewport unchanged")
+    ok(right.Current.ViewportX > 0, "right output viewport advances")
+    c.Arrange_All(m)
+    right_rendered, _ := c.Clip_Tiled_Geometry(right_first.Geom, right_first.Border, right.Geom)
+    ok(right_rendered.X >= right.Geom.X && right_rendered.X + right_rendered.W <= right.Geom.X + right.Geom.W,
+       "right output preview cannot render onto the left monitor")
+    for cl in right.Current.Cols[2].Wins {
+        rendered, _ := c.Clip_Tiled_Geometry(cl.Geom, cl.Border, right.Geom)
+        ok(rendered.X >= right.Geom.X && rendered.X + rendered.W <= right.Geom.X + right.Geom.W,
+           "right output's rendered window remains within that output")
+    }
+
+    // Resized columns use a contiguous logical strip, so the last column can
+    // intersect the output edge. Its X rendering must still stop there.
+    right.Current.ViewportX = 0
+    for col in right.Current.Cols { col.Width = 700 }
+    c.Arrange_All(m)
+    ok(right_third.Geom.X + right_third.Geom.W > right.Geom.X + right.Geom.W,
+       "custom-width fixture logically continues past the output edge")
+    custom_rendered, _ := c.Clip_Tiled_Geometry(right_third.Geom, right_third.Border, right.Geom)
+    ok(custom_rendered.X + custom_rendered.W <= right.Geom.X + right.Geom.W,
+       "custom-width continuation cannot render on the adjacent monitor")
 }
 
 // ----------------------------------------------------------------------------
