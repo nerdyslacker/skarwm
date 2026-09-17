@@ -2,7 +2,7 @@ package wm
 
 // Optional built-in bar process control. The bar remains an ordinary EWMH
 // dock client: this module only publishes its small bootstrap configuration
-// and starts it. Rendering and monitor handling live in cmd/skarwm-bar.
+// and starts it. Rendering and monitor handling live in src/bar.
 
 import process "../process"
 import x11 "../x11"
@@ -13,7 +13,8 @@ import "core:strings"
 
 BAR_CONFIG_ATOM :: "_SKARWM_BAR_CONFIG"
 BAR_BLOCKS_ATOM :: "_SKARWM_BAR_BLOCKS"
-BAR_CONFIG_VERSION :: u32(1)
+BAR_FONT_ATOM :: "_SKARWM_BAR_FONT"
+BAR_CONFIG_VERSION :: u32(3)
 
 bar_write_escaped :: proc(builder: ^strings.Builder, value: string) {
     for byte in transmute([]u8)value {
@@ -68,7 +69,15 @@ bar_sync_config :: proc() {
     values := []u32{
         BAR_CONFIG_VERSION, u32(cfg.BarEnabled), position, u32(cfg.BarHeight),
         cfg.BarForeground, cfg.BarBackground,
+        u32(cfg.BarWorkspaceCount),
+        cfg.BarWorkspaceForeground, cfg.BarWorkspaceBackground,
+        cfg.BarBlockForeground, cfg.BarBlockBackground,
+        u32(cfg.BarFontSize), u32(cfg.BarFontWeight),
     }
+    font := string(cfg.BarFont[:cfg.BarFontLen])
+    x11.set_prop_text(g_wm.conn, g_wm.root, atom(BAR_FONT_ATOM), atom("UTF8_STRING"), font)
+    // BAR_CONFIG is the commit signal observed by the bar, so publish the
+    // string property first and the versioned numeric payload last.
     x11.set_prop32(g_wm.conn, g_wm.root, atom(BAR_CONFIG_ATOM), atom("CARDINAL"), values)
     bar_publish_blocks()
     x11.xcb_flush(g_wm.conn)

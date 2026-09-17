@@ -1,6 +1,6 @@
 package main
 
-import x11 "../../src/x11"
+import x11 "../x11"
 
 import "core:fmt"
 import "core:strconv"
@@ -150,19 +150,38 @@ blocks_destroy :: proc(state: ^State) {
     state.Blocks = nil
 }
 
-workspace_label :: proc(ws: Workspace_State) -> string {
+workspace_for_slot :: proc(state: ^State, window: ^Bar_Window, id: int) -> ^Workspace_State {
+    for &ws in state.Workspaces {
+        if ws.Id == id && ws.Output == window.Output { return &ws }
+    }
+    return nil
+}
+
+workspace_label :: proc(id: int, ws: ^Workspace_State) -> string {
+    if ws == nil { return fmt.aprintf("%d", id) }
     if ws.Urgent { return fmt.aprintf("%s!", ws.Name) }
-    if ws.Occupied { return fmt.aprintf("%s+", ws.Name) }
     return fmt.aprintf("%s", ws.Name)
+}
+
+workspace_width :: proc(state: ^State, label: string, occupied: bool) -> i32 {
+    return text_width(state, label, occupied) + 20
+}
+
+blend_colour :: proc(from, to: u32, to_parts: u32, total_parts: u32 = 100) -> u32 {
+    from_parts := total_parts - to_parts
+    red := (((from >> 16) & 0xff) * from_parts + ((to >> 16) & 0xff) * to_parts) / total_parts
+    green := (((from >> 8) & 0xff) * from_parts + ((to >> 8) & 0xff) * to_parts) / total_parts
+    blue := ((from & 0xff) * from_parts + (to & 0xff) * to_parts) / total_parts
+    return red << 16 | green << 8 | blue
 }
 
 workspace_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32 {
     _ = block
     width := i32(0)
-    for ws in state.Workspaces {
-        if ws.Output != window.Output { continue }
-        label := workspace_label(ws)
-        width += i32(len(label)) * 6 + 16
+    for id := 1; id <= int(state.Config.WorkspaceCount); id += 1 {
+        label := workspace_label(id, workspace_for_slot(state, window, id))
+        ws := workspace_for_slot(state, window, id)
+        width += workspace_width(state, label, ws != nil && ws.Occupied)
         delete(label)
     }
     return width
@@ -171,26 +190,39 @@ workspace_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> 
 workspace_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, start_x: i32, block_index: int) {
     _ = block
     x := start_x
-    for ws in state.Workspaces {
-        if ws.Output != window.Output { continue }
-        label := workspace_label(ws)
-        width := i32(len(label)) * 6 + 16
-        background := state.Config.Background
-        foreground := state.Config.Foreground
-        if ws.Active {
-            background, foreground = state.Config.Foreground, state.Config.Background
-        } else if ws.Urgent {
-            background = 0xD75F5F
-        } else if window.HoverWorkspace == ws.Id {
-            background = 0x4A4A5A
-        } else if !ws.Occupied {
-            foreground = 0x888899
+    for id := 1; id <= int(state.Config.WorkspaceCount); id += 1 {
+        ws := workspace_for_slot(state, window, id)
+        label := workspace_label(id, ws)
+        occupied := ws != nil && ws.Occupied
+        width := workspace_width(state, label, occupied)
+        background := state.Config.WorkspaceBackground
+        foreground := state.Config.WorkspaceForeground
+        if ws != nil && ws.Active {
+            background = state.Config.Foreground
+            foreground = state.Config.Background
+        } else if ws != nil && ws.Urgent {
+            background = state.Config.BlockBackground
+            foreground = state.Config.BlockForeground
+        } else if window.HoverWorkspace == id {
+            background = blend_colour(
+                state.Config.WorkspaceBackground, state.Config.Foreground, 35,
+            )
+        } else if !occupied {
+            foreground = blend_colour(
+                state.Config.WorkspaceForeground, state.Config.WorkspaceBackground, 55,
+            )
         }
-        fill_rect(state, window.Xid, x, 0, width, window.Geom.H, background)
-        draw_text(state, window.Xid, x + 8, window.Geom.H / 2 + 5, label, foreground, background)
+        fill_rect(state, X_Drawable(window.Canvas), x, 0, width, window.Geom.H, background)
+        draw_text(state, window, x + 10, label, foreground, occupied)
+        if occupied {
+            fill_rect(
+                state, X_Drawable(window.Canvas), x + 6, window.Geom.H - 2,
+                width - 12, 2, foreground,
+            )
+        }
         append(&window.Hits, Hitbox{
             X = x, Y = 0, W = width, H = window.Geom.H,
-            BlockIndex = block_index, Payload = ws.Id,
+            BlockIndex = block_index, Payload = id,
         })
         x += width
         delete(label)
@@ -200,9 +232,17 @@ workspace_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, start_
 workspace_click :: proc(block: ^Block, state: ^State, window: ^Bar_Window, workspace_id: int, button: u8) {
     _ = block
     target := workspace_id
-    if button == 4 { target -= 1 }
-    if button == 5 { target += 1 }
+    if button == 4 || button == 5 {
+        target = 1
+        for ws in state.Workspaces {
+            if ws.Output == window.Output && ws.Active { target = ws.Id; break }
+        }
+        if button == 4 { target -= 1 }
+        if button == 5 { target += 1 }
+        if target < 1 { target = int(state.Config.WorkspaceCount) }
+        if target > int(state.Config.WorkspaceCount) { target = 1 }
+    }
     if button != 1 && button != 4 && button != 5 { return }
-    if target < 1 { return }
+    if target < 1 || target > int(state.Config.WorkspaceCount) { return }
     ipc_switch_workspace(state, window.Output, target)
 }

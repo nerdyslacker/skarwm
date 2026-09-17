@@ -1,6 +1,7 @@
 package main
 
-import x11 "../../src/x11"
+import x11 "../x11"
+import c "core:c"
 
 init_randr :: proc(state: ^State) {
     name := "RANDR"
@@ -85,6 +86,10 @@ monitor_atom_name :: proc(state: ^State, id: u32) -> string {
 destroy_windows :: proc(state: ^State) {
     if state.Conn != nil {
         for window in state.Windows {
+            if window.TextDraw != nil { XftDrawDestroy(window.TextDraw) }
+            if window.Canvas != 0 && state.Display != nil {
+                XFreePixmap(state.Display, window.Canvas)
+            }
             if window.Xid != 0 { x11.xcb_destroy_window(state.Conn, window.Xid) }
             if window.Output != "" { delete(window.Output) }
             delete(window.Hits)
@@ -169,6 +174,12 @@ create_bar_window :: proc(state: ^State, monitor: Monitor) {
     x11.set_prop32(state.Conn, xid, atom(state, "_NET_WM_STRUT_PARTIAL"), atom(state, "CARDINAL"), strut[:])
 
     x11.xcb_map_window(state.Conn, xid)
+    x11.xcb_flush(state.Conn)
+    screen := XDefaultScreen(state.Display)
+    canvas := XCreatePixmap(
+        state.Display, X_Drawable(xid), c.uint(monitor.W), c.uint(height),
+        c.uint(XDefaultDepth(state.Display, screen)),
+    )
     hits := make([dynamic]Hitbox, 0, 16)
     append(&state.Windows, Bar_Window{
         Xid = xid,
@@ -178,6 +189,10 @@ create_bar_window :: proc(state: ^State, monitor: Monitor) {
         // far below the short bar window and clipped every glyph.
         Geom = Monitor{X = monitor.X, Y = y, W = monitor.W, H = height},
         Hits = hits,
+        Canvas = canvas,
+        TextDraw = XftDrawCreate(
+            state.Display, X_Drawable(canvas), state.Visual, state.Colormap,
+        ),
     })
     draw_bar(state, &state.Windows[len(state.Windows) - 1])
 }

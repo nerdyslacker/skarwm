@@ -34,7 +34,9 @@ import x11 "../x11"
 //     border_width, corner_radius, norm_outer_border (unfocused colour), sel_outer_border
 //     (focused colour), focus_follows_mouse, animations,
 //     animation_duration_ms, animation_fps, animation_easing, bar_enabled,
-//     bar_position, bar_height, bar_foreground, bar_background. Legacy decorative/titlebar keys
+//     bar_position, bar_height, bar_foreground, bar_background,
+//     bar_tag_count, bar_tag_foreground, bar_tag_background,
+//     bar_block_foreground, bar_block_background. Legacy decorative/titlebar keys
 //     are accepted and ignored; an unknown setting logs one warning.
 //   - directives:
 //       bind       : <combo> : "<command>"
@@ -122,13 +124,20 @@ Load_Scratch :: struct {
     focused, unfocused: u32,
     bar_enabled: bool,
     bar_position: c.Bar_Position,
-    bar_height: i32,
+    bar_height, bar_tag_count, bar_font_size: i32,
+    bar_font: string,
+    bar_font_weight: c.Bar_Font_Weight,
     bar_foreground, bar_background: u32,
+    bar_tag_foreground, bar_tag_background: u32,
+    bar_block_foreground, bar_block_background: u32,
     gap_set, outer_set, inner_set, border_set, corner_radius_set, ffm_set: bool,
     animations_set, animation_duration_set, animation_fps_set, animation_easing_set: bool,
     focused_set, unfocused_set: bool,
-    bar_enabled_set, bar_position_set, bar_height_set: bool,
+    bar_enabled_set, bar_position_set, bar_height_set, bar_tag_count_set: bool,
+    bar_font_set, bar_font_size_set, bar_font_weight_set: bool,
     bar_foreground_set, bar_background_set: bool,
+    bar_tag_foreground_set, bar_tag_background_set: bool,
+    bar_block_foreground_set, bar_block_background_set: bool,
     // directives
     binds:    [dynamic]Raw_Bind,
     rules:    [dynamic]Raw_Rule,
@@ -157,6 +166,7 @@ scratch_new :: proc() -> ^Load_Scratch {
 scratch_destroy :: proc(sc: ^Load_Scratch) {
     if sc == nil { return }
     if sc.mod_key != "" { delete(sc.mod_key) }
+    if sc.bar_font != "" { delete(sc.bar_font) }
     for &b in sc.binds {
         if b.combo != "" { delete(b.combo) }
         if b.action != "" { delete(b.action) }
@@ -482,8 +492,19 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.bar_enabled_set { r.cfg.BarEnabled = sc.bar_enabled }
     if sc.bar_position_set { r.cfg.BarPosition = sc.bar_position }
     if sc.bar_height_set { r.cfg.BarHeight = sc.bar_height }
+    if sc.bar_font_set {
+        copy(r.cfg.BarFont[:], transmute([]u8)sc.bar_font)
+        r.cfg.BarFontLen = i32(len(sc.bar_font))
+    }
+    if sc.bar_font_size_set { r.cfg.BarFontSize = sc.bar_font_size }
+    if sc.bar_font_weight_set { r.cfg.BarFontWeight = sc.bar_font_weight }
     if sc.bar_foreground_set { r.cfg.BarForeground = sc.bar_foreground }
     if sc.bar_background_set { r.cfg.BarBackground = sc.bar_background }
+    if sc.bar_tag_count_set { r.cfg.BarWorkspaceCount = sc.bar_tag_count }
+    if sc.bar_tag_foreground_set { r.cfg.BarWorkspaceForeground = sc.bar_tag_foreground }
+    if sc.bar_tag_background_set { r.cfg.BarWorkspaceBackground = sc.bar_tag_background }
+    if sc.bar_block_foreground_set { r.cfg.BarBlockForeground = sc.bar_block_foreground }
+    if sc.bar_block_background_set { r.cfg.BarBlockBackground = sc.bar_block_background }
     c.Apply_Gap_Alias(&r.cfg)
 
     mod_key := "Mod4"
@@ -667,6 +688,34 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         }
         sc.bar_height = n; sc.bar_height_set = true
         return true
+    case "bar_font":
+        font := quoted_trim(value)
+        if font == "" || len(font) >= len(c.Config{}.BarFont) {
+            append(errs, fmt.aprintf("bar_font: expected a font family shorter than 128 bytes, got %q", value))
+            return false
+        }
+        if sc.bar_font != "" { delete(sc.bar_font) }
+        sc.bar_font = strings.clone(font); sc.bar_font_set = true
+        return true
+    case "bar_font_size":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 6 || n > 72 {
+            append(errs, fmt.aprintf("bar_font_size: expected 6..72, got %q", value))
+            return false
+        }
+        sc.bar_font_size = n; sc.bar_font_size_set = true
+        return true
+    case "bar_font_weight":
+        switch quoted_trim(value) {
+        case "normal", "regular": sc.bar_font_weight = .Normal
+        case "medium": sc.bar_font_weight = .Medium
+        case "bold": sc.bar_font_weight = .Bold
+        case:
+            append(errs, fmt.aprintf("bar_font_weight: expected normal/medium/bold, got %q", value))
+            return false
+        }
+        sc.bar_font_weight_set = true
+        return true
     case "bar_foreground":
         v, ok := parse_color(value)
         if !ok { append(errs, fmt.aprintf("bar_foreground: expected #RRGGBB, got %q", value)); return false }
@@ -676,6 +725,34 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         v, ok := parse_color(value)
         if !ok { append(errs, fmt.aprintf("bar_background: expected #RRGGBB, got %q", value)); return false }
         sc.bar_background = v; sc.bar_background_set = true
+        return true
+    case "bar_tag_count", "bar_workspace_count":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 1 || n > 64 {
+            append(errs, fmt.aprintf("bar_tag_count: expected 1..64, got %q", value))
+            return false
+        }
+        sc.bar_tag_count = n; sc.bar_tag_count_set = true
+        return true
+    case "bar_tag_foreground", "bar_workspace_foreground":
+        v, ok := parse_color(value)
+        if !ok { append(errs, fmt.aprintf("bar_tag_foreground: expected #RRGGBB, got %q", value)); return false }
+        sc.bar_tag_foreground = v; sc.bar_tag_foreground_set = true
+        return true
+    case "bar_tag_background", "bar_workspace_background":
+        v, ok := parse_color(value)
+        if !ok { append(errs, fmt.aprintf("bar_tag_background: expected #RRGGBB, got %q", value)); return false }
+        sc.bar_tag_background = v; sc.bar_tag_background_set = true
+        return true
+    case "bar_block_foreground":
+        v, ok := parse_color(value)
+        if !ok { append(errs, fmt.aprintf("bar_block_foreground: expected #RRGGBB, got %q", value)); return false }
+        sc.bar_block_foreground = v; sc.bar_block_foreground_set = true
+        return true
+    case "bar_block_background":
+        v, ok := parse_color(value)
+        if !ok { append(errs, fmt.aprintf("bar_block_background: expected #RRGGBB, got %q", value)); return false }
+        sc.bar_block_background = v; sc.bar_block_background_set = true
         return true
 
     case:

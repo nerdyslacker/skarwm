@@ -103,6 +103,7 @@ The source is split into small packages with one-way dependencies:
 ```text
 src/
 ├── main.odin          executable entry point
+├── bar/               optional standalone EWMH dock/bar client
 ├── core/              model, layout, operations, IPC types, pure math
 ├── x11/               low-level XCB, properties, and RandR bindings
 ├── input/             keysyms, modifiers, actions, and resolved bindings
@@ -112,7 +113,6 @@ src/
 ├── log/               logging
 └── wm/                runtime orchestration, config, EWMH, outputs, IPC server
 cmd/skarwm-msg/        standalone IPC command client
-cmd/skarwm-bar/        optional standalone EWMH dock/bar client
 tests/core_tests/      X-independent core regression suite
 ```
 

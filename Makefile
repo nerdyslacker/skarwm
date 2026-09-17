@@ -1,10 +1,11 @@
 # skarwm build.
 #
-# Required at *runtime*:   libxcb + libxcb-randr + libxcb-shape
+# Required at *runtime*:   libxcb + libxcb-randr + libxcb-shape; the optional
+#                          bar additionally uses libX11 + libXft/fontconfig
 # Required at *build* time: odin
 #
 # Configuration is a plain-text rc file — there is no embedded
-# interpreter, so the only runtime dependency is libxcb. Targets:
+# interpreter, so the WM itself keeps its existing XCB-only dependency. Targets:
 #   make            build skarwm, skarwm-msg, and optional skarwm-bar binaries
 #   make debug      build an assertion-enabled binary into build/skarwm-debug
 #   make test       run the unit suite (tests/core_tests) then the X11
@@ -37,9 +38,9 @@ build/skarwm-msg: $(shell find cmd/skarwm-msg src/core -name '*.odin')
 	@mkdir -p build
 	$(ODIN) build cmd/skarwm-msg -o:speed -out:$@
 
-build/skarwm-bar: $(shell find cmd/skarwm-bar src/x11 src/core -name '*.odin')
+build/skarwm-bar: $(shell find src/bar src/x11 src/core -name '*.odin')
 	@mkdir -p build
-	$(ODIN) build cmd/skarwm-bar -o:speed -out:$@
+	$(ODIN) build src/bar -o:speed -out:$@
 
 # debug build (same features, asserts/checks enabled)
 build/skarwm-debug: $(ODIN_SRCS)

@@ -31,7 +31,7 @@ corner_radius : 0
 # Window border colours as #RRGGBB. The normal colour remains accepted for
 # config compatibility; unfocused windows currently have no border.
 norm_outer_border : #504D47
-sel_outer_border  : #FF5F00
+sel_outer_border  : #FCE8C3
 
 # True (default): moving the pointer over a window focuses it.
 focus_follows_mouse : true
@@ -47,21 +47,30 @@ animation_easing : ease_out_cubic
 # desktop shells remain unaffected. The current implementation creates one
 # reserved top/bottom strip per RandR monitor; content blocks are being added
 # incrementally.
-bar_enabled : true
+bar_enabled : false
 bar_position : top
 bar_height : 26
-bar_font : monospace
-bar_foreground : #FF5F00
-bar_background : #504D47
+bar_font : "JetBrainsMono Nerd Font"
+bar_font_size : 12
+bar_font_weight : normal
+bar_foreground : #FCE8C3
+bar_background : #121110
+bar_tag_count : 12
+bar_tag_foreground : #0E0D0C
+bar_tag_background : #917E6B
+bar_block_foreground : #0E0D0C
+bar_block_background : #C5B088
 # Repeated directives define block order. Script fields are:
 # alignment : name : interval seconds : timeout seconds : shell command.
 bar_block : workspaces : left
-bar_block : script : center : date : 1 : 1 : "date '+%a, %b %d - %H:%M:%S'"
-bar_block : script : right : cpu : 2 : 3 : "grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print int(usage+0.5) "%"}'"
-bar_block : script : right : ram : 2 : 1 : "free | awk '/Mem:/ {printf "%.0f%%\n", $3/$2*100}'"
-bar_block : script : right : disk : 30 : 1 : "df -P / | awk 'NR==2 {print $5}'"
-bar_block : script : right : vol : 1 : 1 : "pactl get-sink-volume @DEFAULT_SINK@ | grep -o '[0-9]*%' | head -1"
-bar_block : script : right : bat : 10 : 1 : "cat /sys/class/power_supply/BAT0/capacity; printf '%%'"
+# Use _ as the name to render only the command output. Other names render as
+# "name value" without inserted punctuation, which also works well for icons.
+bar_block : script : center : 󰃭 : 1 : 1 : "date '+%a, %b %d - %H:%M:%S'"
+bar_block : script : right : 󰍛 : 2 : 1 : "free -b | awk '/Mem:/ {print int($3/107374182.4)/10 "/" int($2/107374182.4)/10 "GB"}'"
+bar_block : script : right :  : 2 : 3 : "grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print int(usage+0.5) "%"}'"
+bar_block : script : right : 󰋊 : 30 : 1 : "df -P / | awk 'NR==2 {print $5}'"
+bar_block : script : right : 󰕾 : 1 : 1 : "pactl get-sink-volume @DEFAULT_SINK@ | grep -o '[0-9]*%' | head -1"
+bar_block : script : right : 󰁹 : 10 : 1 : "cat /sys/class/power_supply/BAT0/capacity; printf '%%'"
 bar_block : systray : right
 
 # ---- launching ----------------------------------------------------------------

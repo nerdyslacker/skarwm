@@ -1,6 +1,6 @@
 package main
 
-import x11 "../../src/x11"
+import x11 "../x11"
 
 import "core:sys/posix"
 
@@ -31,12 +31,27 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
     switch response_type {
     case u8(x11.EVENT_CLIENT_MESSAGE):
         tray_handle_client_message(state, (^x11.Client_Message_Event)(event))
+    case u8(x11.EVENT_MAP_REQUEST):
+        mapped := (^x11.Map_Request_Event)(event)
+        if mapped.parent == state.Tray.Owner && tray_has_icon(state, mapped.window) {
+            x11.xcb_map_window(state.Conn, mapped.window)
+            draw_all_bars(state)
+        }
     case u8(x11.EVENT_DESTROY_NOTIFY):
         destroyed := (^x11.Destroy_Notify_Event)(event)
         if destroyed.event == state.Tray.HostBar { tray_remove(state, destroyed.window, true) }
-    case u8(x11.EVENT_UNMAP_NOTIFY):
-        unmapped := (^x11.Unmap_Notify_Event)(event)
-        if unmapped.event == state.Tray.HostBar { tray_remove(state, unmapped.window) }
+        if destroyed.event == state.Tray.Owner { tray_remove(state, destroyed.window, true) }
+    case u8(x11.EVENT_CONFIGURE_REQUEST):
+        requested := (^x11.Configure_Request_Event)(event)
+        if requested.parent == state.Tray.Owner && tray_has_icon(state, requested.window) {
+            draw_all_bars(state)
+        }
+    case u8(x11.EVENT_REPARENT_NOTIFY):
+        reparented := (^x11.Reparent_Notify_Event)(event)
+        if reparented.event == state.Tray.Owner && tray_has_icon(state, reparented.window) &&
+           reparented.parent != state.Tray.Owner {
+            tray_remove(state, reparented.window, true)
+        }
     case u8(x11.EVENT_SELECTION_CLEAR):
         cleared := (^x11.Selection_Clear_Event)(event)
         if cleared.selection == state.Tray.Selection && cleared.owner == state.Tray.Owner {
@@ -62,8 +77,17 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
         old := state.Config
         enabled, found := read_managed_config(state)
         if !found || !enabled { return false }
+        font_changed := old.FontLen != state.Config.FontLen ||
+            config_font(&old) != config_font(&state.Config) ||
+            old.FontSize != state.Config.FontSize || old.FontWeight != state.Config.FontWeight
+        if font_changed { renderer_load_fonts(state) }
         if old.Position != state.Config.Position || old.Height != state.Config.Height ||
-           old.Foreground != state.Config.Foreground || old.Background != state.Config.Background {
+           old.Foreground != state.Config.Foreground || old.Background != state.Config.Background ||
+           old.WorkspaceCount != state.Config.WorkspaceCount ||
+           old.WorkspaceForeground != state.Config.WorkspaceForeground ||
+           old.WorkspaceBackground != state.Config.WorkspaceBackground ||
+           old.BlockForeground != state.Config.BlockForeground ||
+           old.BlockBackground != state.Config.BlockBackground || font_changed {
             rebuild_windows(state)
         }
     case u8(x11.EVENT_EXPOSE):
@@ -105,6 +129,7 @@ run_event_loop :: proc(state: ^State) {
     running := true
     for running && x11.xcb_connection_has_error(state.Conn) == 0 {
         if state.IpcFd < 0 { ipc_start(state) }
+        if state.Tray.Enabled && state.Tray.Owner == 0 { tray_update_owner(state) }
         scripts_service(state)
         count := 1
         if state.IpcFd >= 0 { count = 2 }
@@ -113,6 +138,9 @@ run_event_loop :: proc(state: ^State) {
         if count == 2 { descriptors[1] = posix.pollfd{fd = state.IpcFd, events = {.IN}} }
         timeout := scripts_poll_timeout(state)
         if state.IpcFd < 0 && (timeout < 0 || timeout > 1000) { timeout = 1000 }
+        if state.Tray.Enabled && state.Tray.Owner == 0 && (timeout < 0 || timeout > 1000) {
+            timeout = 1000
+        }
         result := posix.poll(&descriptors[0], posix.nfds_t(count), timeout)
         if result < 0 { continue }
 

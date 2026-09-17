@@ -1,5 +1,7 @@
 package main
 
+// Script-backed bar blocks.
+
 import "core:c"
 import "core:fmt"
 import "core:strings"
@@ -58,16 +60,16 @@ append_script_block :: proc(
 
 script_label :: proc(data: ^Script_Block_Data) -> string {
     if data == nil { return fmt.aprintf("") }
-    if data.Name == "" { return fmt.aprintf("%s", data.Text) }
-    return fmt.aprintf("%s: %s", data.Name, data.Text)
+    if data.Name == "" || data.Name == "_" { return fmt.aprintf("%s", data.Text) }
+    return fmt.aprintf("%s %s", data.Name, data.Text)
 }
 
 script_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32 {
-    _ = state
     _ = window
     label := script_label(script_data(block))
     defer delete(label)
-    return i32(min(len(label), SCRIPT_VISIBLE_MAX)) * 6 + 16
+    visible := label[:min(len(label), SCRIPT_VISIBLE_MAX)]
+    return text_width(state, visible) + 16
 }
 
 script_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, block_index: int) {
@@ -75,12 +77,13 @@ script_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, b
     label := script_label(script_data(block))
     defer delete(label)
     visible := label[:min(len(label), SCRIPT_VISIBLE_MAX)]
-    width := i32(len(visible)) * 6 + 16
-    fill_rect(state, window.Xid, x, 0, width, window.Geom.H, state.Config.Background)
-    draw_text(
-        state, window.Xid, x + 8, window.Geom.H / 2 + 5,
-        visible, state.Config.Foreground, state.Config.Background,
+    width := text_width(state, visible) + 16
+    wrapper_y := min(i32(3), max(i32(0), window.Geom.H / 4))
+    fill_rect(
+        state, X_Drawable(window.Canvas), x, wrapper_y, width, window.Geom.H - wrapper_y * 2,
+        state.Config.BlockBackground,
     )
+    draw_text(state, window, x + 8, visible, state.Config.BlockForeground)
 }
 
 script_stop :: proc(data: ^Script_Block_Data) {

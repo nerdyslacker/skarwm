@@ -1,39 +1,19 @@
 package main
 
-import protocol "../../src/core"
+import protocol "../core"
 
 import "core:fmt"
-import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:sys/posix"
 import cc "core:c"
 
-ipc_socket_path :: proc() -> string {
-    buffer: [512]u8
-    if path := os.get_env_buf(buffer[:], "SKARWM_SOCKET"); path != "" {
-        return strings.clone(path)
-    }
-    if directory := os.get_env_buf(buffer[:], "XDG_RUNTIME_DIR"); directory != "" {
-        return strings.concatenate({directory, "/skarwm.sock"})
-    }
-    return fmt.aprintf("/tmp/skarwm-%d.sock", posix.geteuid())
-}
-
 ipc_start :: proc(state: ^State) -> bool {
     if state.IpcFd >= 0 { return true }
-    path := ipc_socket_path()
+    path := protocol.Ipc_Default_Socket_Path()
     defer delete(path)
-    if len(path) >= len(posix.sockaddr_un{}.sun_path) { return false }
-    fd := posix.socket(.UNIX, .STREAM)
+    fd := protocol.Ipc_Connect(path)
     if fd < 0 { return false }
-    address: posix.sockaddr_un
-    address.sun_family = .UNIX
-    for character, index in path { address.sun_path[index] = cc.char(character) }
-    if posix.connect(fd, (^posix.sockaddr)(&address), posix.socklen_t(size_of(address))) == .FAIL {
-        posix.close(fd)
-        return false
-    }
     flags := posix.fcntl(fd, .GETFL)
     if flags >= 0 { posix.fcntl(fd, .SETFL, int(flags) | int(posix.O_NONBLOCK)) }
     posix.fcntl(fd, .SETFD, posix.FD_CLOEXEC)
@@ -52,24 +32,11 @@ ipc_disconnect :: proc(state: ^State) {
     protocol.Ipc_Reader_Reset(&state.IpcReader)
 }
 
-ipc_send_bytes :: proc(state: ^State, bytes: []byte) -> bool {
-    offset: int = 0
-    for offset < len(bytes) {
-        sent := posix.send(
-            state.IpcFd, raw_data(bytes[offset:]), cc.size_t(len(bytes[offset:])), {.NOSIGNAL},
-        )
-        if sent > 0 { offset += int(sent); continue }
-        if sent < 0 && posix.errno() == .EINTR { continue }
-        return false
-    }
-    return true
-}
-
 ipc_send_request :: proc(state: ^State, kind: protocol.Ipc_Type, payload: string) -> bool {
     if state.IpcFd < 0 { return false }
     frame := protocol.ipc_encode(kind, transmute([]u8)payload)
     defer delete(frame)
-    return ipc_send_bytes(state, frame)
+    return protocol.Ipc_Send_All(state.IpcFd, frame)
 }
 
 ipc_request_workspaces :: proc(state: ^State) -> bool {

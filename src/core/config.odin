@@ -24,14 +24,24 @@ Config :: struct {
     BarEnabled: bool,
     BarPosition: Bar_Position,
     BarHeight: i32,
+    BarFont: [128]u8,
+    BarFontLen: i32,
+    BarFontSize: i32,
+    BarFontWeight: Bar_Font_Weight,
     BarForeground: u32,
     BarBackground: u32,
+    BarWorkspaceCount: i32,
+    BarWorkspaceForeground: u32,
+    BarWorkspaceBackground: u32,
+    BarBlockForeground: u32,
+    BarBlockBackground: u32,
 }
 
 Bar_Position :: enum u8 { Top, Bottom }
+Bar_Font_Weight :: enum u8 { Normal, Medium, Bold }
 
 Default_Config :: proc() -> Config {
-    return Config {
+    cfg := Config {
         Gap               = 0, // 0 == unset, caller applies it to both gaps
         OuterGap          = 8,
         InnerGap          = 8,
@@ -47,9 +57,20 @@ Default_Config :: proc() -> Config {
         BarEnabled        = false,
         BarPosition       = .Top,
         BarHeight         = 26,
+        BarFontSize       = 11,
+        BarFontWeight     = .Normal,
         BarForeground     = 0xE6E6E6,
         BarBackground     = 0x1E1E2E,
+        BarWorkspaceCount = 8,
+        BarWorkspaceForeground = 0x262626,
+        BarWorkspaceBackground = 0x5F87AF,
+        BarBlockForeground = 0x262626,
+        BarBlockBackground = 0xAF5F5F,
     }
+    font := "monospace"
+    copy(cfg.BarFont[:], transmute([]u8)font)
+    cfg.BarFontLen = i32(len(font))
+    return cfg
 }
 
 Animation_Easing :: enum u8 {

@@ -1,7 +1,7 @@
 package main
 
-import x11 "../../src/x11"
-import ipc "../../src/core"
+import x11 "../x11"
+import ipc "../core"
 
 import "core:fmt"
 import "core:os"
@@ -9,13 +9,20 @@ import "core:strconv"
 import "core:sys/posix"
 
 Bar_Position :: enum u8 { Top, Bottom }
+Bar_Font_Weight :: enum u8 { Normal, Medium, Bold }
 
 Bar_Config :: struct {
     Position: Bar_Position,
     Height: i32,
+    Font: [128]u8,
+    FontLen, FontSize: i32,
+    FontWeight: Bar_Font_Weight,
     Managed: bool,
     Foreground: u32,
     Background: u32,
+    WorkspaceCount: i32,
+    WorkspaceForeground, WorkspaceBackground: u32,
+    BlockForeground, BlockBackground: u32,
 }
 
 Bar_Window :: struct {
@@ -24,6 +31,8 @@ Bar_Window :: struct {
     Geom: Monitor,
     Hits: [dynamic]Hitbox,
     HoverWorkspace: int,
+    Canvas: X_Pixmap,
+    TextDraw: ^Xft_Draw,
 }
 
 Monitor :: struct {
@@ -46,12 +55,17 @@ State :: struct {
     ScreenNumber: i32,
     RootW, RootH: i32,
     BlackPixel: u32,
+    RootVisual: u32,
     Atoms: map[string]u32,
     Windows: [dynamic]Bar_Window,
     Config: Bar_Config,
     RandrAvailable: bool,
     RandrEventBase: u8,
-    Font, GC: u32,
+    GC: ^X_GC,
+    Display: ^X_Display,
+    Visual: ^X_Visual,
+    Colormap: X_Colormap,
+    NormalFont, BoldFont: ^Xft_Font,
     Blocks: [dynamic]Block,
     Workspaces: [dynamic]Workspace_State,
     IpcFd: posix.FD,
@@ -61,7 +75,8 @@ State :: struct {
 
 BAR_CONFIG_ATOM :: "_SKARWM_BAR_CONFIG"
 BAR_BLOCKS_ATOM :: "_SKARWM_BAR_BLOCKS"
-BAR_CONFIG_VERSION :: u32(1)
+BAR_FONT_ATOM :: "_SKARWM_BAR_FONT"
+BAR_CONFIG_VERSION :: u32(3)
 
 main :: proc() {
     cfg, ok := parse_args()
@@ -89,8 +104,13 @@ main :: proc() {
 parse_args :: proc() -> (Bar_Config, bool) {
     cfg := Bar_Config{
         Position = .Top, Height = 26,
+        FontSize = 11, FontWeight = .Normal,
         Foreground = 0xE6E6E6, Background = 0x1E1E2E,
+        WorkspaceCount = 8,
+        WorkspaceForeground = 0x262626, WorkspaceBackground = 0x5F87AF,
+        BlockForeground = 0x262626, BlockBackground = 0xAF5F5F,
     }
+    config_set_font(&cfg, "monospace")
     args := os.args
     i := 1
     for i < len(args) {
@@ -111,6 +131,25 @@ parse_args :: proc() -> (Bar_Config, bool) {
             value, parsed := strconv.parse_i64(args[i], 10)
             if !parsed || value < 1 || value > 512 { usage(); return {}, false }
             cfg.Height = i32(value)
+        case "--font":
+            if i + 1 >= len(args) || len(args[i + 1]) >= len(cfg.Font) { usage(); return {}, false }
+            i += 1
+            config_set_font(&cfg, args[i])
+        case "--font-size":
+            if i + 1 >= len(args) { usage(); return {}, false }
+            i += 1
+            value, parsed := strconv.parse_i64(args[i], 10)
+            if !parsed || value < 6 || value > 72 { usage(); return {}, false }
+            cfg.FontSize = i32(value)
+        case "--font-weight":
+            if i + 1 >= len(args) { usage(); return {}, false }
+            i += 1
+            switch args[i] {
+            case "normal", "regular": cfg.FontWeight = .Normal
+            case "medium": cfg.FontWeight = .Medium
+            case "bold": cfg.FontWeight = .Bold
+            case: usage(); return {}, false
+            }
         case "--foreground":
             if i + 1 >= len(args) { usage(); return {}, false }
             i += 1
@@ -123,6 +162,12 @@ parse_args :: proc() -> (Bar_Config, bool) {
             value, parsed := parse_colour(args[i])
             if !parsed { usage(); return {}, false }
             cfg.Background = value
+        case "--workspaces", "--tags":
+            if i + 1 >= len(args) { usage(); return {}, false }
+            i += 1
+            value, parsed := strconv.parse_i64(args[i], 10)
+            if !parsed || value < 1 || value > 64 { usage(); return {}, false }
+            cfg.WorkspaceCount = i32(value)
         case "-h", "--help":
             usage()
             os.exit(0)
@@ -137,7 +182,21 @@ parse_args :: proc() -> (Bar_Config, bool) {
 
 usage :: proc() {
     fmt.eprintln("usage: skarwm-bar [--position top|bottom] [--height 1..512]")
+    fmt.eprintln("                  [--font FAMILY] [--font-size 6..72]")
+    fmt.eprintln("                  [--font-weight normal|medium|bold]")
     fmt.eprintln("                  [--foreground '#RRGGBB'] [--background '#RRGGBB']")
+    fmt.eprintln("                  [--workspaces 1..64]")
+}
+
+config_set_font :: proc(config: ^Bar_Config, font: string) {
+    config.Font = {}
+    count := min(len(font), len(config.Font) - 1)
+    copy(config.Font[:count], transmute([]u8)font[:count])
+    config.FontLen = i32(count)
+}
+
+config_font :: proc(config: ^Bar_Config) -> string {
+    return string(config.Font[:config.FontLen])
 }
 
 parse_colour :: proc(value: string) -> (u32, bool) {
@@ -162,6 +221,7 @@ connect :: proc(state: ^State) -> bool {
     state.RootW = i32(screen.width_in_pixels)
     state.RootH = i32(screen.height_in_pixels)
     state.BlackPixel = screen.black_pixel
+    state.RootVisual = screen.root_visual
     state.Atoms = make(map[string]u32)
     state.Windows = make([dynamic]Bar_Window, 0, 4)
     state.Workspaces = make([dynamic]Workspace_State, 0, 16)
@@ -211,6 +271,23 @@ read_managed_config :: proc(state: ^State) -> (enabled, found: bool) {
     if len(values) >= 6 {
         state.Config.Foreground = values[4]
         state.Config.Background = values[5]
+    }
+    if len(values) >= 11 {
+        state.Config.WorkspaceCount = clamp(i32(values[6]), i32(1), i32(64))
+        state.Config.WorkspaceForeground = values[7]
+        state.Config.WorkspaceBackground = values[8]
+        state.Config.BlockForeground = values[9]
+        state.Config.BlockBackground = values[10]
+    }
+    if len(values) >= 13 {
+        state.Config.FontSize = clamp(i32(values[11]), i32(6), i32(72))
+        if values[12] <= u32(Bar_Font_Weight.Bold) {
+            state.Config.FontWeight = Bar_Font_Weight(values[12])
+        }
+    }
+    if font, font_ok := x11.get_text(state.Conn, state.Root, atom(state, BAR_FONT_ATOM)); font_ok {
+        config_set_font(&state.Config, font)
+        delete(font)
     }
     return true, true
 }
