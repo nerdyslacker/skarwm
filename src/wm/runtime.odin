@@ -129,6 +129,7 @@ wm_startup :: proc() -> bool {
 }
 
 cleanup_all :: proc() {
+    bar_shutdown()
     ui.Hide_Drop(&g_wm.ui)
     ui.Destroy_Drop(&g_wm.ui)
     ui.Hide_Help(&g_wm.ui)
@@ -138,6 +139,7 @@ cleanup_all :: proc() {
     ui.Shutdown_Tabs(&g_wm.ui)
     release_bindings(&g_wm.bindings)
     release_rules(&g_wm.rules)
+    release_bar_blocks(&g_wm.bar_blocks)
     if g_wm.ran_startups != nil {
         for s in g_wm.ran_startups { if s != "" { delete(s) } }
         delete(g_wm.ran_startups)

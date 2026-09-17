@@ -21,6 +21,8 @@ Client_Animation :: struct {
 Window_Shape_State :: struct {
     Width, Height, Border, Radius: i32,
     Rounded: bool,
+    Viewport: bool,
+    Bounding: c.Rect,
 }
 
 State :: struct {
@@ -39,7 +41,15 @@ Init :: proc(state: ^State, conn: ^x11.Connection) {
     shape_init(state, conn)
 }
 
-configure_client_geometry :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, cl: ^c.Client, geom: c.Rect, border: i32) {
+configure_client_geometry :: proc(
+    state: ^State,
+    conn: ^x11.Connection,
+    m: ^c.Manager,
+    cl: ^c.Client,
+    geom: c.Rect,
+    border: i32,
+    constrain_to_output := true,
+) {
     vals := [5]u32 {
         u32(i16(geom.X)),
         u32(i16(geom.Y)),
@@ -51,7 +61,7 @@ configure_client_geometry :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Ma
         conn, cl.Xid,
         x11.CW_X | x11.CW_Y | x11.CW_WIDTH | x11.CW_HEIGHT | x11.CW_BORDER_WIDTH, &vals[0],
     )
-    shape_client(state, conn, m, cl, geom, border)
+    shape_client(state, conn, m, cl, geom, border, constrain_to_output)
 }
 
 // Preview_Client moves a dragged tile without changing its authoritative core
@@ -71,7 +81,9 @@ Preview_Client :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, cl: 
     st.Current_Border = cl.Border
     st.Target_Border = cl.Border
     st.Active = false
-    configure_client_geometry(state, conn, m, cl, geom, cl.Border)
+    // A drag preview intentionally follows the pointer across outputs; its
+    // ownership is updated only when the drop completes.
+    configure_client_geometry(state, conn, m, cl, geom, cl.Border, false)
 }
 
 animation_sample :: proc(st: ^Client_Animation, now: time.Tick) {

@@ -919,9 +919,9 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             col_left := base_x + workspace_col_left(ws, p, ci)
             is_preview := ci == preview_left || ci == preview_right
             if contiguous_custom {
-                // Keep the resized strip contiguous. Intersecting columns stay
-                // at full size and the root/output edge reveals only the part
-                // that actually fits in the available area.
+                // Custom-width strips retain their continuous logical
+                // geometry. The X Shape viewport masks overflow without
+                // resizing the client surface.
                 if col_left + col_w <= p.WorkX || col_left >= p.WorkX + p.WorkW {
                     for cl in col.Wins {
                         cl.Geom = hide
@@ -945,11 +945,8 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
                 col_left, col_w = rendered_x, rendered_w
             }
 
-            // A maximized column is one full page. While scrolling between it
-            // and a neighbor, translate the complete maximized rectangle: the
-            // root viewport naturally reveals only the on-screen portion, but
-            // the client remains maximized and the following column stays
-            // directly adjacent in strip coordinates.
+            // A maximized column is one full page. Translate the complete
+            // logical rectangle; the output viewport provides presentation.
             if column_has_maximized(col) {
                 if col_left + col_w <= p.WorkX || col_left >= p.WorkX + p.WorkW {
                     for cl in col.Wins {

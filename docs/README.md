@@ -1,6 +1,7 @@
 # skarwm documentation
 
 - [Configuration](configuration.md) — rc discovery, settings, commands, rules, and reloads.
+- [Built-in bar](bar.md) — optional dock process, workspace/script blocks, XEmbed tray, and lifecycle.
 - [Layouts and windows](layouts-and-windows.md) — columns, stacks, tabs, floating, maximize, fullscreen, and resizing.
 - [Scrolling and drag/drop](scrolling-and-drag-drop.md) — the horizontal strip, edge previews, and pointer controls.
 - [Workspaces and outputs](workspaces-and-outputs.md) — dynamic workspaces and RandR monitors.

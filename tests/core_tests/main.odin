@@ -131,6 +131,11 @@ test_config :: proc() {
     eq(cfg.AnimationDurationMs, i32(180), "default animation duration")
     eq(cfg.AnimationFps, i32(60), "default animation frame rate")
     eq(cfg.AnimationEasing, c.Animation_Easing.Ease_Out_Cubic, "default animation easing")
+    ok(!cfg.BarEnabled, "built-in bar is opt-in")
+    eq(cfg.BarPosition, c.Bar_Position.Top, "default bar position")
+    eq(cfg.BarHeight, i32(26), "default bar height")
+    eq(cfg.BarForeground, u32(0xE6E6E6), "default bar foreground")
+    eq(cfg.BarBackground, u32(0x1E1E2E), "default bar background")
 
     gapped := cfg
     gapped.Gap = 16
@@ -1203,8 +1208,8 @@ test_multi_output_scrolling :: proc() {
     right_third := add_tiled(m, 202)
 
     c.Arrange_All(m)
-    eq(left_third.Geom.X, -26, "left output exposes the edge of its right neighbor")
-    eq(right_third.Geom.X, 1894, "right output exposes the edge of its right neighbor")
+    eq(left_third.Geom.X, -26, "left output preserves its logical right-neighbor geometry")
+    eq(right_third.Geom.X, 1894, "right output preserves its logical right-neighbor geometry")
     ok(right_first.Geom.X >= right.Geom.X, "visible right column stays on its own output")
 
     eq(left.Current.ViewportX, 0, "left viewport starts independently at zero")
@@ -1214,9 +1219,26 @@ test_multi_output_scrolling :: proc() {
     eq(right.Current.ViewportX, 0, "right output viewport remains unchanged")
     eq(c.Active_Output(m), right, "pointer scrolling does not steal active output")
     c.Arrange_All(m)
-    eq(left_first.Geom.X, -1878, "left output exposes its unfocused left neighbor after scrolling")
+    eq(left_first.Geom.X, -1878, "left output preserves its logical left-neighbor geometry")
     ok(left_third.Geom.X >= left.Geom.X && left_third.Geom.X < left.Geom.X + left.Geom.W,
        "newly visible left column stays within its output")
+
+    left_viewport := left.Current.ViewportX
+    ok(c.Scroll_Output_Viewport(m, right, 1), "wheel can scroll the right output independently")
+    eq(left.Current.ViewportX, left_viewport, "right-output scroll leaves the left viewport unchanged")
+    ok(right.Current.ViewportX > 0, "right output viewport advances")
+    c.Arrange_All(m)
+    ok(right_first.Geom.X < right.Geom.X,
+       "right output keeps the full logical preview beyond its viewport")
+
+    // A custom-width edge preview also keeps its full application geometry;
+    // the X output viewport presents only its owning monitor's portion.
+    right.Current.ViewportX = 0
+    for col in right.Current.Cols { col.Width = 700 }
+    c.Arrange_All(m)
+    eq(right_third.Geom.W, i32(696), "custom-width preview preserves its full client width")
+    ok(right_third.Geom.X >= left.Geom.X + left.Geom.W,
+       "custom-width continuation does not enter the adjacent left monitor")
 }
 
 // ----------------------------------------------------------------------------
@@ -1847,6 +1869,27 @@ test_ipc_workspaces_payload :: proc() {
     pl3 := c.ipc_workspaces_payload(m2)
     defer delete(pl3)
     eq(string(pl3), "[]", "GET_WORKSPACES with no workspaces")
+
+    multi := c.New_Manager()
+    defer c.Destroy_Manager(multi)
+    c.Reconcile_Outputs(multi, []c.Output_Spec{
+        {Name = "LEFT", Geom = c.Rect{X = 0, Y = 0, W = 1280, H = 800}, Primary = true},
+        {Name = "RIGHT", Geom = c.Rect{X = 1280, Y = 0, W = 1280, H = 800}},
+    })
+    c.Focus_Output(multi, multi.Outputs[0])
+    c.Switch_WS_Id(multi, 1)
+    c.Focus_Output(multi, multi.Outputs[1])
+    c.Switch_WS_Id(multi, 2)
+    c.Focus_Output(multi, multi.Outputs[0])
+    multi_payload := c.ipc_workspaces_payload(multi)
+    defer delete(multi_payload)
+    ok(strings.contains(string(multi_payload), `"output":"LEFT"`),
+       "GET_WORKSPACES includes the primary output")
+    ok(strings.contains(string(multi_payload), `"output":"RIGHT"`),
+       "GET_WORKSPACES includes non-active outputs")
+    ok(strings.contains(string(multi_payload),
+       `"name":"2","visible":true,"focused":false,"urgent":false,"rect":{"x":1280`),
+       "non-active output current workspace is visible but not focused")
 }
 
 test_ipc_outputs_payload :: proc() {
@@ -1982,6 +2025,10 @@ test_ipc_parse_command :: proc() {
 
     cmd, err, fine = c.ipc_parse_command(bytes_of(`workspace next`))
     ok(fine && cmd.action == .Workspace_Next, "workspace next parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`workspace 4 output HDMI-1`))
+    ok(fine && cmd.action == .Workspace_On_Output && cmd.arg == 4 && cmd.text == "HDMI-1",
+       "output-qualified workspace command parsed")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`focus left`))
     ok(fine && cmd.action == .Focus_Left, "focus left parsed")

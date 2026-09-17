@@ -337,6 +337,16 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
     case .Move_Up:           b.action = .Move_Up
     case .Move_Down:         b.action = .Move_Down
     case .Workspace:         b.action = .WS_Goto
+    case .Workspace_On_Output:
+        output := c.Find_Output(g_wm.m, cmd.text)
+        if output == nil { return }
+        old_ws := c.Current_WS(g_wm.m)
+        if c.Focus_Output(g_wm.m, output) {
+            ipc_broadcast_output_event("focus", output.Name)
+            ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, output.Current, old_ws)
+        }
+        ws_switch_to(cmd.arg)
+        return
     case .Workspace_Next:    b.action = .WS_Next
     case .Workspace_Prev:    b.action = .WS_Prev
     case .Move_To_Workspace: b.action = .Move_To_WS

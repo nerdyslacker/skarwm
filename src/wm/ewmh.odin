@@ -37,8 +37,9 @@ import x11 "../x11"
 // flips (EWMH mandates the ClientMessage).
 // Struts and the dock window type ARE read:
 // only _NET_WM_WINDOW_TYPE_DOCK windows contribute, only their struts
-// (_NET_WM_STRUT_PARTIAL preferred) shrink the work area, and the partial
-// form's begin/end edge ranges are ignored on our single full-screen output.
+// (_NET_WM_STRUT_PARTIAL preferred) shrink the work area. Root-relative
+// distances and partial edge ranges are converted to the owning RandR output's
+// local insets, allowing one independent dock per monitor.
 // Fullscreen requests for windows on an inactive workspace are ignored:
 // fullscreen in this WM belongs to the focused window of the visible
 // workspace, so there is no sensible geometry to give them.

@@ -28,6 +28,22 @@ Without a file, built-in settings and bindings are used. Copy
 | `animation_duration_ms : 180` | Transition duration, `0..5000`. |
 | `animation_fps : 60` | Animation target rate, `1..240`. |
 | `animation_easing : ease_out_cubic` | `linear` or `ease_out_cubic`. |
+| `bar_enabled : false` | Launch the optional built-in `skarwm-bar`; disabled by default. |
+| `bar_position : top` | Place the built-in bar at `top` or `bottom`. |
+| `bar_height : 26` | Bar height in pixels, `1..512`. |
+| `bar_font : monospace` | Fontconfig family used by the built-in bar. |
+| `bar_font_size : 11` | Bar font size in points, `6..72`. |
+| `bar_font_weight : normal` | Default text weight: `normal`, `medium`, or `bold`. |
+| `bar_foreground : #E6E6E6` | Built-in bar text colour. |
+| `bar_background : #1E1E2E` | Built-in bar background colour. |
+| `bar_tag_count : 8` | Fixed workspace slots shown on every monitor, `1..64`. |
+| `bar_tag_foreground : #262626` | Workspace-slot text colour. |
+| `bar_tag_background : #5F87AF` | Workspace-slot wrapper colour. |
+| `bar_block_foreground : #262626` | Script/status block text colour. |
+| `bar_block_background : #AF5F5F` | Script/status block wrapper colour. |
+
+See [Built-in bar](bar.md) for the current implementation status and manual
+launch options.
 
 ## Directives
 
@@ -43,12 +59,20 @@ call : mod + Control + Shift + r : reminder_clear_all
 workspace : mod + 1 : view 1
 workspace : mod + Shift + 1 : tag 1
 autostart : "xsetroot -solid '#202020'"
+bar_block : workspaces : left
+bar_block : systray : right
+bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
 rule : class : Firefox : workspace 3 floating
 ```
 
 `bind` launches a shell command. `call` invokes a WM action. `workspace view`
 switches workspace and `workspace tag` sends the focused window. `autostart`
 runs once at startup and is not run again by configuration reloads.
+
+`bar_block` directives define the built-in bar's blocks in declaration order.
+Workspace and `systray` blocks take an alignment. Script blocks additionally
+take a name, interval in seconds, timeout in seconds, and a shell command. See
+[Built-in bar](bar.md) for limits, failure handling, and security details.
 
 Rules use a substring match against `class`, `instance`, or `title`. Effects are
 `workspace N`, `floating`, and `floating true|false`; the first matching rule is
