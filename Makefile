@@ -68,7 +68,7 @@ xephyr-multi: build/skarwm build/skarwm-msg
 	SKARWM_XEPHYR_DISPLAY="$(XEPHYR_DISPLAY)" scripts/xephyr.sh multi
 
 xephyr-anush: build/skarwm build/skarwm-msg
-	SKARWM_XEPHYR_DISPLAY="$(XEPHYR_DISPLAY)" scripts/xephyr.sh single	-c "$(HOME)/Projects/Experimental/anush/config/skarwm/config.rc"
+	SKARWM_XEPHYR_DISPLAY="$(XEPHYR_DISPLAY)" scripts/xephyr.sh multi	-c "$(HOME)/Projects/Experimental/anush/config/skarwm/config.rc"
 
 clean:
 	rm -rf build

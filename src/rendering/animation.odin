@@ -21,6 +21,8 @@ Client_Animation :: struct {
 Window_Shape_State :: struct {
     Width, Height, Border, Radius: i32,
     Rounded: bool,
+    Viewport: bool,
+    Bounding: c.Rect,
 }
 
 State :: struct {
@@ -46,25 +48,20 @@ configure_client_geometry :: proc(
     cl: ^c.Client,
     geom: c.Rect,
     border: i32,
-    clip_to_output := true,
+    constrain_to_output := true,
 ) {
-    rendered_geom, rendered_border := geom, border
-    if clip_to_output && cl.Out != nil && !cl.Floating && !cl.Dock &&
-       !cl.Fullscreen && !cl.Stashed && !animation_is_parked(cl, geom) {
-        rendered_geom, rendered_border = c.Clip_Tiled_Geometry(geom, border, cl.Out.Geom)
-    }
     vals := [5]u32 {
-        u32(i16(rendered_geom.X)),
-        u32(i16(rendered_geom.Y)),
-        u32(max(i32(1), rendered_geom.W)),
-        u32(max(i32(1), rendered_geom.H)),
-        u32(max(i32(0), rendered_border)),
+        u32(i16(geom.X)),
+        u32(i16(geom.Y)),
+        u32(max(i32(1), geom.W)),
+        u32(max(i32(1), geom.H)),
+        u32(max(i32(0), border)),
     }
     x11.xcb_configure_window(
         conn, cl.Xid,
         x11.CW_X | x11.CW_Y | x11.CW_WIDTH | x11.CW_HEIGHT | x11.CW_BORDER_WIDTH, &vals[0],
     )
-    shape_client(state, conn, m, cl, rendered_geom, rendered_border)
+    shape_client(state, conn, m, cl, geom, border, constrain_to_output)
 }
 
 // Preview_Client moves a dragged tile without changing its authoritative core

@@ -4,8 +4,8 @@ import logger "../log"
 import x11 "../x11"
 import c "../core"
 
-// X Shape-backed rounded client corners. Shapes are relative to the window
-// origin, so moving a window needs no update; resize animation frames do.
+// X Shape-backed rounded client corners and per-output presentation. Shape
+// regions never change the client geometry or application surface dimensions.
 
 import "core:math"
 
@@ -14,7 +14,8 @@ Shape_Rectangle :: struct {
     width, height: u16,
 }
 
-SHAPE_SET      :: u8(0)
+SHAPE_SET       :: u8(0)
+SHAPE_INTERSECT :: u8(2)
 SHAPE_BOUNDING :: u8(0)
 SHAPE_CLIP     :: u8(1)
 SHAPE_UNSORTED :: u8(0)
@@ -54,7 +55,7 @@ shape_init :: proc(state: ^State, conn: ^x11.Connection) {
         x11.free_libc(reply)
     }
     if !state.ShapeAvailable {
-        logger.Warn("X Shape unavailable; corner_radius is disabled")
+        logger.Warn("X Shape unavailable; corner_radius and output viewport masking are disabled")
     }
 }
 
@@ -103,20 +104,63 @@ shape_rounded_rectangle :: proc(conn: ^x11.Connection, xid: u32, kind: u8, x, y,
     )
 }
 
-shape_client :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, cl: ^c.Client, geom: c.Rect, border: i32) {
+shape_rectangle :: proc(conn: ^x11.Connection, xid: u32, operation, kind: u8, r: c.Rect) {
+    if r.W <= 0 || r.H <= 0 {
+        xcb_shape_rectangles(conn, operation, kind, SHAPE_UNSORTED, xid, 0, 0, 0, nil)
+        return
+    }
+    rect := Shape_Rectangle{
+        x = i16(r.X), y = i16(r.Y),
+        width = u16(r.W), height = u16(r.H),
+    }
+    xcb_shape_rectangles(conn, operation, kind, SHAPE_UNSORTED, xid, 0, 0, 1, &rect)
+}
+
+shape_intersection :: proc(a, b: c.Rect) -> c.Rect {
+    x1, y1 := max(a.X, b.X), max(a.Y, b.Y)
+    x2, y2 := min(a.X + a.W, b.X + b.W), min(a.Y + a.H, b.Y + b.H)
+    return c.Rect{X = x1, Y = y1, W = max(i32(0), x2 - x1), H = max(i32(0), y2 - y1)}
+}
+
+shape_client :: proc(
+    state: ^State,
+    conn: ^x11.Connection,
+    m: ^c.Manager,
+    cl: ^c.Client,
+    geom: c.Rect,
+    border: i32,
+    constrain_to_output: bool,
+) {
     if !state.ShapeAvailable || cl == nil { return }
 
     width := max(i32(1), geom.W) + 2 * max(i32(0), border)
     height := max(i32(1), geom.H) + 2 * max(i32(0), border)
     radius := clamp(m.Cfg.CornerRadius, i32(0), min(width, height) / 2)
     rounded := radius > 0 && !cl.Fullscreen && !cl.Dock
+    b := max(i32(0), border)
+    bounding := c.Rect{X = -b, Y = -b, W = width, H = height}
+    viewport := constrain_to_output && cl.Out != nil && !cl.Floating && !cl.Dock && !cl.Fullscreen
+    if viewport {
+        output_local := c.Rect{
+            X = cl.Out.Geom.X - geom.X,
+            Y = cl.Out.Geom.Y - geom.Y,
+            W = cl.Out.Geom.W,
+            H = cl.Out.Geom.H,
+        }
+        clipped_bounding := shape_intersection(bounding, output_local)
+        viewport = clipped_bounding != bounding
+        if viewport {
+            bounding = clipped_bounding
+        }
+    }
     desired := Window_Shape_State{
         Width = width, Height = height, Border = border,
         Radius = radius, Rounded = rounded,
+        Viewport = viewport, Bounding = bounding,
     }
     if old, found := state.WindowShapes[cl.Xid]; found && old == desired { return }
 
-    if !rounded {
+    if !rounded && !viewport {
         // None removes both client regions and restores the server defaults.
         xcb_shape_mask(conn, SHAPE_SET, SHAPE_BOUNDING, cl.Xid, 0, 0, 0)
         xcb_shape_mask(conn, SHAPE_SET, SHAPE_CLIP, cl.Xid, 0, 0, 0)
@@ -124,14 +168,23 @@ shape_client :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, cl: ^c
         return
     }
 
-    b := max(i32(0), border)
-    // X draws its border as bounding minus clip. Concentric outer and inner
-    // arcs keep that difference visually equal to `border` around corners.
-    shape_rounded_rectangle(conn, cl.Xid, SHAPE_BOUNDING, -b, -b, width, height, radius)
-    shape_rounded_rectangle(
-        conn, cl.Xid, SHAPE_CLIP, 0, 0,
-        max(i32(1), geom.W), max(i32(1), geom.H), max(i32(0), radius - b),
-    )
+    if rounded {
+        // X draws its border as bounding minus clip. Concentric outer and inner
+        // arcs keep that difference visually equal to `border` around corners.
+        shape_rounded_rectangle(conn, cl.Xid, SHAPE_BOUNDING, -b, -b, width, height, radius)
+        shape_rounded_rectangle(
+            conn, cl.Xid, SHAPE_CLIP, 0, 0,
+            max(i32(1), geom.W), max(i32(1), geom.H), max(i32(0), radius - b),
+        )
+        if viewport {
+            shape_rectangle(conn, cl.Xid, SHAPE_INTERSECT, SHAPE_BOUNDING, bounding)
+        }
+    } else {
+        shape_rectangle(conn, cl.Xid, SHAPE_SET, SHAPE_BOUNDING, bounding)
+        // Keep the client drawing region at its complete natural size. Only
+        // the bounding region limits presentation/input at the output edge.
+        xcb_shape_mask(conn, SHAPE_SET, SHAPE_CLIP, cl.Xid, 0, 0, 0)
+    }
     state.WindowShapes[cl.Xid] = desired
 }
 

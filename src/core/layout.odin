@@ -838,41 +838,6 @@ inset_rect :: proc(tile: Rect, border: i32) -> Rect {
     }
 }
 
-// Clip_Tiled_Geometry converts a logical client rectangle into the portion X
-// may render inside one RandR output. RandR outputs share a root window and do
-// not clip their children, so scroll previews and partially visible columns
-// must be constrained immediately before their geometry is sent to X.
-// Rectangles wholly outside the output are returned unchanged; layout parks
-// those separately, and preserving that location avoids moving hidden clients
-// onto an output edge.
-Clip_Tiled_Geometry :: proc(geom: Rect, border: i32, output: Rect) -> (Rect, i32) {
-    b := max(i32(0), border)
-    outer_left := geom.X - b
-    outer_top := geom.Y - b
-    outer_right := geom.X + geom.W + b
-    outer_bottom := geom.Y + geom.H + b
-    clipped_left := max(outer_left, output.X)
-    clipped_top := max(outer_top, output.Y)
-    clipped_right := min(outer_right, output.X + output.W)
-    clipped_bottom := min(outer_bottom, output.Y + output.H)
-    if clipped_right <= clipped_left || clipped_bottom <= clipped_top {
-        return geom, border
-    }
-
-    clipped_w := clipped_right - clipped_left
-    clipped_h := clipped_bottom - clipped_top
-    rendered_border := b
-    if clipped_w <= 2 * rendered_border || clipped_h <= 2 * rendered_border {
-        rendered_border = 0
-    }
-    return Rect{
-        X = clipped_left + rendered_border,
-        Y = clipped_top + rendered_border,
-        W = max(i32(1), clipped_w - 2 * rendered_border),
-        H = max(i32(1), clipped_h - 2 * rendered_border),
-    }, rendered_border
-}
-
 // Every client reserves the configured border inset, so changing focus never
 // resizes its application surface. Only the workspace focus draws the actual
 // X border; for other clients the reserved ring simply remains empty.
@@ -954,9 +919,9 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             col_left := base_x + workspace_col_left(ws, p, ci)
             is_preview := ci == preview_left || ci == preview_right
             if contiguous_custom {
-                // Keep the resized strip contiguous. Intersecting columns stay
-                // at full size and the rendering boundary clips the part that
-                // does not belong to this output.
+                // Custom-width strips retain their continuous logical
+                // geometry. The X Shape viewport masks overflow without
+                // resizing the client surface.
                 if col_left + col_w <= p.WorkX || col_left >= p.WorkX + p.WorkW {
                     for cl in col.Wins {
                         cl.Geom = hide
@@ -980,9 +945,8 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
                 col_left, col_w = rendered_x, rendered_w
             }
 
-            // A maximized column is one full page. While scrolling between it
-            // and a neighbor, translate the complete logical rectangle. The
-            // rendering boundary clips it to its owning output.
+            // A maximized column is one full page. Translate the complete
+            // logical rectangle; the output viewport provides presentation.
             if column_has_maximized(col) {
                 if col_left + col_w <= p.WorkX || col_left >= p.WorkX + p.WorkW {
                     for cl in col.Wins {

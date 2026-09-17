@@ -50,13 +50,19 @@ animation_easing : ease_out_cubic
 bar_enabled : true
 bar_position : top
 bar_height : 26
+bar_font : monospace
 bar_foreground : #FF5F00
 bar_background : #504D47
 # Repeated directives define block order. Script fields are:
 # alignment : name : interval seconds : timeout seconds : shell command.
 bar_block : workspaces : left
+bar_block : script : center : date : 1 : 1 : "date '+%a, %b %d - %H:%M:%S'"
+bar_block : script : right : cpu : 2 : 3 : "grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print int(usage+0.5) "%"}'"
+bar_block : script : right : ram : 2 : 1 : "free | awk '/Mem:/ {printf "%.0f%%\n", $3/$2*100}'"
+bar_block : script : right : disk : 30 : 1 : "df -P / | awk 'NR==2 {print $5}'"
+bar_block : script : right : vol : 1 : 1 : "pactl get-sink-volume @DEFAULT_SINK@ | grep -o '[0-9]*%' | head -1"
+bar_block : script : right : bat : 10 : 1 : "cat /sys/class/power_supply/BAT0/capacity; printf '%%'"
 bar_block : systray : right
-bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
 
 # ---- launching ----------------------------------------------------------------
 
