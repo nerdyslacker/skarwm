@@ -110,6 +110,15 @@ Unmap_Notify_Event :: struct {
     pad1:          [3]u8,
 }
 
+Selection_Clear_Event :: struct {
+    response_type: u8,
+    pad0: u8,
+    sequence: u16,
+    time: u32,
+    owner: u32,
+    selection: u32,
+}
+
 Key_Press_Event :: struct {
     response_type: u8,
     detail:        u8,
@@ -372,6 +381,11 @@ Event_Header :: struct {
     sequence:      u16,
 }
 
+Rectangle :: struct {
+    x, y: i16,
+    width, height: u16,
+}
+
 // -- ABI guards ------------------------------------------------------------
 
 #assert(size_of(Screen) == 40)
@@ -380,6 +394,7 @@ Event_Header :: struct {
 #assert(size_of(Configure_Request_Event) == 28)
 #assert(size_of(Destroy_Notify_Event) == 12)
 #assert(size_of(Unmap_Notify_Event) == 16)
+#assert(size_of(Selection_Clear_Event) == 16)
 #assert(size_of(Key_Press_Event) == 32)
 #assert(size_of(Button_Press_Event) == 32)
 #assert(size_of(Motion_Notify_Event) == 32)
@@ -404,6 +419,7 @@ Event_Header :: struct {
 #assert(size_of(Get_Modifier_Mapping_Reply) == 32)
 #assert(size_of(Grab_Keyboard_Reply) == 32)
 #assert(size_of(Event_Header) == 4)
+#assert(size_of(Rectangle) == 8)
 #assert(offset_of(Get_Property_Reply, type_) == 8)
 #assert(offset_of(Get_Property_Reply, value_len) == 16)
 #assert(offset_of(Query_Tree_Reply, children_len) == 16)
@@ -432,6 +448,7 @@ EVENT_LEAVE_NOTIFY :: 8
 EVENT_FOCUS_IN :: 9
 EVENT_FOCUS_OUT :: 10
 EVENT_EXPOSE :: 12
+EVENT_SELECTION_CLEAR :: 29
 EVENT_CLIENT_MESSAGE :: 33
 EVENT_PROPERTY_NOTIFY :: 28
 EVENT_MAPPING_NOTIFY :: 34
@@ -579,6 +596,7 @@ foreign xcb {
 
     xcb_get_setup             :: proc(c: ^Connection) -> ^Setup ---
     xcb_setup_roots_iterator  :: proc(s: ^Setup) -> Screen_Iterator ---
+    xcb_screen_next :: proc(i: ^Screen_Iterator) ---
 
     xcb_create_window :: proc(
         c: ^Connection,
@@ -616,15 +634,20 @@ foreign xcb {
     xcb_destroy_window :: proc(c: ^Connection, window: u32) -> Cookie ---
     xcb_map_window     :: proc(c: ^Connection, window: u32) -> Cookie ---
     xcb_unmap_window   :: proc(c: ^Connection, window: u32) -> Cookie ---
+    xcb_reparent_window :: proc(c: ^Connection, window, parent: u32, x, y: i16) -> Cookie ---
+    xcb_change_save_set :: proc(c: ^Connection, mode: u8, window: u32) -> Cookie ---
     xcb_configure_window :: proc(c: ^Connection, window: u32, value_mask: u32, value_list: ^u32) -> Cookie ---
     xcb_clear_area :: proc(c: ^Connection, exposures: u8, window: u32, x, y: i16, width, height: u16) -> Cookie ---
 
     xcb_open_font :: proc(c: ^Connection, fid: u32, name_len: u16, name: cstring) -> Cookie ---
+    xcb_open_font_checked :: proc(c: ^Connection, fid: u32, name_len: u16, name: cstring) -> Cookie ---
     xcb_close_font :: proc(c: ^Connection, font: u32) -> Cookie ---
     xcb_create_gc :: proc(c: ^Connection, cid, drawable, value_mask: u32, value_list: ^u32) -> Cookie ---
+    xcb_create_gc_checked :: proc(c: ^Connection, cid, drawable, value_mask: u32, value_list: ^u32) -> Cookie ---
     xcb_change_gc :: proc(c: ^Connection, gc, value_mask: u32, value_list: ^u32) -> Cookie ---
     xcb_free_gc :: proc(c: ^Connection, gc: u32) -> Cookie ---
     xcb_image_text_8 :: proc(c: ^Connection, string_len: u8, drawable, gc: u32, x, y: i16, string: cstring) -> Cookie ---
+    xcb_poly_fill_rectangle :: proc(c: ^Connection, drawable, gc: u32, rectangles_len: u32, rectangles: ^Rectangle) -> Cookie ---
 
     xcb_set_input_focus :: proc(c: ^Connection, revert_to: u8, focus: u32, time: u32) -> Cookie ---
 
@@ -643,6 +666,7 @@ foreign xcb {
 
     xcb_get_selection_owner :: proc(c: ^Connection, selection: u32) -> Cookie ---
     xcb_get_selection_owner_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Get_Selection_Owner_Reply ---
+    xcb_set_selection_owner :: proc(c: ^Connection, owner, selection, time: u32) -> Cookie ---
 
     xcb_change_property :: proc(
         c: ^Connection,
@@ -685,6 +709,7 @@ foreign xcb {
 
     xcb_poll_for_event        :: proc(c: ^Connection) -> ^Event ---
     xcb_poll_for_queued_event :: proc(c: ^Connection) -> ^Event ---
+    xcb_wait_for_event        :: proc(c: ^Connection) -> ^Event ---
     xcb_request_check         :: proc(c: ^Connection, cookie: Cookie) -> ^Error ---
 
     xcb_send_event :: proc(c: ^Connection, propagate: u8, destination: u32, event_mask: u32, event: rawptr) -> Cookie ---

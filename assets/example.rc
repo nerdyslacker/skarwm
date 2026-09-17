@@ -43,6 +43,21 @@ animation_duration_ms : 180
 animation_fps : 60
 animation_easing : ease_out_cubic
 
+# Optional built-in EWMH dock. It is disabled by default so external bars and
+# desktop shells remain unaffected. The current implementation creates one
+# reserved top/bottom strip per RandR monitor; content blocks are being added
+# incrementally.
+bar_enabled : true
+bar_position : top
+bar_height : 26
+bar_foreground : #FF5F00
+bar_background : #504D47
+# Repeated directives define block order. Script fields are:
+# alignment : name : interval seconds : timeout seconds : shell command.
+bar_block : workspaces : left
+bar_block : systray : right
+bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
+
 # ---- launching ----------------------------------------------------------------
 
 # bind: run a shell command. Combo = modifier tokens + one key.

@@ -33,7 +33,8 @@ import x11 "../x11"
 //   - settings: mod_key (alias modkey), inner_gap, outer_gap, gap (seeds both),
 //     border_width, corner_radius, norm_outer_border (unfocused colour), sel_outer_border
 //     (focused colour), focus_follows_mouse, animations,
-//     animation_duration_ms, animation_fps, animation_easing. Legacy decorative/titlebar keys
+//     animation_duration_ms, animation_fps, animation_easing, bar_enabled,
+//     bar_position, bar_height, bar_foreground, bar_background. Legacy decorative/titlebar keys
 //     are accepted and ignored; an unknown setting logs one warning.
 //   - directives:
 //       bind       : <combo> : "<command>"
@@ -42,6 +43,10 @@ import x11 "../x11"
 //       workspace  : <combo> : tag <N>       (move focused window to N)
 //       rule       : <class|instance|title> : <pattern> : <effects…>
 //       autostart  : "<command>"
+//       bar_block  : workspaces : <left|center|right>
+//       bar_block  : systray : <left|center|right>
+//       bar_block  : script : <left|center|right> : <name> : <interval seconds> :
+//                    <timeout seconds> : "<command>"
 //       mousebind  : …                       (warned + skipped: no mouse system yet)
 //
 // A combo is modifier tokens (`mod`, Shift, Control, Mod1..Mod5, Super, Alt)
@@ -80,6 +85,18 @@ Raw_Rule :: struct {
     floating_set:       bool,
 }
 
+Bar_Block_Kind :: enum u8 { Workspaces, Script, Systray }
+Bar_Block_Alignment :: enum u8 { Left, Center, Right }
+
+// Raw_Bar_Block is owned configuration data. The WM publishes it for the
+// standalone bar, but never executes script commands itself.
+Raw_Bar_Block :: struct {
+    kind: Bar_Block_Kind,
+    alignment: Bar_Block_Alignment,
+    name, command: string,
+    interval_ms, timeout_ms: i32,
+}
+
 // Config_Result is the fully-resolved product of a config load, ready to apply.
 Config_Result :: struct {
     cfg:       c.Config,
@@ -87,6 +104,7 @@ Config_Result :: struct {
     bindings:  [dynamic]input.Binding,
     rules:     [dynamic]Raw_Rule,
     startups:  [dynamic]string,
+    bar_blocks: [dynamic]Raw_Bar_Block,
 }
 
 // Load_Scratch accumulates raw settings + directives while the file is scanned.
@@ -102,13 +120,21 @@ Load_Scratch :: struct {
     animation_duration_ms, animation_fps: i32,
     animation_easing: c.Animation_Easing,
     focused, unfocused: u32,
+    bar_enabled: bool,
+    bar_position: c.Bar_Position,
+    bar_height: i32,
+    bar_foreground, bar_background: u32,
     gap_set, outer_set, inner_set, border_set, corner_radius_set, ffm_set: bool,
     animations_set, animation_duration_set, animation_fps_set, animation_easing_set: bool,
     focused_set, unfocused_set: bool,
+    bar_enabled_set, bar_position_set, bar_height_set: bool,
+    bar_foreground_set, bar_background_set: bool,
     // directives
     binds:    [dynamic]Raw_Bind,
     rules:    [dynamic]Raw_Rule,
     startups: [dynamic]string,
+    bar_blocks: [dynamic]Raw_Bar_Block,
+    bar_blocks_set: bool,
     warned:   [dynamic]string, // unknown settings already warned about
 }
 
@@ -123,6 +149,7 @@ scratch_new :: proc() -> ^Load_Scratch {
     sc.binds = make([dynamic]Raw_Bind, 0, 48)
     sc.rules = make([dynamic]Raw_Rule, 0, 8)
     sc.startups = make([dynamic]string, 0, 8)
+    sc.bar_blocks = make([dynamic]Raw_Bar_Block, 0, 8)
     sc.warned = make([dynamic]string, 0, 8)
     return sc
 }
@@ -139,6 +166,7 @@ scratch_destroy :: proc(sc: ^Load_Scratch) {
     release_rules(&sc.rules)
     for s in sc.startups { if s != "" { delete(s) } }
     delete(sc.startups)
+    release_bar_blocks(&sc.bar_blocks)
     for w in sc.warned { if w != "" { delete(w) } }
     delete(sc.warned)
     free(sc)
@@ -164,6 +192,15 @@ release_rules :: proc(rs: ^[dynamic]Raw_Rule) {
     }
     delete(rs^)
     rs^ = {}
+}
+
+release_bar_blocks :: proc(blocks: ^[dynamic]Raw_Bar_Block) {
+    for &block in blocks {
+        if block.name != "" { delete(block.name) }
+        if block.command != "" { delete(block.command) }
+    }
+    delete(blocks^)
+    blocks^ = {}
 }
 
 free_errors :: proc(errs: ^[dynamic]string) {
@@ -442,6 +479,11 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.animation_easing_set { r.cfg.AnimationEasing = sc.animation_easing }
     if sc.focused_set { r.cfg.FocusedBorder = sc.focused }
     if sc.unfocused_set { r.cfg.UnfocusedBorder = sc.unfocused }
+    if sc.bar_enabled_set { r.cfg.BarEnabled = sc.bar_enabled }
+    if sc.bar_position_set { r.cfg.BarPosition = sc.bar_position }
+    if sc.bar_height_set { r.cfg.BarHeight = sc.bar_height }
+    if sc.bar_foreground_set { r.cfg.BarForeground = sc.bar_foreground }
+    if sc.bar_background_set { r.cfg.BarBackground = sc.bar_background }
     c.Apply_Gap_Alias(&r.cfg)
 
     mod_key := "Mod4"
@@ -473,6 +515,17 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     for s, i in sc.startups {
         r.startups[i] = strings.clone(s)
     }
+    if sc.bar_blocks_set {
+        r.bar_blocks = make([dynamic]Raw_Bar_Block, len(sc.bar_blocks))
+        for block, i in sc.bar_blocks {
+            r.bar_blocks[i] = block
+            if block.name != "" { r.bar_blocks[i].name = strings.clone(block.name) }
+            if block.command != "" { r.bar_blocks[i].command = strings.clone(block.command) }
+        }
+    } else {
+        r.bar_blocks = make([dynamic]Raw_Bar_Block, 0, 1)
+        append(&r.bar_blocks, Raw_Bar_Block{kind = .Workspaces, alignment = .Left})
+    }
     return r
 }
 
@@ -481,6 +534,7 @@ destroy_result :: proc(r: ^Config_Result) {
     release_rules(&r.rules)
     for s in r.startups { if s != "" { delete(s) } }
     delete(r.startups)
+    release_bar_blocks(&r.bar_blocks)
     r^ = {}
 }
 
@@ -590,6 +644,40 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         sc.animation_easing = v; sc.animation_easing_set = true
         return true
 
+    case "bar_enabled":
+        v, ok := parse_bool_value(value)
+        if !ok { append(errs, fmt.aprintf("bar_enabled: expected true/false, got %q", value)); return false }
+        sc.bar_enabled = v; sc.bar_enabled_set = true
+        return true
+    case "bar_position":
+        switch quoted_trim(value) {
+        case "top":    sc.bar_position = .Top
+        case "bottom": sc.bar_position = .Bottom
+        case:
+            append(errs, fmt.aprintf("bar_position: expected top/bottom, got %q", value))
+            return false
+        }
+        sc.bar_position_set = true
+        return true
+    case "bar_height":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 1 || n > 512 {
+            append(errs, fmt.aprintf("bar_height: expected 1..512, got %q", value))
+            return false
+        }
+        sc.bar_height = n; sc.bar_height_set = true
+        return true
+    case "bar_foreground":
+        v, ok := parse_color(value)
+        if !ok { append(errs, fmt.aprintf("bar_foreground: expected #RRGGBB, got %q", value)); return false }
+        sc.bar_foreground = v; sc.bar_foreground_set = true
+        return true
+    case "bar_background":
+        v, ok := parse_color(value)
+        if !ok { append(errs, fmt.aprintf("bar_background: expected #RRGGBB, got %q", value)); return false }
+        sc.bar_background = v; sc.bar_background_set = true
+        return true
+
     case:
         if ignored_setting(key) { return true }
         warn_once(sc, key)
@@ -597,9 +685,79 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
     }
 }
 
-// parse_directive handles bind/call/workspace/rule/autostart/mousebind lines.
+next_directive_field :: proc(rest: ^string) -> (string, bool) {
+    colon := strings.index_byte(rest^, ':')
+    if colon < 0 { return "", false }
+    field := strings.trim_space(rest^[:colon])
+    rest^ = strings.trim_space(rest^[colon + 1:])
+    return field, field != ""
+}
+
+parse_bar_alignment :: proc(value: string) -> (Bar_Block_Alignment, bool) {
+    switch strings.trim_space(value) {
+    case "left": return .Left, true
+    case "center": return .Center, true
+    case "right": return .Right, true
+    }
+    return {}, false
+}
+
+parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string) -> bool {
+    remaining := rest
+    kind, has_kind := next_directive_field(&remaining)
+    if !has_kind {
+        append(errs, fmt.aprintf("bar_block: expected a block kind and alignment, got %q", remaining))
+        return false
+    }
+
+    switch kind {
+    case "workspaces", "systray":
+        alignment, ok := parse_bar_alignment(remaining)
+        if !ok {
+            append(errs, fmt.aprintf("bar_block(%s): expected left/center/right, got %q", kind, remaining))
+            return false
+        }
+        block_kind := Bar_Block_Kind.Workspaces
+        if kind == "systray" { block_kind = .Systray }
+        append(&sc.bar_blocks, Raw_Bar_Block{kind = block_kind, alignment = alignment})
+    case "script":
+        alignment_text, ok_alignment := next_directive_field(&remaining)
+        name, ok_name := next_directive_field(&remaining)
+        interval_text, ok_interval := next_directive_field(&remaining)
+        timeout_text, ok_timeout := next_directive_field(&remaining)
+        alignment, valid_alignment := parse_bar_alignment(alignment_text)
+        interval, valid_interval := parse_i32_value(interval_text)
+        timeout, valid_timeout := parse_i32_value(timeout_text)
+        command := quoted_trim(remaining)
+        if !ok_alignment || !valid_alignment || !ok_name || len(name) > 64 ||
+           !ok_interval || !valid_interval || interval < 1 || interval > 86400 ||
+           !ok_timeout || !valid_timeout || timeout < 1 || timeout > 60 ||
+           command == "" || len(command) >= 1024 {
+            append(errs, fmt.aprintf(
+                "bar_block(script): expected alignment : name : interval(1..86400) : timeout(1..60) : command, got %q",
+                remaining,
+            ))
+            return false
+        }
+        append(&sc.bar_blocks, Raw_Bar_Block{
+            kind = .Script, alignment = alignment,
+            name = strings.clone(name), command = strings.clone(command),
+            interval_ms = interval * 1000, timeout_ms = timeout * 1000,
+        })
+    case:
+        append(errs, fmt.aprintf("bar_block: unknown block kind %q", kind))
+        return false
+    }
+    sc.bar_blocks_set = true
+    return true
+}
+
+// parse_directive handles bind/call/workspace/rule/autostart/bar_block/mousebind lines.
 parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]string) -> bool {
     switch key {
+    case "bar_block":
+        return parse_bar_block(sc, rest, errs)
+
     case "autostart":
         cmd := quoted_trim(rest)
         if cmd == "" {
@@ -787,7 +945,7 @@ scan_rc :: proc(sc: ^Load_Scratch, data: []byte, errs: ^[dynamic]string) -> bool
         rest := strings.trim_space(line[colon + 1:])
 
         switch key {
-        case "bind", "call", "workspace", "rule", "autostart", "mousebind":
+        case "bind", "call", "workspace", "rule", "autostart", "bar_block", "mousebind":
             if !parse_directive(sc, key, rest, errs) { ok = false }
         case:
             if !parse_setting(sc, key, rest, errs) { ok = false }
@@ -851,6 +1009,10 @@ cfg_apply :: proc(r: ^Config_Result, label: string) {
     g_wm.rules = r.rules
     r.rules = {}
 
+    release_bar_blocks(&g_wm.bar_blocks)
+    g_wm.bar_blocks = r.bar_blocks
+    r.bar_blocks = {}
+
     // Startup commands run once per command text, so a reload never relaunches
     // programs the running config already started.
     for s in r.startups {
@@ -865,6 +1027,7 @@ cfg_apply :: proc(r: ^Config_Result, label: string) {
 
     grab_all_keys()
     regrab_client_buttons()
+    bar_sync_config()
     reflow()
     x11.xcb_flush(g_wm.conn)
     logger.Info("config applied:", label)

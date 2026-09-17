@@ -8,9 +8,9 @@ The name stands for **S**argsyan **KAR**en's **W**indow **M**anager.
 
 skarwm is a small keyboard-driven X11 window manager written in Odin. Windows
 live in vertical columns on a horizontally scrolling strip, with workspaces as
-the vertical dimension. Bars, launchers, notifications, compositing, and other
-desktop UI are intentionally left to external programs such as
-[anush](https://github.com/nerdyslacker/anush).
+the vertical dimension. An optional lightweight built-in bar provides
+workspace and scheduled script blocks; external desktop UI such as
+[anush](https://github.com/nerdyslacker/anush) remains fully supported.
 
 Features include dynamic workspaces, stacked and tabbed columns, RandR
 multi-monitor support, independent workspaces per monitor, floating and
@@ -54,7 +54,7 @@ sudo xbps-install -S tigervnc xterm xdotool xwininfo xrandr xprop \
 ```
 
 At runtime skarwm links libxcb plus its RandR and Shape extensions. No shell,
-bar, compositor, or notification daemon is required.
+bar, compositor, or notification daemon is required; `skarwm-bar` is optional.
 
 ## Recommended companion software
 
@@ -112,6 +112,7 @@ src/
 ├── log/               logging
 └── wm/                runtime orchestration, config, EWMH, outputs, IPC server
 cmd/skarwm-msg/        standalone IPC command client
+cmd/skarwm-bar/        optional standalone EWMH dock/bar client
 tests/core_tests/      X-independent core regression suite
 ```
 

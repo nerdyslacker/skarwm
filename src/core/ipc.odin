@@ -57,7 +57,7 @@ Ipc_Action :: enum {
     Invalid,
     Focus_Left, Focus_Right, Focus_Up, Focus_Down,
     Move_Left, Move_Right, Move_Up, Move_Down,
-    Workspace, Workspace_Next, Workspace_Prev,
+    Workspace, Workspace_On_Output, Workspace_Next, Workspace_Prev,
     Focus_Window,
     Move_To_Workspace, Move_To_Workspace_Next, Move_To_Workspace_Prev,
     Toggle_Floating, Toggle_Fullscreen,
@@ -122,6 +122,12 @@ ipc_encode :: proc(typ: Ipc_Type, payload: []byte) -> []byte {
 Ipc_Reader :: struct {
     buf: []byte, // owned allocation (never interior-sliced)
     off: int, // bytes of buf already parsed out (<= len(buf))
+}
+
+Ipc_Reader_Reset :: proc(r: ^Ipc_Reader) {
+    if r == nil { return }
+    delete(r.buf)
+    r^ = {}
 }
 
 ipc_reader_feed :: proc(r: ^Ipc_Reader, data: []byte) -> (frames: [dynamic]Ipc_Frame, ok: bool) {
@@ -246,9 +252,9 @@ ipc_ws_entry :: proc(sb: ^strings.Builder, m: ^Manager, o: ^Output, ws: ^Workspa
     strings.write_string(sb, `,"name":"`)
     strings.write_int(sb, ws.Id)
     strings.write_string(sb, `","visible":`)
-    json_bool(sb, on && o == Active_Output(m))
-    strings.write_string(sb, `,"focused":`)
     json_bool(sb, on)
+    strings.write_string(sb, `,"focused":`)
+    json_bool(sb, on && o == Active_Output(m))
     strings.write_string(sb, `,"urgent":`)
     json_bool(sb, workspace_urgent(ws))
     strings.write_string(sb, `,"rect":{"x":`)
@@ -281,16 +287,17 @@ workspace_window_count :: proc(ws: ^Workspace) -> int {
 }
 
 // ipc_workspaces_payload renders the GET_WORKSPACES body: one entry per
-// existing workspace in id order. Empty workspaces are included — skarwm
-// keeps them alive, so they exist from the moment they are created.
+// existing workspace grouped by output discovery order, then id order. Empty
+// workspaces are included — skarwm keeps them alive from creation onward.
 ipc_workspaces_payload :: proc(m: ^Manager) -> []byte {
-    o := Active_Output(m)
     sb := strings.builder_make()
     defer strings.builder_destroy(&sb)
     strings.write_string(&sb, "[")
-    if o != nil {
-        for ws, i in o.Ws {
-            if i > 0 { strings.write_string(&sb, ",") }
+    first := true
+    for o in m.Outputs {
+        for ws in o.Ws {
+            if !first { strings.write_string(&sb, ",") }
+            first = false
             ipc_ws_entry(&sb, m, o, ws)
         }
     }
@@ -629,6 +636,20 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
             if tokens[2] == "next" { return Ipc_Command{action = .Move_To_Output_Next}, "", true }
             if tokens[2] == "prev" || tokens[2] == "previous" { return Ipc_Command{action = .Move_To_Output_Prev}, "", true }
         }
+    }
+
+    if len(tokens) == 4 && tokens[0] == "workspace" && tokens[2] == "output" {
+        id := 0
+        valid := len(tokens[1]) > 0 && tokens[3] != ""
+        for ch in tokens[1] {
+            if ch < '0' || ch > '9' { valid = false; break }
+            id = id * 10 + int(ch - '0')
+            if id > IPC_MAX_WORKSPACE_ID { valid = false; break }
+        }
+        if valid && id >= 1 {
+            return Ipc_Command{action = .Workspace_On_Output, arg = id, text = tokens[3]}, "", true
+        }
+        return {}, strings.clone("workspace output: expected workspace id and output name"), false
     }
 
     if len(tokens) == 3 && tokens[0] == "focus" && tokens[1] == "window" {

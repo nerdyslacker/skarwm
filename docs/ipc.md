@@ -15,6 +15,7 @@ returned by `get-version` is `i3-ipc+skarwm-v1`.
 skarwm-msg focus left|right|up|down
 skarwm-msg move left|right|up|down
 skarwm-msg workspace N|next|prev
+skarwm-msg workspace N output NAME
 skarwm-msg move workspace N
 skarwm-msg move workspace next|prev
 skarwm-msg toggle-floating
@@ -60,8 +61,10 @@ skarwm-msg get-version
 ```
 
 `get-workspaces` and `get-outputs` use i3-compatible message types and object
-fields. Workspace objects add a `windows` count so a shell can distinguish an
-empty workspace without fetching the window list. `get-windows` is skarwm
+fields. `get-workspaces` includes every output; `visible` means current on its
+output, while `focused` additionally requires that output to be active.
+Workspace objects add a `windows` count so a shell can distinguish an empty
+workspace without fetching the window list. `get-windows` is skarwm
 extension type 100 and returns metadata, workspace membership, state, and the
 last arranged geometry for every managed client. Tiled clients also include
 `column`, `column_layout`, `tab_index`, `tab_count`, and `tab_active`;

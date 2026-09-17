@@ -21,7 +21,14 @@ Config :: struct {
     AnimationEasing: Animation_Easing,
     FocusedBorder: u32,   // border colour of the focused window
     UnfocusedBorder: u32, // border colour of every other window
+    BarEnabled: bool,
+    BarPosition: Bar_Position,
+    BarHeight: i32,
+    BarForeground: u32,
+    BarBackground: u32,
 }
+
+Bar_Position :: enum u8 { Top, Bottom }
 
 Default_Config :: proc() -> Config {
     return Config {
@@ -37,6 +44,11 @@ Default_Config :: proc() -> Config {
         AnimationEasing   = .Ease_Out_Cubic,
         FocusedBorder     = 0xE0AF68,
         UnfocusedBorder   = 0x3A3A3A,
+        BarEnabled        = false,
+        BarPosition       = .Top,
+        BarHeight         = 26,
+        BarForeground     = 0xE6E6E6,
+        BarBackground     = 0x1E1E2E,
     }
 }
 

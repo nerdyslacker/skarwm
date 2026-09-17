@@ -50,9 +50,12 @@ src/
     └── outputs.odin            monitor discovery and reconciliation
 ```
 
-Outside `src/`, `cmd/skarwm-msg/` is the standalone IPC client, `assets/`
+Outside `src/`, `cmd/skarwm-msg/` is the standalone IPC client,
+`cmd/skarwm-bar/` is the optional dock/bar process, `assets/`
 contains installable session/config files, `scripts/` contains nested-X
 integration tooling, and `tests/core_tests/` exercises the pure core package.
+The bar owns its X rendering, script scheduler, XEmbed tray, and IPC client;
+the WM only publishes launch/configuration state and workspace events.
 
 The local package dependency direction is:
 

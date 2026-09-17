@@ -60,6 +60,8 @@ Wm :: struct {
     preview_hover_locked: bool,
     preview_hover_target: u32,
     rendering: rendering.State,
+    bar_managed_started: bool,
+    bar_blocks: [dynamic]Raw_Bar_Block,
 }
 
 g_wm: Wm
@@ -198,9 +200,10 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     // — a dock is a dock even if it carries fullscreen state or matches a rule.
     if read_window_type(cl) {
         cl.Dock = true
-        read_struts(cl)
         read_dock_geometry(cl)
-        c.Add_Dock_To_Output(m, c.Output_At_Rect(m, cl.FloatingRect), cl)
+        output := c.Output_At_Rect(m, cl.FloatingRect)
+        read_struts(cl, output)
+        c.Add_Dock_To_Output(m, output, cl)
         ewmh_client_managed(cl) // _NET_CLIENT_LIST (no _NET_WM_DESKTOP: Ws == nil)
         reflow() // arranges the dock and maps it (push_geoms)
         raise_docks() // keep the dock below an active fullscreen client
@@ -251,21 +254,35 @@ read_window_type :: proc(cl: ^c.Client) -> bool {
     return false
 }
 
-// read_struts fills cl.Strut from _NET_WM_STRUT_PARTIAL (the four per-edge
-// widths come first among its 12 CARDINAL values) or, failing that,
-// _NET_WM_STRUT (4 CARDINAL). The begin/end edge ranges of the partial form
-// are deliberately ignored: a dock reserves the full corresponding edge of
-// the RandR monitor containing its geometry.
-read_struts :: proc(cl: ^c.Client) {
+// read_struts converts EWMH root-edge distances into local insets for the
+// RandR output owning the dock. The partial ranges decide which monitor edge
+// is affected; this is essential when one bar window exists per monitor.
+read_struts :: proc(cl: ^c.Client, output: ^c.Output) {
     cl.Strut = c.Insets {}
     if data, ok := x11.get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_STRUT_PARTIAL"), atom("CARDINAL")); ok {
         defer delete(data)
-        if len(data) >= 12 * 4 {
+        if len(data) >= 12 * size_of(u32) && output != nil {
             vals := ([^]u32)(raw_data(data))
-            cl.Strut.Left = i32(vals[0])
-            cl.Strut.Right = i32(vals[1])
-            cl.Strut.Top = i32(vals[2])
-            cl.Strut.Bottom = i32(vals[3])
+            ox1, ox2 := output.Geom.X, output.Geom.X + output.Geom.W
+            oy1, oy2 := output.Geom.Y, output.Geom.Y + output.Geom.H
+            vertical_overlap := i32(vals[5]) >= oy1 && i32(vals[4]) < oy2
+            right_vertical_overlap := i32(vals[7]) >= oy1 && i32(vals[6]) < oy2
+            horizontal_overlap := i32(vals[9]) >= ox1 && i32(vals[8]) < ox2
+            bottom_horizontal_overlap := i32(vals[11]) >= ox1 && i32(vals[10]) < ox2
+            if vals[0] > 0 && vertical_overlap {
+                cl.Strut.Left = clamp(i32(vals[0]) - ox1, i32(0), output.Geom.W)
+            }
+            if vals[1] > 0 && right_vertical_overlap {
+                edge := g_wm.scr_w - i32(vals[1])
+                cl.Strut.Right = clamp(ox2 - edge, i32(0), output.Geom.W)
+            }
+            if vals[2] > 0 && horizontal_overlap {
+                cl.Strut.Top = clamp(i32(vals[2]) - oy1, i32(0), output.Geom.H)
+            }
+            if vals[3] > 0 && bottom_horizontal_overlap {
+                edge := g_wm.scr_h - i32(vals[3])
+                cl.Strut.Bottom = clamp(oy2 - edge, i32(0), output.Geom.H)
+            }
             return
         }
     }
@@ -273,10 +290,19 @@ read_struts :: proc(cl: ^c.Client) {
         defer delete(data)
         if len(data) >= 4 * 4 {
             vals := ([^]u32)(raw_data(data))
-            cl.Strut.Left = i32(vals[0])
-            cl.Strut.Right = i32(vals[1])
-            cl.Strut.Top = i32(vals[2])
-            cl.Strut.Bottom = i32(vals[3])
+            if output == nil {
+                cl.Strut.Left = i32(vals[0])
+                cl.Strut.Right = i32(vals[1])
+                cl.Strut.Top = i32(vals[2])
+                cl.Strut.Bottom = i32(vals[3])
+            } else {
+                ox2 := output.Geom.X + output.Geom.W
+                oy2 := output.Geom.Y + output.Geom.H
+                if vals[0] > 0 do cl.Strut.Left = clamp(i32(vals[0]) - output.Geom.X, i32(0), output.Geom.W)
+                if vals[1] > 0 do cl.Strut.Right = clamp(ox2 - (g_wm.scr_w - i32(vals[1])), i32(0), output.Geom.W)
+                if vals[2] > 0 do cl.Strut.Top = clamp(i32(vals[2]) - output.Geom.Y, i32(0), output.Geom.H)
+                if vals[3] > 0 do cl.Strut.Bottom = clamp(oy2 - (g_wm.scr_h - i32(vals[3])), i32(0), output.Geom.H)
+            }
         }
     }
 }
@@ -1369,7 +1395,7 @@ on_property_notify :: proc(ev: ^x11.Property_Notify_Event) {
         return
     }
     if cl.Dock && (ev.atom == atom("_NET_WM_STRUT_PARTIAL") || ev.atom == atom("_NET_WM_STRUT")) {
-        read_struts(cl)
+        read_struts(cl, cl.Out)
         c.Update_Reserved(g_wm.m)
         reflow() // ewmh_pulse inside reflow republishes _NET_WORKAREA
     }

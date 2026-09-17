@@ -5,7 +5,7 @@
 #
 # Configuration is a plain-text rc file — there is no embedded
 # interpreter, so the only runtime dependency is libxcb. Targets:
-#   make            build a release binary into build/skarwm
+#   make            build skarwm, skarwm-msg, and optional skarwm-bar binaries
 #   make debug      build an assertion-enabled binary into build/skarwm-debug
 #   make test       run the unit suite (tests/core_tests) then the X11
 #                   integration tests
@@ -26,7 +26,7 @@ SESSIONDIR := $(DATADIR)/xsessions
 SYSCONFDIR ?= /etc
 SKARWMDIR := $(SYSCONFDIR)/skarwm
 
-all: build/skarwm build/skarwm-msg
+all: build/skarwm build/skarwm-msg build/skarwm-bar
 
 # release build
 build/skarwm: $(ODIN_SRCS)
@@ -37,6 +37,10 @@ build/skarwm-msg: $(shell find cmd/skarwm-msg src/core -name '*.odin')
 	@mkdir -p build
 	$(ODIN) build cmd/skarwm-msg -o:speed -out:$@
 
+build/skarwm-bar: $(shell find cmd/skarwm-bar src/x11 src/core -name '*.odin')
+	@mkdir -p build
+	$(ODIN) build cmd/skarwm-bar -o:speed -out:$@
+
 # debug build (same features, asserts/checks enabled)
 build/skarwm-debug: $(ODIN_SRCS)
 	@mkdir -p build
@@ -44,14 +48,15 @@ build/skarwm-debug: $(ODIN_SRCS)
 
 debug: build/skarwm-debug
 
-install: build/skarwm build/skarwm-msg
+install: build/skarwm build/skarwm-msg build/skarwm-bar
 	install -Dm755 build/skarwm $(DESTDIR)$(BINDIR)/skarwm
 	install -Dm755 build/skarwm-msg $(DESTDIR)$(BINDIR)/skarwm-msg
+	install -Dm755 build/skarwm-bar $(DESTDIR)$(BINDIR)/skarwm-bar
 	install -Dm755 assets/skarwm-session $(DESTDIR)$(BINDIR)/skarwm-session
 	install -Dm644 assets/skarwm.desktop $(DESTDIR)$(SESSIONDIR)/skarwm.desktop
 	install -Dm644 assets/example.rc $(DESTDIR)$(SKARWMDIR)/config.rc
 
-test: build/skarwm build/skarwm-msg
+test: build/skarwm build/skarwm-msg build/skarwm-bar
 	odin run tests/core_tests
 	scripts/itest.sh
 	scripts/itest-randr.sh
