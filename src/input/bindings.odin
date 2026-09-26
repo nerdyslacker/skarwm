@@ -25,6 +25,8 @@ Action_Kind :: enum u8 {
     Move_To_WS_Next, Move_To_WS_Prev,
     Focus_Output_Next, Focus_Output_Prev,
     Move_To_Output_Next, Move_To_Output_Prev,
+    Screen_Split_Toggle, Screen_Split_Enable, Screen_Split_Disable,
+    Screen_Split_Grow, Screen_Split_Shrink, Screen_Split_Ratio,
 }
 
 Binding :: struct {

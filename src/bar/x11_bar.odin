@@ -39,6 +39,15 @@ init_randr :: proc(state: ^State) {
 
 query_monitors :: proc(state: ^State) -> [dynamic]Monitor {
     monitors := make([dynamic]Monitor, 0, 4)
+    if state.LogicalMonitorsReady && len(state.LogicalMonitors) > 0 {
+        for monitor in state.LogicalMonitors {
+            append(&monitors, Monitor{
+                X = monitor.X, Y = monitor.Y, W = monitor.W, H = monitor.H,
+                Name = x11.strings_clone_here(monitor.Name),
+            })
+        }
+        return monitors
+    }
     if state.RandrAvailable {
         e: ^x11.Error
         reply := x11.xcb_randr_get_monitors_reply(

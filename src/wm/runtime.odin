@@ -130,6 +130,7 @@ wm_startup :: proc() -> bool {
 
 cleanup_all :: proc() {
     bar_shutdown()
+    randr_shutdown()
     ui.Hide_Drop(&g_wm.ui)
     ui.Destroy_Drop(&g_wm.ui)
     ui.Hide_Help(&g_wm.ui)
@@ -140,6 +141,7 @@ cleanup_all :: proc() {
     release_bindings(&g_wm.bindings)
     release_rules(&g_wm.rules)
     release_bar_blocks(&g_wm.bar_blocks)
+    release_virtual_screens(&g_wm.virtual_screens)
     if g_wm.ran_startups != nil {
         for s in g_wm.ran_startups { if s != "" { delete(s) } }
         delete(g_wm.ran_startups)
@@ -305,7 +307,7 @@ handle_event :: proc(ev: ^x11.Event) {
     // with window destruction — ignore those.
     rt &= 0x7F
     if rt == 0 { return }
-    if randr_handle_event(rt) { return }
+    if randr_handle_event(ev, rt) { return }
 
     switch rt {
     case u8(x11.EVENT_KEY_PRESS):

@@ -55,6 +55,7 @@ main :: proc() {
     test_maximize()
     test_tabbed_layout()
     test_multi_output()
+    test_virtual_screens()
     test_multi_output_scrolling()
     test_layout_geometry()
     test_scrolling()
@@ -203,19 +204,64 @@ test_resize_math :: proc() {
     kha_before := kha.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
     khb_before := khb.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
     ok(c.Resize_Focused(keyboard_horizontal, .Left),
-       "keyboard left resize grows the focused column")
+       "keyboard left resize shrinks the focused column")
     c.Arrange_All(keyboard_horizontal)
     kha_after := kha.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
     khb_after := khb.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
-    eq(kha_after, kha_before,
-       "keyboard width resize leaves neighboring columns unchanged")
+    eq(kha_after, kha_before + c.KEYBOARD_RESIZE_STEP,
+       "keyboard width resize gives released space to the neighboring column")
     eq(khb_after, khb_before - c.KEYBOARD_RESIZE_STEP,
        "keyboard left resize shrinks the focused column by one step")
+    eq(kha_after + khb_after, kha_before + khb_before,
+       "keyboard width resize preserves the visible pair extent")
     ok(c.Resize_Focused(keyboard_horizontal, .Right),
        "keyboard right resize grows the focused column again")
     c.Arrange_All(keyboard_horizontal)
     eq(khb.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth, khb_before,
        "opposite keyboard width steps are reversible")
+
+    pointer_horizontal := mk_man()
+    defer c.Destroy_Manager(pointer_horizontal)
+    c.Activate_WS(pointer_horizontal, c.Ensure_WS(pointer_horizontal, 1))
+    pha := add_tiled(pointer_horizontal, 295)
+    phb := add_tiled(pointer_horizontal, 296)
+    c.Arrange_All(pointer_horizontal)
+    pha_before := pha.Geom.W + 2 * pointer_horizontal.Cfg.BorderWidth
+    phb_before := phb.Geom.W + 2 * pointer_horizontal.Cfg.BorderWidth
+    ok(c.Resize_Tiled_Client(pointer_horizontal, pha, 120, 0, .Right),
+       "pointer resize moves the boundary toward the neighboring column")
+    c.Arrange_All(pointer_horizontal)
+    eq(pha.Geom.W + 2 * pointer_horizontal.Cfg.BorderWidth, pha_before + 120,
+       "pointer resize grows the selected column")
+    eq(phb.Geom.W + 2 * pointer_horizontal.Cfg.BorderWidth, phb_before - 120,
+       "pointer resize keeps the neighboring column on screen")
+    eq(c.Current_WS(pointer_horizontal).ViewportX, i32(0),
+       "paired resize does not introduce horizontal scrolling")
+
+    scrolling_horizontal := mk_man()
+    defer c.Destroy_Manager(scrolling_horizontal)
+    c.Activate_WS(scrolling_horizontal, c.Ensure_WS(scrolling_horizontal, 1))
+    sha := add_tiled(scrolling_horizontal, 297)
+    shb := add_tiled(scrolling_horizontal, 298)
+    shc := add_tiled(scrolling_horizontal, 299)
+    shws := c.Current_WS(scrolling_horizontal)
+    sho := c.Active_Output(scrolling_horizontal)
+    strip_before := c.Column_Width_At(scrolling_horizontal, sho, shws, 0) +
+        c.Column_Width_At(scrolling_horizontal, sho, shws, 1) +
+        c.Column_Width_At(scrolling_horizontal, sho, shws, 2)
+    ok(c.Resize_Tiled_Client(scrolling_horizontal, sha, 120, 0, .Right),
+       "paired resize works inside an overflowing strip")
+    strip_after := c.Column_Width_At(scrolling_horizontal, sho, shws, 0) +
+        c.Column_Width_At(scrolling_horizontal, sho, shws, 1) +
+        c.Column_Width_At(scrolling_horizontal, sho, shws, 2)
+    eq(strip_after, strip_before,
+       "paired resize leaves the scrolling strip extent unchanged")
+    c.Focus_Client(scrolling_horizontal, shc)
+    c.Ensure_Active_Focus_Visible(scrolling_horizontal)
+    c.Arrange_All(scrolling_horizontal)
+    ok(shws.ViewportX > 0 && shc.Geom.X >= 0,
+       "later columns remain reachable after paired resizing")
+    _ = shb
 
     keyboard_vertical := mk_man()
     defer c.Destroy_Manager(keyboard_vertical)
@@ -1159,8 +1205,11 @@ test_multi_output :: proc() {
 
     floating := c.New_Client(102)
     c.Add_Managed(m, c.Current_WS(m), floating, true)
+    floating.FloatingRect = c.Rect{X = 2100, Y = 100, W = 400, H = 300}
     ok(c.Move_Focused_To_Output_Rel(m, -1), "send floating client to previous output")
     eq(floating.Out.Name, "eDP-1", "floating client ownership moved")
+    eq(floating.FloatingRect, c.Rect{X = 180, Y = 100, W = 400, H = 300},
+       "floating client preserves screen-relative geometry")
     eq(floating.Ws.Focus, floating, "moved floating client is remembered on target")
 
     reduced := []c.Output_Spec {
@@ -1183,6 +1232,111 @@ test_multi_output :: proc() {
     eq(string(event), `{"change":"disconnected","output":"HDMI-1"}`, "output IPC event payload")
 }
 
+test_virtual_screens :: proc() {
+    m := c.New_Manager()
+    defer c.Destroy_Manager(m)
+    c.Setup_Output(m, "DP-1", c.Rect{X = 1920, Y = 0, W = 3440, H = 1440})
+    c.Activate_WS(m, c.Ensure_WS(m, 1))
+    physical := m.PhysicalOutputs[0]
+    eq(len(m.PhysicalOutputs), 1, "default topology has one physical output")
+    eq(len(m.Outputs), 1, "default topology has one logical screen")
+    eq(m.Outputs[0].Parent, physical, "logical screen records its physical parent")
+    ok(!m.Outputs[0].Virtual, "default logical screen is not virtual")
+
+    primary_client := add_tiled(m, 801)
+    ok(c.Enable_Output_Split(m, m.Outputs[0], 0.75), "physical output accepts a 75/25 split")
+    eq(len(m.PhysicalOutputs), 1, "splitting does not invent a physical output")
+    eq(len(m.Outputs), 2, "split creates two logical screens")
+    left, right := m.Outputs[0], m.Outputs[1]
+    eq(left.Name, "DP-1:left", "left logical screen has a stable qualified id")
+    eq(right.Name, "DP-1:right", "right logical screen has a stable qualified id")
+    eq(left.Geom, c.Rect{X = 1920, Y = 0, W = 2580, H = 1440}, "75 percent left geometry uses parent root origin")
+    eq(right.Geom, c.Rect{X = 4500, Y = 0, W = 860, H = 1440}, "right geometry consumes the exact remainder")
+    eq(left.Geom.W + right.Geom.W, physical.Geom.W, "split covers the complete physical width")
+    eq(left.Geom.X + left.Geom.W, right.Geom.X, "split regions share one gapless boundary")
+    eq(c.Output_At_Point(m, 3000, 700), left, "point lookup selects the left logical screen")
+    eq(c.Output_At_Point(m, 5000, 700), right, "point lookup selects the right logical screen")
+
+    c.Focus_Output(m, right)
+    c.Switch_WS_Id(m, 4)
+    secondary_client := add_tiled(m, 802)
+    c.Arrange_All(m)
+    eq(secondary_client.Geom, c.Rect{X = 4510, Y = 10, W = 840, H = 1420},
+       "logical screen owns independent layout geometry")
+    secondary_client.Fullscreen = true
+    c.Arrange_All(m)
+    eq(secondary_client.Geom, right.Geom, "fullscreen fills only the logical screen")
+    secondary_client.Fullscreen = false
+    dock := add_dock(m, 803, c.Insets{Top = 24}, physical.Geom)
+    eq(left.Reserved.Top, i32(24), "physical-width dock reserves the left logical workarea")
+    eq(right.Reserved.Top, i32(24), "physical-width dock reserves the right logical workarea")
+    _ = dock
+
+    left_bar := c.New_Client(804)
+    left_bar.Strut = c.Insets{Top = 34}
+    left_bar.FloatingRect = c.Rect{X = 1928, Y = 8, W = 2564, H = 34}
+    c.Add_Dock_To_Output(m, left, left_bar)
+    right_bar := c.New_Client(805)
+    right_bar.Strut = c.Insets{Top = 34}
+    right_bar.FloatingRect = c.Rect{X = 4508, Y = 8, W = 844, H = 34}
+    c.Add_Dock_To_Output(m, right, right_bar)
+
+    old_total := left.Geom.W + right.Geom.W
+    ok(c.Resize_Output_Split(m, left, 50), "split boundary moves at runtime")
+    eq(left.Geom.W, i32(2630), "boundary delta grows the left logical screen")
+    eq(right.Geom.W, i32(810), "boundary delta shrinks the right logical screen")
+    eq(left.Geom.W + right.Geom.W, old_total, "boundary resize preserves exact coverage")
+    eq(left_bar.FloatingRect, c.Rect{X = 1928, Y = 8, W = 2614, H = 34},
+       "left edge bar resizes with its logical screen")
+    eq(right_bar.FloatingRect, c.Rect{X = 4558, Y = 8, W = 794, H = 34},
+       "right edge bar moves and resizes with its logical screen")
+    eq(dock.FloatingRect, physical.Geom,
+       "parent-wide dock is not mistaken for a logical-screen bar")
+    left_bar.FloatingRect = c.Rect{X = 1928, Y = 8, W = 2564, H = 34}
+    c.Capture_Dock_Anchors(left_bar, left)
+    c.Remap_Dock_To_Output(left_bar, left)
+    eq(left_bar.FloatingRect, c.Rect{X = 1928, Y = 8, W = 2614, H = 34},
+       "delayed panel configure cannot restore the previous split width")
+    ok(c.Resize_Output_Split(m, right, -50), "opposite boundary delta is accepted")
+    eq(left.Geom.W, i32(2580), "opposite deltas restore the original geometry exactly")
+    eq(right.Geom.X, i32(4500), "opposite deltas do not accumulate boundary drift")
+
+    resized := []c.Output_Spec{{Name = "DP-1", Geom = c.Rect{X = 0, Y = 0, W = 4000, H = 1200}, Primary = true}}
+    ok(c.Reconcile_Outputs(m, resized), "physical resize updates topology")
+    left, right = m.Outputs[0], m.Outputs[1]
+    eq(left.Geom.W, i32(3000), "ratio split recalculates from current physical width")
+    eq(right.Geom, c.Rect{X = 3000, Y = 0, W = 1000, H = 1200},
+       "physical resize derives the second screen from the remainder")
+
+    ok(c.Disable_Output_Split(m, right), "split can return to one logical screen")
+    eq(len(m.Outputs), 1, "unsplit removes the secondary logical screen")
+    eq(m.Outputs[0].Name, "DP-1", "unsplit restores the physical-compatible logical id")
+    eq(m.Outputs[0].Geom, resized[0].Geom, "unsplit uses current physical geometry")
+    eq(primary_client.Out, m.Outputs[0], "primary client survives unsplit")
+    eq(secondary_client.Out, m.Outputs[0], "secondary client migrates on unsplit")
+    eq(secondary_client.Ws.Id, 4, "secondary workspace identity survives migration")
+
+    ok(c.Enable_Output_Split(m, m.Outputs[0], 0.75), "split can be enabled again")
+    eq(m.Outputs[1].Current.Id, 4, "secondary selected workspace is restored on re-split")
+    eq(secondary_client.Out, m.Outputs[0], "migrated clients remain accessible on the primary screen")
+
+    before_invalid := m.Outputs[0].Geom
+    ok(!c.Set_Output_Split_Ratio(m, m.Outputs[0], 0.99),
+       "invalid minimum width rejects the topology transaction")
+    eq(m.Outputs[0].Geom, before_invalid, "rejected topology leaves geometry untouched")
+
+    two_physical := []c.Output_Spec{
+        {Name = "DP-1", Geom = c.Rect{X = 0, Y = 0, W = 4000, H = 1200}, Primary = true},
+        {Name = "HDMI-1", Geom = c.Rect{X = 4000, Y = 0, W = 1920, H = 1080}},
+    }
+    ok(c.Reconcile_Outputs(m, two_physical), "a second physical output can connect while split")
+    eq(len(m.PhysicalOutputs), 2, "physical enumeration remains separate from logical screens")
+    eq(len(m.Outputs), 3, "existing split plus normal monitor yields three logical screens")
+    hdmi := c.Find_Output(m, "HDMI-1")
+    ok(c.Enable_Output_Split(m, hdmi, 0.5), "an output can split while another physical monitor is connected")
+    eq(len(m.Outputs), 4, "two split physical outputs yield four logical screens")
+}
+
 test_multi_output_scrolling :: proc() {
     m := c.New_Manager()
     defer c.Destroy_Manager(m)
@@ -1196,7 +1350,9 @@ test_multi_output_scrolling :: proc() {
 
     eq(c.Output_At_Point(m, -640, 512), left, "negative root coordinate selects left output")
     eq(c.Output_At_Point(m, 960, 540), right, "root coordinate selects right output")
-    eq(c.Output_At_Point(m, 3000, 540), right, "point outside outputs falls back to active output")
+    c.Focus_Output(m, left)
+    eq(c.Output_At_Point(m, 3000, 540), right, "point outside outputs selects the nearest logical screen")
+    c.Focus_Output(m, right)
 
     c.Focus_Output(m, left)
     left_first := add_tiled(m, 100)
@@ -1899,6 +2055,9 @@ test_ipc_outputs_payload :: proc() {
     defer delete(pl)
     eq(string(pl), `[{"name":"eDP-1","active":true,"primary":true,"focused":true,` +
         `"rect":{"x":0,"y":0,"width":1920,"height":1080},` +
+        `"physical_output":"eDP-1","virtual":false,` +
+        `"relative_rect":{"x":0,"y":0,"width":1920,"height":1080},` +
+        `"workarea":{"x":8,"y":8,"width":1904,"height":1064},` +
         `"current_workspace":"1","power":true,"scale":1}]`,
         "GET_OUTPUTS: one output, ws1 current")
 
@@ -1907,6 +2066,9 @@ test_ipc_outputs_payload :: proc() {
     defer delete(pl2)
     ok(string(pl2) == `[{"name":"eDP-1","active":true,"primary":true,"focused":true,` +
         `"rect":{"x":0,"y":0,"width":1920,"height":1080},` +
+        `"physical_output":"eDP-1","virtual":false,` +
+        `"relative_rect":{"x":0,"y":0,"width":1920,"height":1080},` +
+        `"workarea":{"x":8,"y":8,"width":1904,"height":1064},` +
         `"current_workspace":"2","power":true,"scale":1}]`,
         "GET_OUTPUTS follows the current workspace")
 
@@ -1916,6 +2078,9 @@ test_ipc_outputs_payload :: proc() {
     defer delete(pl3)
     ok(string(pl3) == `[{"name":"eDP-1","active":true,"primary":true,"focused":true,` +
         `"rect":{"x":0,"y":0,"width":1920,"height":1080},` +
+        `"physical_output":"eDP-1","virtual":false,` +
+        `"relative_rect":{"x":0,"y":0,"width":1920,"height":1080},` +
+        `"workarea":{"x":8,"y":8,"width":1904,"height":1064},` +
         `"current_workspace":null,"power":true,"scale":1}]`,
         "GET_OUTPUTS: null current workspace before any activation")
 }
@@ -2040,6 +2205,20 @@ test_ipc_parse_command :: proc() {
     cmd, err, fine = c.ipc_parse_command(bytes_of(`focus window nope`))
     ok(!fine, "focus window rejects non-numeric id")
     eq(err, "focus window: expected a positive X11 window id", "focus window error")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`screen split toggle`))
+    ok(fine && cmd.action == .Screen_Split_Toggle, "screen split toggle parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`screen split resize -50`))
+    ok(fine && cmd.action == .Screen_Split_Resize && cmd.arg == -50,
+       "screen split signed resize parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`screen split ratio 0.75`))
+    ok(fine && cmd.action == .Screen_Split_Ratio && cmd.arg == 75,
+       "screen split fractional ratio parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`screen split ratio 1.25`))
+    ok(!fine, "screen split rejects out-of-range ratio")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`move workspace next`))
     ok(fine && cmd.action == .Move_To_Workspace_Next, "move workspace next parsed")

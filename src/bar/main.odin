@@ -68,6 +68,8 @@ State :: struct {
     NormalFont, BoldFont: ^Xft_Font,
     Blocks: [dynamic]Block,
     Workspaces: [dynamic]Workspace_State,
+    LogicalMonitors: [dynamic]Monitor,
+    LogicalMonitorsReady: bool,
     IpcFd: posix.FD,
     IpcReader: ipc.Ipc_Reader,
     Tray: Tray_State,
@@ -225,6 +227,7 @@ connect :: proc(state: ^State) -> bool {
     state.Atoms = make(map[string]u32)
     state.Windows = make([dynamic]Bar_Window, 0, 4)
     state.Workspaces = make([dynamic]Workspace_State, 0, 16)
+    state.LogicalMonitors = make([dynamic]Monitor, 0, 4)
     state.IpcFd = -1
 
     // Managed instances watch the WM-published config. Event selection is
@@ -243,6 +246,7 @@ shutdown :: proc(state: ^State) {
     destroy_windows(state)
     renderer_shutdown(state)
     clear_workspaces(state)
+    clear_logical_monitors(state)
     if state.Atoms != nil { delete(state.Atoms) }
     if state.Conn != nil { x11.xcb_disconnect(state.Conn) }
     state^ = {}

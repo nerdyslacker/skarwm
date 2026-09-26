@@ -14,6 +14,7 @@ import x11 "../x11"
 // reflow() (arrange + push + focus), never by hand-editing rectangles.
 
 import "core:time"
+import "core:strings"
 
 Tiled_Resize_State :: struct {
     Active: bool,
@@ -62,6 +63,7 @@ Wm :: struct {
     rendering: rendering.State,
     bar_managed_started: bool,
     bar_blocks: [dynamic]Raw_Bar_Block,
+    virtual_screens: [dynamic]Virtual_Screen_Profile,
 }
 
 g_wm: Wm
@@ -259,29 +261,34 @@ read_window_type :: proc(cl: ^c.Client) -> bool {
 // is affected; this is essential when one bar window exists per monitor.
 read_struts :: proc(cl: ^c.Client, output: ^c.Output) {
     cl.Strut = c.Insets {}
+    output_geom := c.Rect{}
+    if output != nil {
+        output_geom = output.Geom
+        if output.Parent != nil { output_geom = output.Parent.Geom }
+    }
     if data, ok := x11.get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_STRUT_PARTIAL"), atom("CARDINAL")); ok {
         defer delete(data)
         if len(data) >= 12 * size_of(u32) && output != nil {
             vals := ([^]u32)(raw_data(data))
-            ox1, ox2 := output.Geom.X, output.Geom.X + output.Geom.W
-            oy1, oy2 := output.Geom.Y, output.Geom.Y + output.Geom.H
+            ox1, ox2 := output_geom.X, output_geom.X + output_geom.W
+            oy1, oy2 := output_geom.Y, output_geom.Y + output_geom.H
             vertical_overlap := i32(vals[5]) >= oy1 && i32(vals[4]) < oy2
             right_vertical_overlap := i32(vals[7]) >= oy1 && i32(vals[6]) < oy2
             horizontal_overlap := i32(vals[9]) >= ox1 && i32(vals[8]) < ox2
             bottom_horizontal_overlap := i32(vals[11]) >= ox1 && i32(vals[10]) < ox2
             if vals[0] > 0 && vertical_overlap {
-                cl.Strut.Left = clamp(i32(vals[0]) - ox1, i32(0), output.Geom.W)
+                cl.Strut.Left = clamp(i32(vals[0]) - ox1, i32(0), output_geom.W)
             }
             if vals[1] > 0 && right_vertical_overlap {
                 edge := g_wm.scr_w - i32(vals[1])
-                cl.Strut.Right = clamp(ox2 - edge, i32(0), output.Geom.W)
+                cl.Strut.Right = clamp(ox2 - edge, i32(0), output_geom.W)
             }
             if vals[2] > 0 && horizontal_overlap {
-                cl.Strut.Top = clamp(i32(vals[2]) - oy1, i32(0), output.Geom.H)
+                cl.Strut.Top = clamp(i32(vals[2]) - oy1, i32(0), output_geom.H)
             }
             if vals[3] > 0 && bottom_horizontal_overlap {
                 edge := g_wm.scr_h - i32(vals[3])
-                cl.Strut.Bottom = clamp(oy2 - edge, i32(0), output.Geom.H)
+                cl.Strut.Bottom = clamp(oy2 - edge, i32(0), output_geom.H)
             }
             return
         }
@@ -296,12 +303,12 @@ read_struts :: proc(cl: ^c.Client, output: ^c.Output) {
                 cl.Strut.Top = i32(vals[2])
                 cl.Strut.Bottom = i32(vals[3])
             } else {
-                ox2 := output.Geom.X + output.Geom.W
-                oy2 := output.Geom.Y + output.Geom.H
-                if vals[0] > 0 do cl.Strut.Left = clamp(i32(vals[0]) - output.Geom.X, i32(0), output.Geom.W)
-                if vals[1] > 0 do cl.Strut.Right = clamp(ox2 - (g_wm.scr_w - i32(vals[1])), i32(0), output.Geom.W)
-                if vals[2] > 0 do cl.Strut.Top = clamp(i32(vals[2]) - output.Geom.Y, i32(0), output.Geom.H)
-                if vals[3] > 0 do cl.Strut.Bottom = clamp(oy2 - (g_wm.scr_h - i32(vals[3])), i32(0), output.Geom.H)
+                ox2 := output_geom.X + output_geom.W
+                oy2 := output_geom.Y + output_geom.H
+                if vals[0] > 0 do cl.Strut.Left = clamp(i32(vals[0]) - output_geom.X, i32(0), output_geom.W)
+                if vals[1] > 0 do cl.Strut.Right = clamp(ox2 - (g_wm.scr_w - i32(vals[1])), i32(0), output_geom.W)
+                if vals[2] > 0 do cl.Strut.Top = clamp(i32(vals[2]) - output_geom.Y, i32(0), output_geom.H)
+                if vals[3] > 0 do cl.Strut.Bottom = clamp(oy2 - (g_wm.scr_h - i32(vals[3])), i32(0), output_geom.H)
             }
         }
     }
@@ -769,9 +776,71 @@ dispatch_action :: proc(b: ^input.Binding) {
         move_focused_to_output_rel(1)
     case .Move_To_Output_Prev:
         move_focused_to_output_rel(-1)
+    case .Screen_Split_Toggle, .Screen_Split_Enable, .Screen_Split_Disable,
+         .Screen_Split_Grow, .Screen_Split_Shrink, .Screen_Split_Ratio:
+        screen_split_action(b.action, b.arg)
     }
     if b.action != .WS_Next && b.action != .WS_Prev && b.action != .WS_Goto {
         ipc_broadcast_focus_change(old_focus, m.Focused)
+    }
+}
+
+screen_split_action :: proc(action: input.Action_Kind, arg: int) {
+    m := g_wm.m
+    active := c.Active_Output(m)
+    if active == nil || active.Parent == nil { return }
+    parent := active.Parent
+    was_split := parent.Split
+    old_left, old_right := "", ""
+    if len(parent.Screens) > 0 { old_left = strings.clone(parent.Screens[0].Name) }
+    if len(parent.Screens) > 1 { old_right = strings.clone(parent.Screens[1].Name) }
+    defer {
+        if old_left != "" do delete(old_left)
+        if old_right != "" do delete(old_right)
+    }
+
+    changed := false
+    #partial switch action {
+    case .Screen_Split_Toggle:
+        percent := arg
+        if percent == 0 { percent = 75 }
+        changed = c.Toggle_Output_Split(m, active, f64(percent) / 100.0)
+    case .Screen_Split_Enable:
+        percent := arg
+        if percent == 0 { percent = 75 }
+        changed = c.Enable_Output_Split(m, active, f64(percent) / 100.0)
+    case .Screen_Split_Disable:
+        changed = c.Disable_Output_Split(m, active)
+    case .Screen_Split_Grow:
+        amount := arg
+        if amount <= 0 { amount = 50 }
+        changed = c.Resize_Output_Split(m, active, i32(amount))
+    case .Screen_Split_Shrink:
+        amount := arg
+        if amount <= 0 { amount = 50 }
+        changed = c.Resize_Output_Split(m, active, -i32(amount))
+    case .Screen_Split_Ratio:
+        if arg >= 10 && arg <= 90 {
+            changed = c.Set_Output_Split_Ratio(m, active, f64(arg) / 100.0)
+        }
+    }
+    if !changed { return }
+
+    reflow()
+    randr_sync_virtual_monitors()
+    if !was_split && parent.Split {
+        ipc_broadcast_output_event("geometry", parent.Screens[0].Name)
+        ipc_broadcast_output_event("added", parent.Screens[1].Name)
+    } else if was_split && !parent.Split {
+        ipc_broadcast_output_event("removed", old_right)
+        ipc_broadcast_output_event("geometry", parent.Screens[0].Name)
+    } else {
+        ipc_broadcast_output_event("geometry", parent.Screens[0].Name)
+        ipc_broadcast_output_event("geometry", parent.Screens[1].Name)
+    }
+    current := c.Active_Output(m)
+    if current != nil && current.Name != old_left {
+        ipc_broadcast_output_event("focus", current.Name)
     }
 }
 
@@ -1077,7 +1146,8 @@ tiled_resize_motion :: proc(root_x, root_y: i32) {
     if state.From_Top { dy = -dy }
     if !state.Resize_Width { dx = 0 }
     if !state.Resize_Height { dy = 0 }
-    if c.Resize_Tiled_Client(g_wm.m, cl, dx, dy) { reflow_immediate() }
+    resize_edge := c.Resize_Edge.Left if state.From_Left else .Right
+    if c.Resize_Tiled_Client(g_wm.m, cl, dx, dy, resize_edge) { reflow_immediate() }
     g_wm.mouse_root_x = i16(root_x)
     g_wm.mouse_root_y = i16(root_y)
 }
@@ -1365,6 +1435,14 @@ apply_float_configure :: proc(cl: ^c.Client, ev: ^x11.Configure_Request_Event) {
     if mask & x11.CW_HEIGHT != 0 { r.H = i32(ev.height) }
     if !cl.Dock { r = constrain_floating_rect(cl, r) }
     cl.FloatingRect = r
+    if cl.Dock && cl.Out != nil {
+        // Accept genuine margin changes, but keep the stable full-edge anchors
+        // when a panel sends a delayed configure based on the previous RandR
+        // monitor rectangle. This prevents rapid split resizes from restoring
+        // an obsolete bar width one event later.
+        c.Capture_Dock_Anchors(cl, cl.Out)
+        c.Remap_Dock_To_Output(cl, cl.Out)
+    }
 }
 
 // on_property_notify reacts to title changes (refresh metadata + IPC event)
@@ -1395,7 +1473,14 @@ on_property_notify :: proc(ev: ^x11.Property_Notify_Event) {
         return
     }
     if cl.Dock && (ev.atom == atom("_NET_WM_STRUT_PARTIAL") || ev.atom == atom("_NET_WM_STRUT")) {
+        was_horizontal := cl.Strut.Top > 0 || cl.Strut.Bottom > 0
+        was_vertical := cl.Strut.Left > 0 || cl.Strut.Right > 0
         read_struts(cl, cl.Out)
+        is_horizontal := cl.Strut.Top > 0 || cl.Strut.Bottom > 0
+        is_vertical := cl.Strut.Left > 0 || cl.Strut.Right > 0
+        c.Capture_Dock_Anchors(cl, cl.Out,
+            was_horizontal != is_horizontal || was_vertical != is_vertical)
+        c.Remap_Dock_To_Output(cl, cl.Out)
         c.Update_Reserved(g_wm.m)
         reflow() // ewmh_pulse inside reflow republishes _NET_WORKAREA
     }
@@ -1410,12 +1495,23 @@ on_property_notify :: proc(ev: ^x11.Property_Notify_Event) {
 // back into the layout.
 on_configure_notify :: proc(ev: ^x11.Configure_Notify_Event) {
     if ev.event != g_wm.root || ev.window != g_wm.root { return }
-    g_wm.scr_w = i32(ev.width)
-    g_wm.scr_h = i32(ev.height)
+    next_w, next_h := i32(ev.width), i32(ev.height)
+    // RandR 1.5 SetMonitor/DeleteMonitor deliberately sends a root
+    // ConfigureNotify even though the root dimensions did not change. Ignore
+    // it: rediscovering at that point would mistake our projected logical
+    // monitors for newly attached physical outputs and create an event loop.
+    if next_w == g_wm.scr_w && next_h == g_wm.scr_h { return }
+    g_wm.scr_w, g_wm.scr_h = next_w, next_h
     if g_randr.available {
+        randr_clear_virtual_monitors()
         randr_scan(true)
-    } else if o := c.Active_Output(g_wm.m); o != nil {
-        o.Geom = c.Rect{X = 0, Y = 0, W = g_wm.scr_w, H = g_wm.scr_h}
+        randr_sync_virtual_monitors()
+    } else {
+        _ = c.Reconcile_Outputs(g_wm.m, []c.Output_Spec{{
+            Name = "screen",
+            Geom = c.Rect{X = 0, Y = 0, W = g_wm.scr_w, H = g_wm.scr_h},
+            Primary = true,
+        }})
         reflow()
     }
 }

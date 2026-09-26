@@ -70,6 +70,8 @@ Ipc_Action :: enum {
     Reminder_Add,
     Focus_Output_Next, Focus_Output_Prev,
     Move_To_Output_Next, Move_To_Output_Prev,
+    Screen_Split_Toggle, Screen_Split_Enable, Screen_Split_Disable,
+    Screen_Split_Resize, Screen_Split_Ratio,
     Close, Reload, Quit,
 }
 
@@ -101,6 +103,34 @@ put_le_u32 :: proc(b: []byte, v: u32) {
     b[1] = u8(v >> 8)
     b[2] = u8(v >> 16)
     b[3] = u8(v >> 24)
+}
+
+parse_signed_command_int :: proc(s: string, limit: int = 100000) -> (int, bool) {
+    if len(s) == 0 { return 0, false }
+    sign, start := 1, 0
+    if s[0] == '+' { start = 1 }
+    if s[0] == '-' { sign, start = -1, 1 }
+    if start >= len(s) { return 0, false }
+    value := 0
+    for ch in s[start:] {
+        if ch < '0' || ch > '9' { return 0, false }
+        value = value * 10 + int(ch - '0')
+        if value > limit { return 0, false }
+    }
+    return sign * value, true
+}
+
+parse_ratio_percent :: proc(s: string) -> (int, bool) {
+    // Runtime syntax follows the documented fractional form: 0.75, 0.7, etc.
+    if len(s) < 3 || s[0] != '0' || s[1] != '.' || len(s) > 4 { return 0, false }
+    fraction := 0
+    digits := s[2:]
+    for ch in digits {
+        if ch < '0' || ch > '9' { return 0, false }
+        fraction = fraction * 10 + int(ch - '0')
+    }
+    if len(digits) == 1 { fraction *= 10 }
+    return fraction, fraction >= 10 && fraction <= 90
 }
 
 // ipc_encode frames a payload as one i3-ipc message. Returns an owned buffer
@@ -350,6 +380,31 @@ ipc_output_entry :: proc(sb: ^strings.Builder, m: ^Manager, o: ^Output) {
     json_int(sb, o.Geom.W)
     strings.write_string(sb, `,"height":`)
     json_int(sb, o.Geom.H)
+    strings.write_string(sb, `},"physical_output":`)
+    if o.Parent != nil {
+        ipc_json_string(sb, o.Parent.Name)
+    } else {
+        strings.write_string(sb, "null")
+    }
+    strings.write_string(sb, `,"virtual":`)
+    json_bool(sb, o.Virtual)
+    strings.write_string(sb, `,"relative_rect":{"x":`)
+    json_int(sb, o.RelativeGeom.X)
+    strings.write_string(sb, `,"y":`)
+    json_int(sb, o.RelativeGeom.Y)
+    strings.write_string(sb, `,"width":`)
+    json_int(sb, o.RelativeGeom.W)
+    strings.write_string(sb, `,"height":`)
+    json_int(sb, o.RelativeGeom.H)
+    work := compute_params(m.Cfg, o.Geom, 0, o.Reserved)
+    strings.write_string(sb, `},"workarea":{"x":`)
+    json_int(sb, work.WorkX)
+    strings.write_string(sb, `,"y":`)
+    json_int(sb, work.WorkY)
+    strings.write_string(sb, `,"width":`)
+    json_int(sb, work.WorkW)
+    strings.write_string(sb, `,"height":`)
+    json_int(sb, work.WorkH)
     strings.write_string(sb, `},"current_workspace":`)
     if o.Current != nil {
         strings.write_string(sb, `"`)
@@ -635,6 +690,31 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
         } else if tokens[0] == "move" {
             if tokens[2] == "next" { return Ipc_Command{action = .Move_To_Output_Next}, "", true }
             if tokens[2] == "prev" || tokens[2] == "previous" { return Ipc_Command{action = .Move_To_Output_Prev}, "", true }
+        }
+    }
+
+    if len(tokens) == 3 && tokens[0] == "screen" && tokens[1] == "split" {
+        switch tokens[2] {
+        case "toggle":  return Ipc_Command{action = .Screen_Split_Toggle}, "", true
+        case "enable":  return Ipc_Command{action = .Screen_Split_Enable}, "", true
+        case "disable": return Ipc_Command{action = .Screen_Split_Disable}, "", true
+        }
+    }
+
+    if len(tokens) == 4 && tokens[0] == "screen" && tokens[1] == "split" {
+        switch tokens[2] {
+        case "resize":
+            delta, valid := parse_signed_command_int(tokens[3])
+            if valid && delta != 0 {
+                return Ipc_Command{action = .Screen_Split_Resize, arg = delta}, "", true
+            }
+            return {}, strings.clone("screen split resize: expected a non-zero signed pixel delta"), false
+        case "ratio":
+            percent, valid := parse_ratio_percent(tokens[3])
+            if valid {
+                return Ipc_Command{action = .Screen_Split_Ratio, arg = percent}, "", true
+            }
+            return {}, strings.clone("screen split ratio: expected 0.10..0.90"), false
         }
     }
 

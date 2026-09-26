@@ -200,6 +200,7 @@ fi
 # Opening beside a resized column must use the remaining page width rather than
 # injecting a generic 624px column and leaving partially visible windows.
 key super+Return
+wait_for ipc_count_is 3 || fail "post-resize insertion mapped"
 new_after_resize=$(printf '0x%x' "$(xdotool getwindowfocus 2>/dev/null | tr -d ' ')")
 if wait_geom "$first" "727x780+10+10" && wait_geom "$new_after_resize" "493x780+749+10"; then
   pass "new window preserves resized page proportions"

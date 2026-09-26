@@ -27,8 +27,8 @@ The binary can also be run independently:
 skarwm-bar --position bottom --height 30
 ```
 
-It creates one dock window per active RandR 1.5 monitor, follows geometry
-changes, and publishes both
+It creates one dock window per active RandR 1.5 monitor, including virtual
+screens published by skarwm, follows geometry changes, and publishes both
 `_NET_WM_STRUT` and `_NET_WM_STRUT_PARTIAL`. skarwm converts those root-relative
 struts to per-output reserved insets, so tiled and maximized windows use the
 remaining workarea.
@@ -42,7 +42,7 @@ active workspace uses the main bar color pair. Hover and vacant colors are
 derived from the configured palette instead of hard-coded values. Occupied
 workspaces use a bold face and underline, while urgent workspaces carry `!`.
 Left-click switches to the selected slot on the clicked
-monitor. Wheel up/down cycles the active workspace within the fixed range; it
+logical screen. Wheel up/down cycles that screen's active workspace within the fixed range; it
 does not derive a new workspace number from the hovered slot. The IPC client
 reconnects after WM restarts.
 

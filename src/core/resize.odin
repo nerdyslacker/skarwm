@@ -69,10 +69,19 @@ resize_row_limits :: proc(cl: ^Client, border_width: i32) -> (minimum, maximum: 
     return
 }
 
-// resize_client_width: a column owns its width.
-// Resizing it changes the strip extent instead of stealing space from an
-// arbitrary (possibly off-screen) neighbor.
-resize_client_width :: proc(m: ^Manager, cl: ^Client, delta: i32) -> bool {
+Resize_Edge :: enum i8 { Auto, Left, Right }
+
+store_column_width :: proc(col: ^Column, width, natural: i32) {
+    if col == nil { return }
+    col.Width = width if width != natural else 0
+}
+
+// resize_client_width moves the selected column boundary. When that boundary
+// has a neighboring column, the two columns exchange width so their combined
+// extent stays fixed. An outer strip edge still resizes independently.
+resize_client_width :: proc(
+    m: ^Manager, cl: ^Client, delta: i32, edge: Resize_Edge,
+) -> bool {
     if delta == 0 { return false }
     ci, col, _ := column_of(cl.Ws, cl)
     if col == nil || column_has_maximized(col) { return false }
@@ -81,10 +90,55 @@ resize_client_width :: proc(m: ^Manager, cl: ^Client, delta: i32) -> bool {
     p := compute_params(m.Cfg, cl.Out.Geom, len(cl.Ws.Cols), cl.Out.Reserved)
     minimum = min(minimum, p.WorkW)
     if maximum <= 0 || maximum > p.WorkW { maximum = p.WorkW }
+
+    neighbor_index := -1
+    switch edge {
+    case .Left:
+        if ci > 0 { neighbor_index = ci - 1 }
+    case .Right:
+        if ci + 1 < len(cl.Ws.Cols) { neighbor_index = ci + 1 }
+    case .Auto:
+        // Keyboard width changes have no pointer edge. Prefer the following
+        // column, falling back to the previous one at the end of the strip.
+        if ci + 1 < len(cl.Ws.Cols) {
+            neighbor_index = ci + 1
+        } else if ci > 0 {
+            neighbor_index = ci - 1
+        }
+    }
+
+    if neighbor_index >= 0 {
+        neighbor := cl.Ws.Cols[neighbor_index]
+        if !column_has_maximized(neighbor) {
+            neighbor_start := Column_Width_At(m, cl.Out, cl.Ws, neighbor_index)
+            neighbor_min, neighbor_max := resize_column_limits(neighbor, m.Cfg.BorderWidth)
+            neighbor_min = min(neighbor_min, p.WorkW)
+            if neighbor_max <= 0 || neighbor_max > p.WorkW { neighbor_max = p.WorkW }
+
+            focused_width, neighbor_width := i32(0), i32(0)
+            if neighbor_index > ci {
+                focused_width, neighbor_width = Resize_Pair(
+                    start, neighbor_start, delta,
+                    minimum, neighbor_min, maximum, neighbor_max,
+                )
+            } else {
+                neighbor_width, focused_width = Resize_Pair(
+                    neighbor_start, start, -delta,
+                    neighbor_min, minimum, neighbor_max, maximum,
+                )
+            }
+            if focused_width == start { return false }
+            natural := Default_Column_Width(m, cl.Out, cl.Ws)
+            store_column_width(col, focused_width, natural)
+            store_column_width(neighbor, neighbor_width, natural)
+            return true
+        }
+    }
+
     width := clamp(start + delta, minimum, maximum)
     if width == start { return false }
     natural := Default_Column_Width(m, cl.Out, cl.Ws)
-    col.Width = width if width != natural else 0
+    store_column_width(col, width, natural)
     return true
 }
 
@@ -125,15 +179,19 @@ resize_client_row :: proc(m: ^Manager, cl: ^Client, delta: i32) -> bool {
     return true
 }
 
-// Resize_Tiled_Client adjusts the focused column and stacked row independently.
+// Resize_Tiled_Client adjusts the focused column and stacked row.
 // Negative deltas make that dimension smaller; positive deltas make it larger.
-// It is shared by keyboard stepping and pointer resizing.
-Resize_Tiled_Client :: proc(m: ^Manager, cl: ^Client, delta_x, delta_y: i32) -> bool {
+// Horizontal changes move a shared boundary when the selected edge has a
+// neighbor. It is shared by keyboard stepping and pointer resizing.
+Resize_Tiled_Client :: proc(
+    m: ^Manager, cl: ^Client, delta_x, delta_y: i32,
+    resize_edge: Resize_Edge = .Auto,
+) -> bool {
     if m == nil || cl == nil || cl.Ws == nil || cl.Out == nil ||
        cl.Floating || cl.Fullscreen || cl.Maximized {
         return false
     }
-    changed := resize_client_width(m, cl, delta_x)
+    changed := resize_client_width(m, cl, delta_x, resize_edge)
     if resize_client_row(m, cl, delta_y) { changed = true }
     return changed
 }

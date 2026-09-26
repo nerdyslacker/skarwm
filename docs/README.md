@@ -5,6 +5,7 @@
 - [Layouts and windows](layouts-and-windows.md) — columns, stacks, tabs, floating, maximize, fullscreen, and resizing.
 - [Scrolling and drag/drop](scrolling-and-drag-drop.md) — the horizontal strip, edge previews, and pointer controls.
 - [Workspaces and outputs](workspaces-and-outputs.md) — dynamic workspaces and RandR monitors.
+- [Virtual screens](virtual-screens.md) — ultrawide split setup, commands, keybindings, and behavior.
 - [Scratchpads and overview](scratchpads-and-overview.md) — session registers and shell-driven overview events.
 - [Appearance and animation](appearance-and-animation.md) — gaps, borders, rounded corners, and transitions.
 - [Notices](notices.md) — temporary date/time and battery overlays without a bar.

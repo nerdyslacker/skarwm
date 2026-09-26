@@ -11,11 +11,13 @@ FAIL=0
 VNC_PID=
 WM_PID=
 SUB_PID=
+BAR_PID=
 
 say() { printf '%s\n' "$*"; }
 pass() { PASS=$((PASS + 1)); say "PASS  $*"; }
 fail() { FAIL=$((FAIL + 1)); say "FAIL  $*"; }
 cleanup() {
+  [ -z "$BAR_PID" ] || kill "$BAR_PID" 2>/dev/null || true
   [ -z "$SUB_PID" ] || kill "$SUB_PID" 2>/dev/null || true
   [ -z "$WM_PID" ] || kill "$WM_PID" 2>/dev/null || true
   [ -z "$VNC_PID" ] || kill "$VNC_PID" 2>/dev/null || true
@@ -111,6 +113,128 @@ if [[ $outputs == *'"name":"LEFT"'*'"current_workspace":"1"'*'"name":"RIGHT"'*'"
   pass "keeps independent current workspaces per monitor"
 else
   fail "independent monitor workspaces"
+fi
+
+./build/skarwm-bar --height 26 --workspaces 8 >"${TMPDIR:-/tmp}/skarwm_randr_bar.log" 2>&1 &
+BAR_PID=$!
+bar_geometries() {
+  xwininfo -root -tree 2>/dev/null \
+    | sed -nE '/"skarwm-bar"/s/.* ([0-9]+x[0-9]+\+[-0-9]+\+[-0-9]+).*/\1/p'
+}
+for _ in $(seq 1 30); do
+  [ "$(bar_geometries | wc -l)" -eq 2 ] && break
+  sleep 0.2
+done
+if bar_geometries | grep -q '^640x26+0+0$' &&
+   bar_geometries | grep -q '^640x26+640+0$'; then
+  pass "built-in bar follows the initial logical outputs"
+else
+  fail "built-in bar initial logical output geometry"
+fi
+
+# A WM-level split creates logical screens and projects them as RandR monitors.
+# LEFT is active here and is exactly 640px wide, so 75/25 gives 480/160.
+./build/skarwm-msg screen split enable >/dev/null
+outputs=$(./build/skarwm-msg get-outputs)
+if [[ $outputs == *'"name":"LEFT:left"'*'"rect":{"x":0,"y":0,"width":480,"height":800}'*'"physical_output":"LEFT"'* &&
+      $outputs == *'"name":"LEFT:right"'*'"rect":{"x":480,"y":0,"width":160,"height":800}'*'"physical_output":"LEFT"'* ]]; then
+  pass "runtime IPC creates a 75/25 logical split"
+else
+  fail "runtime logical split"
+fi
+monitors=$(xrandr --listactivemonitors)
+if [[ $monitors == *'LEFT:left'* && $monitors == *'LEFT:right'* ]]; then
+  pass "publishes virtual screens through RandR 1.5"
+else
+  fail "RandR virtual-screen publication"
+fi
+for _ in $(seq 1 30); do
+  bars=$(bar_geometries)
+  if [ "$(printf '%s\n' "$bars" | grep -c .)" -eq 3 ]; then break; fi
+  sleep 0.2
+done
+if printf '%s\n' "$bars" | grep -q '^480x26+0+0$' &&
+   printf '%s\n' "$bars" | grep -q '^160x26+480+0$' &&
+   printf '%s\n' "$bars" | grep -q '^640x26+640+0$'; then
+  pass "built-in bar creates one window per virtual screen"
+else
+  fail "built-in bar split geometry"
+fi
+
+./build/skarwm-msg screen split resize -20 >/dev/null
+outputs=$(./build/skarwm-msg get-outputs)
+if [[ $outputs == *'"name":"LEFT:left"'*'"rect":{"x":0,"y":0,"width":460,"height":800}'* &&
+      $outputs == *'"name":"LEFT:right"'*'"rect":{"x":460,"y":0,"width":180,"height":800}'* ]]; then
+  pass "runtime IPC moves the split boundary without gaps"
+else
+  fail "runtime split resize"
+fi
+monitors=$(xrandr --listactivemonitors)
+if [[ $monitors == *'LEFT:left'* && $monitors == *'LEFT:right'* ]]; then
+  pass "RandR virtual screens survive an in-place resize"
+else
+  fail "RandR virtual-screen resize publication"
+fi
+for _ in $(seq 1 30); do
+  bars=$(bar_geometries)
+  if printf '%s\n' "$bars" | grep -q '^460x26+0+0$' &&
+     printf '%s\n' "$bars" | grep -q '^180x26+460+0$'; then break; fi
+  sleep 0.2
+done
+if printf '%s\n' "$bars" | grep -q '^460x26+0+0$' &&
+   printf '%s\n' "$bars" | grep -q '^180x26+460+0$'; then
+  pass "built-in bars track virtual-screen resize"
+else
+  fail "built-in bar resized geometry"
+fi
+
+./build/skarwm-msg screen split ratio 0.50 >/dev/null
+./build/skarwm-msg focus output next >/dev/null
+./build/skarwm-msg workspace 4 >/dev/null
+outputs=$(./build/skarwm-msg get-outputs)
+if [[ $outputs == *'"name":"LEFT:left"'*'"rect":{"x":0,"y":0,"width":320,"height":800}'* &&
+      $outputs == *'"name":"LEFT:right"'*'"current_workspace":"4"'* ]]; then
+  pass "logical siblings keep independent workspaces and ratio updates"
+else
+  fail "logical split workspace/ratio"
+fi
+
+# Click workspace 3 on LEFT:right. Each bar sends the command with its own
+# logical output name, so the sibling's workspace changes independently.
+xdotool mousemove 390 10 click 1 >/dev/null 2>&1
+for _ in $(seq 1 30); do
+  outputs=$(./build/skarwm-msg get-outputs)
+  [[ $outputs == *'"name":"LEFT:right"'*'"current_workspace":"3"'* ]] && break
+  sleep 0.2
+done
+if [[ $outputs == *'"name":"LEFT:left"'*'"current_workspace":"1"'*'"name":"LEFT:right"'*'"current_workspace":"3"'* ]]; then
+  pass "virtual-screen bar controls its own workspace"
+else
+  fail "virtual-screen bar workspace targeting"
+fi
+
+./build/skarwm-msg screen split disable >/dev/null
+outputs=$(./build/skarwm-msg get-outputs)
+if [[ $outputs == *'"name":"LEFT"'* && $outputs != *'"name":"LEFT:right"'* ]]; then
+  pass "runtime IPC unsplits to the current physical output"
+else
+  fail "runtime logical unsplit"
+fi
+monitors=$(xrandr --listactivemonitors)
+if [[ $monitors != *'LEFT:left'* && $monitors != *'LEFT:right'* ]]; then
+  pass "removes virtual RandR monitors after unsplit"
+else
+  fail "RandR virtual-screen cleanup"
+fi
+for _ in $(seq 1 30); do
+  [ "$(bar_geometries | wc -l)" -eq 2 ] && break
+  sleep 0.2
+done
+if bar_geometries | grep -q '^640x26+0+0$' &&
+   bar_geometries | grep -q '^640x26+640+0$'; then
+  pass "built-in bar removes the retired virtual screen"
+else
+  fail "built-in bar unsplit geometry"
 fi
 
 ./build/skarwm-msg subscribe output >"${TMPDIR:-/tmp}/skarwm_randr_events.log" 2>&1 &

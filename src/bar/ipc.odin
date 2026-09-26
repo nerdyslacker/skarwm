@@ -19,6 +19,7 @@ ipc_start :: proc(state: ^State) -> bool {
     posix.fcntl(fd, .SETFD, posix.FD_CLOEXEC)
     state.IpcFd = fd
     if !ipc_send_request(state, .Subscribe, `["workspace","window","output"]`) ||
+       !ipc_request_outputs(state) ||
        !ipc_request_workspaces(state) {
         ipc_disconnect(state)
         return false
@@ -41,6 +42,10 @@ ipc_send_request :: proc(state: ^State, kind: protocol.Ipc_Type, payload: string
 
 ipc_request_workspaces :: proc(state: ^State) -> bool {
     return ipc_send_request(state, .Get_Workspaces, "")
+}
+
+ipc_request_outputs :: proc(state: ^State) -> bool {
+    return ipc_send_request(state, .Get_Outputs, "")
 }
 
 ipc_switch_workspace :: proc(state: ^State, output: string, id: int) {
@@ -77,14 +82,100 @@ ipc_service :: proc(state: ^State) -> bool {
 ipc_handle_frame :: proc(state: ^State, frame: protocol.Ipc_Frame) -> bool {
     kind := protocol.Ipc_Type(frame.typ)
     #partial switch kind {
+    case .Get_Outputs:
+        if parse_output_snapshot(state, frame.payload) {
+            rebuild_windows(state)
+        }
     case .Get_Workspaces:
         parse_workspace_snapshot(state, frame.payload)
         draw_all_bars(state)
     case .Event_Workspace, .Event_Window, .Event_Output:
+        if kind == .Event_Output && !ipc_request_outputs(state) { return false }
         return ipc_request_workspaces(state)
     case:
     }
     return true
+}
+
+clear_logical_monitors :: proc(state: ^State) {
+    for monitor in state.LogicalMonitors {
+        if monitor.Name != "" { delete(monitor.Name) }
+    }
+    delete(state.LogicalMonitors)
+    state.LogicalMonitors = make([dynamic]Monitor, 0, 4)
+    state.LogicalMonitorsReady = false
+}
+
+monitors_equal :: proc(a, b: []Monitor) -> bool {
+    if len(a) != len(b) { return false }
+    for monitor, index in a {
+        other := b[index]
+        if monitor.Name != other.Name || monitor.X != other.X || monitor.Y != other.Y ||
+           monitor.W != other.W || monitor.H != other.H {
+            return false
+        }
+    }
+    return true
+}
+
+parse_output_object :: proc(object: []byte) -> (Monitor, bool) {
+    name, name_ok := json_string_field(object, "name")
+    x, x_ok := json_int_field(object, "x")
+    y, y_ok := json_int_field(object, "y")
+    width, width_ok := json_int_field(object, "width")
+    height, height_ok := json_int_field(object, "height")
+    if !name_ok || !x_ok || !y_ok || !width_ok || !height_ok || width <= 0 || height <= 0 {
+        if name != "" { delete(name) }
+        return {}, false
+    }
+    return Monitor{X = i32(x), Y = i32(y), W = i32(width), H = i32(height), Name = name}, true
+}
+
+// parse_output_snapshot adopts skarwm's logical output list. This is the same
+// screen model used for layout/workspaces, so a virtual split creates two bar
+// windows and each one can address its own workspace by output name.
+parse_output_snapshot :: proc(state: ^State, payload: []byte) -> bool {
+    next := make([dynamic]Monitor, 0, 4)
+    depth := 0
+    start := -1
+    in_string := false
+    escaped := false
+    for character, index in payload {
+        if in_string {
+            if escaped { escaped = false; continue }
+            if character == '\\' { escaped = true; continue }
+            if character == '"' { in_string = false }
+            continue
+        }
+        if character == '"' { in_string = true; continue }
+        if character == '{' {
+            if depth == 0 { start = index }
+            depth += 1
+        } else if character == '}' {
+            depth -= 1
+            if depth == 0 && start >= 0 {
+                if monitor, ok := parse_output_object(payload[start:index + 1]); ok {
+                    append(&next, monitor)
+                }
+                start = -1
+            }
+        }
+    }
+    if len(next) == 0 {
+        for monitor in next { if monitor.Name != "" { delete(monitor.Name) } }
+        delete(next)
+        return false
+    }
+    changed := !state.LogicalMonitorsReady || !monitors_equal(state.LogicalMonitors[:], next[:])
+    if changed {
+        clear_logical_monitors(state)
+        state.LogicalMonitors = next
+        state.LogicalMonitorsReady = true
+    } else {
+        for monitor in next { if monitor.Name != "" { delete(monitor.Name) } }
+        delete(next)
+    }
+    return changed
 }
 
 clear_workspaces :: proc(state: ^State) {

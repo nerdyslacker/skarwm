@@ -62,12 +62,31 @@ autostart : "xsetroot -solid '#202020'"
 bar_block : workspaces : left
 bar_block : systray : right
 bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
+virtual_screen : DP-1 : split : 75 : -30
 rule : class : Firefox : workspace 3 floating
 ```
 
 `bind` launches a shell command. `call` invokes a WM action. `workspace view`
 switches workspace and `workspace tag` sends the focused window. `autostart`
 runs once at startup and is not run again by configuration reloads.
+
+`virtual_screen` declares a horizontal logical split for a named physical
+RandR output. The split is a percentage from 10 through 90; the optional final
+field adjusts the boundary by signed pixels. The example uses 75% minus 30
+pixels for the left screen and the exact remainder for the right. Geometry is
+recomputed from the current physical output after resolution changes. Profiles
+for disconnected outputs are retained and applied when that output appears.
+Duplicate output profiles and profiles that cannot satisfy the 160-pixel
+minimum on a connected output reject the whole reload.
+
+The same feature is bindable without a declarative profile:
+
+```rc
+call : mod + F5 : screen_split_shrink 15
+call : mod + F6 : screen_split_disable
+call : mod + F7 : screen_split_enable 75
+call : mod + F8 : screen_split_grow 15
+```
 
 `bar_block` directives define the built-in bar's blocks in declaration order.
 Workspace and `systray` blocks take an alignment. Script blocks additionally

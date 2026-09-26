@@ -406,6 +406,16 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
     case .Focus_Output_Prev: b.action = .Focus_Output_Prev
     case .Move_To_Output_Next: b.action = .Move_To_Output_Next
     case .Move_To_Output_Prev: b.action = .Move_To_Output_Prev
+    case .Screen_Split_Toggle: b.action = .Screen_Split_Toggle
+    case .Screen_Split_Enable: b.action = .Screen_Split_Enable
+    case .Screen_Split_Disable: b.action = .Screen_Split_Disable
+    case .Screen_Split_Resize:
+        b.action = .Screen_Split_Grow
+        b.arg = cmd.arg
+        if cmd.arg < 0 { b.action = .Screen_Split_Shrink; b.arg = -cmd.arg }
+    case .Screen_Split_Ratio:
+        b.action = .Screen_Split_Ratio
+        b.arg = cmd.arg
     case .Close:             b.action = .Close
     case .Reload:            b.action = .Reload
     case .Quit:              b.action = .Quit
