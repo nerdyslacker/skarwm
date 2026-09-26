@@ -203,19 +203,64 @@ test_resize_math :: proc() {
     kha_before := kha.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
     khb_before := khb.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
     ok(c.Resize_Focused(keyboard_horizontal, .Left),
-       "keyboard left resize grows the focused column")
+       "keyboard left resize shrinks the focused column")
     c.Arrange_All(keyboard_horizontal)
     kha_after := kha.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
     khb_after := khb.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth
-    eq(kha_after, kha_before,
-       "keyboard width resize leaves neighboring columns unchanged")
+    eq(kha_after, kha_before + c.KEYBOARD_RESIZE_STEP,
+       "keyboard width resize gives released space to the neighboring column")
     eq(khb_after, khb_before - c.KEYBOARD_RESIZE_STEP,
        "keyboard left resize shrinks the focused column by one step")
+    eq(kha_after + khb_after, kha_before + khb_before,
+       "keyboard width resize preserves the visible pair extent")
     ok(c.Resize_Focused(keyboard_horizontal, .Right),
        "keyboard right resize grows the focused column again")
     c.Arrange_All(keyboard_horizontal)
     eq(khb.Geom.W + 2 * keyboard_horizontal.Cfg.BorderWidth, khb_before,
        "opposite keyboard width steps are reversible")
+
+    pointer_horizontal := mk_man()
+    defer c.Destroy_Manager(pointer_horizontal)
+    c.Activate_WS(pointer_horizontal, c.Ensure_WS(pointer_horizontal, 1))
+    pha := add_tiled(pointer_horizontal, 295)
+    phb := add_tiled(pointer_horizontal, 296)
+    c.Arrange_All(pointer_horizontal)
+    pha_before := pha.Geom.W + 2 * pointer_horizontal.Cfg.BorderWidth
+    phb_before := phb.Geom.W + 2 * pointer_horizontal.Cfg.BorderWidth
+    ok(c.Resize_Tiled_Client(pointer_horizontal, pha, 120, 0, .Right),
+       "pointer resize moves the boundary toward the neighboring column")
+    c.Arrange_All(pointer_horizontal)
+    eq(pha.Geom.W + 2 * pointer_horizontal.Cfg.BorderWidth, pha_before + 120,
+       "pointer resize grows the selected column")
+    eq(phb.Geom.W + 2 * pointer_horizontal.Cfg.BorderWidth, phb_before - 120,
+       "pointer resize keeps the neighboring column on screen")
+    eq(c.Current_WS(pointer_horizontal).ViewportX, i32(0),
+       "paired resize does not introduce horizontal scrolling")
+
+    scrolling_horizontal := mk_man()
+    defer c.Destroy_Manager(scrolling_horizontal)
+    c.Activate_WS(scrolling_horizontal, c.Ensure_WS(scrolling_horizontal, 1))
+    sha := add_tiled(scrolling_horizontal, 297)
+    shb := add_tiled(scrolling_horizontal, 298)
+    shc := add_tiled(scrolling_horizontal, 299)
+    shws := c.Current_WS(scrolling_horizontal)
+    sho := c.Active_Output(scrolling_horizontal)
+    strip_before := c.Column_Width_At(scrolling_horizontal, sho, shws, 0) +
+        c.Column_Width_At(scrolling_horizontal, sho, shws, 1) +
+        c.Column_Width_At(scrolling_horizontal, sho, shws, 2)
+    ok(c.Resize_Tiled_Client(scrolling_horizontal, sha, 120, 0, .Right),
+       "paired resize works inside an overflowing strip")
+    strip_after := c.Column_Width_At(scrolling_horizontal, sho, shws, 0) +
+        c.Column_Width_At(scrolling_horizontal, sho, shws, 1) +
+        c.Column_Width_At(scrolling_horizontal, sho, shws, 2)
+    eq(strip_after, strip_before,
+       "paired resize leaves the scrolling strip extent unchanged")
+    c.Focus_Client(scrolling_horizontal, shc)
+    c.Ensure_Active_Focus_Visible(scrolling_horizontal)
+    c.Arrange_All(scrolling_horizontal)
+    ok(shws.ViewportX > 0 && shc.Geom.X >= 0,
+       "later columns remain reachable after paired resizing")
+    _ = shb
 
     keyboard_vertical := mk_man()
     defer c.Destroy_Manager(keyboard_vertical)

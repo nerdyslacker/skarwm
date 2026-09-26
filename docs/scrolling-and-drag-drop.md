@@ -42,5 +42,7 @@ opaque outline otherwise. Resized column widths are retained when reordered.
 For floating windows, `Super`+left-drag moves and `Super`+right-drag resizes.
 On tiled windows, `Super`+right-drag resizes the focused column and stacked row
 from the side where the drag began. Moving outward grows that dimension;
-moving inward shrinks it. Other columns keep their independent widths, while
-the remaining stacked rows share the leftover height proportionally.
+moving inward shrinks it. A column across the selected boundary takes or gives
+the same width, preserving the pair's place in the scrollable strip; an outer
+strip edge remains independently resizable. The remaining stacked rows share
+the leftover height proportionally.

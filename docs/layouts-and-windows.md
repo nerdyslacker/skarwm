@@ -53,6 +53,8 @@ are respected. The resized column width survives new windows and drag/drop.
 The keyboard equivalent:
 `Super+Control+h/l` makes the focused column 40 pixels narrower/wider, and
 `Super+Control+k/j` makes its stacked row shorter/taller. Columns keep
-independent widths; the other rows share remaining height proportionally.
+independent widths at the outer strip edges; an adjacent column receives or
+provides the horizontal space at a shared boundary. The other stacked rows
+share remaining height proportionally.
 These actions are configurable as `resizeleft`, `resizeright`, `resizeup`, and
 `resizedown`.

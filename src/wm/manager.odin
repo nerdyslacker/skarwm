@@ -1077,7 +1077,8 @@ tiled_resize_motion :: proc(root_x, root_y: i32) {
     if state.From_Top { dy = -dy }
     if !state.Resize_Width { dx = 0 }
     if !state.Resize_Height { dy = 0 }
-    if c.Resize_Tiled_Client(g_wm.m, cl, dx, dy) { reflow_immediate() }
+    resize_edge := c.Resize_Edge.Left if state.From_Left else .Right
+    if c.Resize_Tiled_Client(g_wm.m, cl, dx, dy, resize_edge) { reflow_immediate() }
     g_wm.mouse_root_x = i16(root_x)
     g_wm.mouse_root_y = i16(root_y)
 }
