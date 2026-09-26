@@ -24,7 +24,11 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
     response_type := header.response_type & 0x7F
     if state.RandrAvailable &&
        (response_type == state.RandrEventBase || response_type == state.RandrEventBase + 1) {
-        rebuild_windows(state)
+        if state.IpcFd >= 0 {
+            ipc_request_outputs(state)
+        } else {
+            rebuild_windows(state)
+        }
         ipc_request_workspaces(state)
         return true
     }

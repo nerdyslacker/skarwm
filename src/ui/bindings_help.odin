@@ -62,6 +62,12 @@ Binding_Description :: proc(b: ^input.Binding) -> string {
     case .Focus_Output_Prev:   return fmt.aprintf("focus previous monitor")
     case .Move_To_Output_Next: return fmt.aprintf("move window to next monitor")
     case .Move_To_Output_Prev: return fmt.aprintf("move window to previous monitor")
+    case .Screen_Split_Toggle: return fmt.aprintf("toggle virtual screen split")
+    case .Screen_Split_Enable: return fmt.aprintf("enable virtual screen split")
+    case .Screen_Split_Disable: return fmt.aprintf("disable virtual screen split")
+    case .Screen_Split_Grow: return fmt.aprintf("grow left virtual screen")
+    case .Screen_Split_Shrink: return fmt.aprintf("shrink left virtual screen")
+    case .Screen_Split_Ratio: return fmt.aprintf("set virtual screen split ratio")
     case .None:                return fmt.aprintf("no action")
     }
     return fmt.aprintf("unknown action")

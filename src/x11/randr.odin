@@ -40,10 +40,20 @@ Randr_Get_Monitors_Reply :: struct {
     pad1: [12]u8,
 }
 
+Randr_Notify_Event :: struct {
+    response_type: u8,
+    sub_code: u8,
+    sequence: u16,
+    data: [28]u8,
+}
+
 #assert(size_of(Randr_Query_Version_Reply) == 32)
 #assert(size_of(Randr_Monitor_Info) == 24)
 #assert(size_of(Randr_Monitor_Iterator) == 16)
 #assert(size_of(Randr_Get_Monitors_Reply) == 32)
+#assert(size_of(Randr_Notify_Event) == 32)
+
+RANDR_NOTIFY_RESOURCE_CHANGE :: u8(5)
 
 RANDR_NOTIFY_MASK_SCREEN_CHANGE    :: u16(1 << 0)
 RANDR_NOTIFY_MASK_CRTC_CHANGE      :: u16(1 << 1)
@@ -62,4 +72,6 @@ foreign xcb_randr {
     xcb_randr_get_monitors_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Randr_Get_Monitors_Reply ---
     xcb_randr_get_monitors_monitors_iterator :: proc(reply: ^Randr_Get_Monitors_Reply) -> Randr_Monitor_Iterator ---
     xcb_randr_monitor_info_next :: proc(iter: ^Randr_Monitor_Iterator) ---
+    xcb_randr_set_monitor_checked :: proc(c: ^Connection, window: u32, info: ^Randr_Monitor_Info) -> Cookie ---
+    xcb_randr_delete_monitor_checked :: proc(c: ^Connection, window, name: u32) -> Cookie ---
 }

@@ -31,6 +31,11 @@ skarwm-msg scratchpad target appid|class|instance|title VALUE [--spawn COMMAND]
 skarwm-msg scratchpad target-float appid|class|instance|title VALUE [--spawn COMMAND]
 skarwm-msg focus output next|prev
 skarwm-msg move output next|prev
+skarwm-msg screen split toggle
+skarwm-msg screen split enable
+skarwm-msg screen split disable
+skarwm-msg screen split resize +50|-50
+skarwm-msg screen split ratio 0.10..0.90
 skarwm-msg close
 skarwm-msg reload
 skarwm-msg quit
@@ -38,6 +43,11 @@ skarwm-msg quit
 
 Commands return the i3-style JSON array `[{"success":true}]`. Invalid commands
 return a nonzero exit status and an error object.
+
+Screen-split commands operate on the active logical screen's physical parent.
+`toggle` and `enable` default to 75/25. `resize` moves the shared boundary by
+signed pixels; `ratio` resets the pixel adjustment and recomputes from the
+physical width. Invalid minimum widths are rejected without changing geometry.
 
 The first numbered `toggle` assigns the focused window to that session-only
 register. Further toggles hide it when it is on the active workspace, or summon
@@ -83,8 +93,11 @@ skarwm-msg subscribe workspace window output ui
 The subscription first prints its success reply, then one JSON event per line.
 Workspace changes are `init`, `focus`, and `empty`. Window changes are `new`,
 `close`, `focus`, `title`, `urgent`, and `layout`. Output events contain an
-`output` name and a `change` of `connected`, `disconnected`, `geometry`, or
-`focus`; consumers should refresh `get-outputs` when one arrives.
+`output` name and a `change` of `connected`, `disconnected`, `geometry`,
+`added`, `removed`, or `focus`; consumers should refresh `get-outputs` when
+one arrives. Output snapshots identify each logical screen's
+`physical_output`, `virtual` status, `relative_rect`, root-coordinate `rect`,
+and logical `workarea`.
 
 The optional `ui` stream lets a desktop shell replace skarwm's minimal native
 overlays without making the shell a runtime dependency. Its events use

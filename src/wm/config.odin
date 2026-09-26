@@ -49,6 +49,7 @@ import x11 "../x11"
 //       bar_block  : systray : <left|center|right>
 //       bar_block  : script : <left|center|right> : <name> : <interval seconds> :
 //                    <timeout seconds> : "<command>"
+//       virtual_screen : <output> : split : <percent> [: <pixel offset>]
 //       mousebind  : …                       (warned + skipped: no mouse system yet)
 //
 // A combo is modifier tokens (`mod`, Shift, Control, Mod1..Mod5, Super, Alt)
@@ -99,6 +100,15 @@ Raw_Bar_Block :: struct {
     interval_ms, timeout_ms: i32,
 }
 
+// Virtual_Screen_Profile is a declarative two-way horizontal split. The ratio
+// is stored as a percentage to keep the rc syntax exact and easy to validate;
+// geometry is always derived from the current physical output at activation.
+Virtual_Screen_Profile :: struct {
+    output: string,
+    ratio_percent: i32,
+    offset: i32,
+}
+
 // Config_Result is the fully-resolved product of a config load, ready to apply.
 Config_Result :: struct {
     cfg:       c.Config,
@@ -107,6 +117,7 @@ Config_Result :: struct {
     rules:     [dynamic]Raw_Rule,
     startups:  [dynamic]string,
     bar_blocks: [dynamic]Raw_Bar_Block,
+    virtual_screens: [dynamic]Virtual_Screen_Profile,
 }
 
 // Load_Scratch accumulates raw settings + directives while the file is scanned.
@@ -144,6 +155,7 @@ Load_Scratch :: struct {
     startups: [dynamic]string,
     bar_blocks: [dynamic]Raw_Bar_Block,
     bar_blocks_set: bool,
+    virtual_screens: [dynamic]Virtual_Screen_Profile,
     warned:   [dynamic]string, // unknown settings already warned about
 }
 
@@ -159,6 +171,7 @@ scratch_new :: proc() -> ^Load_Scratch {
     sc.rules = make([dynamic]Raw_Rule, 0, 8)
     sc.startups = make([dynamic]string, 0, 8)
     sc.bar_blocks = make([dynamic]Raw_Bar_Block, 0, 8)
+    sc.virtual_screens = make([dynamic]Virtual_Screen_Profile, 0, 2)
     sc.warned = make([dynamic]string, 0, 8)
     return sc
 }
@@ -177,6 +190,7 @@ scratch_destroy :: proc(sc: ^Load_Scratch) {
     for s in sc.startups { if s != "" { delete(s) } }
     delete(sc.startups)
     release_bar_blocks(&sc.bar_blocks)
+    release_virtual_screens(&sc.virtual_screens)
     for w in sc.warned { if w != "" { delete(w) } }
     delete(sc.warned)
     free(sc)
@@ -211,6 +225,14 @@ release_bar_blocks :: proc(blocks: ^[dynamic]Raw_Bar_Block) {
     }
     delete(blocks^)
     blocks^ = {}
+}
+
+release_virtual_screens :: proc(profiles: ^[dynamic]Virtual_Screen_Profile) {
+    for &profile in profiles {
+        if profile.output != "" { delete(profile.output) }
+    }
+    delete(profiles^)
+    profiles^ = {}
 }
 
 free_errors :: proc(errs: ^[dynamic]string) {
@@ -377,6 +399,27 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
     case "focus_output_prev", "focusmonitor_prev": base.action = .Focus_Output_Prev; return base, ""
     case "move_to_output_next", "tagmonitor_next": base.action = .Move_To_Output_Next; return base, ""
     case "move_to_output_prev", "tagmonitor_prev": base.action = .Move_To_Output_Prev; return base, ""
+    case "screen_split_toggle":
+        if rb.argk == .Num && (rb.argi < 10 || rb.argi > 90) {
+            return {}, fmt.aprintf("bind(%q): split ratio percent must be 10..90", rb.combo)
+        }
+        base.action = .Screen_Split_Toggle; base.arg = rb.argi; return base, ""
+    case "screen_split_enable":
+        if rb.argk == .Num && (rb.argi < 10 || rb.argi > 90) {
+            return {}, fmt.aprintf("bind(%q): split ratio percent must be 10..90", rb.combo)
+        }
+        base.action = .Screen_Split_Enable; base.arg = rb.argi; return base, ""
+    case "screen_split_disable":
+        base.action = .Screen_Split_Disable; return base, ""
+    case "screen_split_grow":
+        base.action = .Screen_Split_Grow; base.arg = rb.argi; return base, ""
+    case "screen_split_shrink":
+        base.action = .Screen_Split_Shrink; base.arg = rb.argi; return base, ""
+    case "screen_split_ratio":
+        if rb.argk != .Num || rb.argi < 10 || rb.argi > 90 {
+            return {}, fmt.aprintf("bind(%q): screen_split_ratio requires percent 10..90", rb.combo)
+        }
+        base.action = .Screen_Split_Ratio; base.arg = rb.argi; return base, ""
 
     case "togglefloating":   base.action = .Toggle_Floating;   return base, ""
     case "togglefullscreen",
@@ -547,6 +590,11 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
         r.bar_blocks = make([dynamic]Raw_Bar_Block, 0, 1)
         append(&r.bar_blocks, Raw_Bar_Block{kind = .Workspaces, alignment = .Left})
     }
+    r.virtual_screens = make([dynamic]Virtual_Screen_Profile, len(sc.virtual_screens))
+    for profile, i in sc.virtual_screens {
+        r.virtual_screens[i] = profile
+        r.virtual_screens[i].output = strings.clone(profile.output)
+    }
     return r
 }
 
@@ -556,6 +604,7 @@ destroy_result :: proc(r: ^Config_Result) {
     for s in r.startups { if s != "" { delete(s) } }
     delete(r.startups)
     release_bar_blocks(&r.bar_blocks)
+    release_virtual_screens(&r.virtual_screens)
     r^ = {}
 }
 
@@ -829,9 +878,59 @@ parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string)
     return true
 }
 
-// parse_directive handles bind/call/workspace/rule/autostart/bar_block/mousebind lines.
+parse_virtual_screen :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string) -> bool {
+    fields := strings.split(rest, ":")
+    defer delete(fields)
+    if len(fields) < 3 || len(fields) > 4 {
+        append(errs, fmt.aprintf(
+            "virtual_screen: expected output : split : percent [: offset], got %q", rest,
+        ))
+        return false
+    }
+    output := strings.trim_space(fields[0])
+    mode := strings.trim_space(fields[1])
+    ratio_text := strings.trim_space(fields[2])
+    has_offset := len(fields) == 4
+    offset_text := ""
+    if has_offset { offset_text = strings.trim_space(fields[3]) }
+    if output == "" || mode != "split" || ratio_text == "" || (has_offset && offset_text == "") {
+        append(errs, fmt.aprintf(
+            "virtual_screen: expected output : split : percent [: offset], got %q", rest,
+        ))
+        return false
+    }
+    ratio, ok := parse_i32_value(ratio_text)
+    if !ok || ratio < 10 || ratio > 90 {
+        append(errs, fmt.aprintf("virtual_screen(%q): split percent must be 10..90", output))
+        return false
+    }
+    offset: i32
+    if has_offset {
+        offset, ok = parse_i32_value(offset_text)
+        if !ok {
+            append(errs, fmt.aprintf("virtual_screen(%q): invalid pixel offset %q", output, offset_text))
+            return false
+        }
+    }
+    for profile in sc.virtual_screens {
+        if profile.output == output {
+            append(errs, fmt.aprintf("virtual_screen: duplicate output %q", output))
+            return false
+        }
+    }
+    append(&sc.virtual_screens, Virtual_Screen_Profile{
+        output = strings.clone(output), ratio_percent = ratio, offset = offset,
+    })
+    return true
+}
+
+// parse_directive handles bind/call/workspace/rule/autostart/bar_block,
+// virtual_screen, and mousebind lines.
 parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]string) -> bool {
     switch key {
+    case "virtual_screen":
+        return parse_virtual_screen(sc, rest, errs)
+
     case "bar_block":
         return parse_bar_block(sc, rest, errs)
 
@@ -1022,7 +1121,7 @@ scan_rc :: proc(sc: ^Load_Scratch, data: []byte, errs: ^[dynamic]string) -> bool
         rest := strings.trim_space(line[colon + 1:])
 
         switch key {
-        case "bind", "call", "workspace", "rule", "autostart", "bar_block", "mousebind":
+        case "bind", "call", "workspace", "rule", "autostart", "bar_block", "virtual_screen", "mousebind":
             if !parse_directive(sc, key, rest, errs) { ok = false }
         case:
             if !parse_setting(sc, key, rest, errs) { ok = false }
@@ -1069,6 +1168,73 @@ startup_ran :: proc(s: string) -> bool {
     return false
 }
 
+profile_for_output :: proc(profiles: []Virtual_Screen_Profile, output: string) -> (^Virtual_Screen_Profile, bool) {
+    for &profile in profiles {
+        if profile.output == output { return &profile, true }
+    }
+    return nil, false
+}
+
+virtual_profile_fits :: proc(profile: Virtual_Screen_Profile, p: ^c.Physical_Output) -> bool {
+    if p == nil { return true } // retain profiles for disconnected outputs
+    left := i32(f64(p.Geom.W) * (f64(profile.ratio_percent) / 100.0) + 0.5) + profile.offset
+    return left >= c.MIN_LOGICAL_SCREEN_WIDTH &&
+           p.Geom.W - left >= c.MIN_LOGICAL_SCREEN_WIDTH
+}
+
+validate_virtual_profiles :: proc(profiles: []Virtual_Screen_Profile) -> string {
+    if g_wm.m == nil { return "" }
+    for profile in profiles {
+        p := c.Find_Physical_Output(g_wm.m, profile.output)
+        if !virtual_profile_fits(profile, p) {
+            return fmt.aprintf(
+                "virtual_screen(%q): split does not fit current physical width", profile.output,
+            )
+        }
+    }
+    return ""
+}
+
+apply_current_virtual_screens :: proc() {
+    if g_wm.m == nil { return }
+    for profile in g_wm.virtual_screens {
+        p := c.Find_Physical_Output(g_wm.m, profile.output)
+        if p == nil || len(p.Screens) == 0 { continue }
+        if !virtual_profile_fits(profile, p) {
+            logger.Warn("virtual screen profile no longer fits output:", profile.output)
+            continue
+        }
+        _ = c.Enable_Output_Split(
+            g_wm.m, p.Screens[0], f64(profile.ratio_percent) / 100.0, profile.offset,
+        )
+    }
+}
+
+apply_virtual_profiles :: proc(next: ^[dynamic]Virtual_Screen_Profile) {
+    if g_wm.m != nil {
+        // A profile removed by reload returns only the topology that profile
+        // managed to normal. Unrelated runtime-created splits are untouched.
+        for old in g_wm.virtual_screens {
+            if _, found := profile_for_output(next^[:], old.output); found { continue }
+            p := c.Find_Physical_Output(g_wm.m, old.output)
+            if p != nil && p.Split && len(p.Screens) > 0 {
+                _ = c.Disable_Output_Split(g_wm.m, p.Screens[0])
+            }
+        }
+    }
+    release_virtual_screens(&g_wm.virtual_screens)
+    g_wm.virtual_screens = next^
+    next^ = {}
+    apply_current_virtual_screens()
+    randr_sync_virtual_monitors()
+    // One invalidation is sufficient for snapshot-based consumers, but emit
+    // every surviving logical name for event-oriented bars as well. At startup
+    // there are no IPC peers yet, so this is naturally a no-op.
+    for output in g_wm.m.Outputs {
+        ipc_broadcast_output_event("geometry", output.Name)
+    }
+}
+
 // cfg_apply swaps the live WM state to r. After this call every heap resource r
 // owned has been moved into the WM or freed, so the caller must not destroy it
 // again.
@@ -1089,6 +1255,8 @@ cfg_apply :: proc(r: ^Config_Result, label: string) {
     release_bar_blocks(&g_wm.bar_blocks)
     g_wm.bar_blocks = r.bar_blocks
     r.bar_blocks = {}
+
+    apply_virtual_profiles(&r.virtual_screens)
 
     // Startup commands run once per command text, so a reload never relaunches
     // programs the running config already started.
@@ -1256,6 +1424,13 @@ load_config_path :: proc(path, verb: string) {
         return
     }
     free_errors(&errs)
+    if topology_error := validate_virtual_profiles(r.virtual_screens[:]); topology_error != "" {
+        logger.Error("could not", verb, "config — keeping current settings:")
+        logger.Error("  ", topology_error)
+        delete(topology_error)
+        destroy_result(&r)
+        return
+    }
     label := fmt.aprintf("%s from %s", verb, path)
     cfg_apply(&r, label)
     delete(label)

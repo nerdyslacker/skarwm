@@ -19,6 +19,7 @@ usage :: proc() {
     fmt.eprintln("         scratchpad toggle|toggle-float|remove N")
     fmt.eprintln("         scratchpad target|target-float FIELD VALUE [--spawn COMMAND]")
     fmt.eprintln("         focus output next|prev | move output next|prev")
+    fmt.eprintln("         screen split toggle|enable|disable|resize DELTA|ratio FRACTION")
     fmt.eprintln("         close | reload | quit | toggle-floating | toggle-fullscreen")
 }
 

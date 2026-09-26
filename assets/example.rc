@@ -47,7 +47,7 @@ animation_easing : ease_out_cubic
 # desktop shells remain unaffected. The current implementation creates one
 # reserved top/bottom strip per RandR monitor; content blocks are being added
 # incrementally.
-bar_enabled : false
+bar_enabled : true
 bar_position : top
 bar_height : 26
 bar_font : "JetBrainsMono Nerd Font"
@@ -72,6 +72,10 @@ bar_block : script : right : 󰋊 : 30 : 1 : "df -P / | awk 'NR==2 {print $5}'"
 bar_block : script : right : 󰕾 : 1 : 1 : "pactl get-sink-volume @DEFAULT_SINK@ | grep -o '[0-9]*%' | head -1"
 bar_block : script : right : 󰁹 : 10 : 1 : "cat /sys/class/power_supply/BAT0/capacity; printf '%%'"
 bar_block : systray : right
+
+# Optional WM-level ultrawide split. Output is the RandR monitor name; percent
+# controls the left region and the signed final field nudges the boundary.
+# virtual_screen : DP-1 : split : 75 : -30
 
 # ---- launching ----------------------------------------------------------------
 
@@ -100,6 +104,7 @@ autostart : "xsetroot -solid '#202020'"
 # ws_next ws_prev togglefloating togglefullscreen layout_tabbed layout_stacked
 # toggle_tabbed show_bindings show_datetime show_battery
 # focus_output_next/prev move_to_output_next/prev
+# screen_split_toggle/enable/disable screen_split_grow/shrink/ratio
 # reminder_new reminder_show_all reminder_clear_all
 # scratchpad_toggle N scratchpad_toggle_float N scratchpad_remove N
 # close_window reload_config quit.
@@ -174,6 +179,14 @@ call : mod + comma         : focus_output_prev
 call : mod + period        : focus_output_next
 call : mod + Shift + comma : move_to_output_prev
 call : mod + Shift + period : move_to_output_next
+
+# Virtual-screen controls for an ultrawide monitor. F5/F8 move the shared
+# boundary by 15px; F6 returns to one logical screen; F7 enables the default
+# 75/25 main/side split. These operate on the active screen's physical parent.
+call : mod + F5 : screen_split_shrink 15
+call : mod + F6 : screen_split_disable
+call : mod + F7 : screen_split_enable 75
+call : mod + F8 : screen_split_grow 15
 
 # Fixed mouse actions: middle-click maximizes/restores a managed window.
 # Hovering the exposed edge of an off-screen tiled window reveals and focuses it.

@@ -267,6 +267,76 @@ register_client :: proc(m: ^Manager, cl: ^Client) {
 // Docks (output-level panels)
 // ----------------------------------------------------------------------------
 
+DOCK_EDGE_MARGIN_LIMIT :: i32(64)
+
+// Capture the fixed edge offsets of a full-edge panel. `reset` is used when a
+// dock is first managed; later valid client configure requests may refresh the
+// offsets, while stale requests from an earlier RandR geometry leave them
+// intact.
+Capture_Dock_Anchors :: proc(cl: ^Client, o: ^Output, reset: bool = false) {
+    if cl == nil || o == nil || rect_empty(cl.FloatingRect) { return }
+    if reset {
+        cl.DockStretchX = false
+        cl.DockStretchY = false
+        cl.DockMargins = {}
+    }
+    r, g := cl.FloatingRect, o.Geom
+    left := r.X - g.X
+    right := g.X + g.W - (r.X + r.W)
+    top := r.Y - g.Y
+    bottom := g.Y + g.H - (r.Y + r.H)
+    if (cl.Strut.Top > 0 || cl.Strut.Bottom > 0) &&
+       left >= 0 && left <= DOCK_EDGE_MARGIN_LIMIT &&
+       right >= 0 && right <= DOCK_EDGE_MARGIN_LIMIT &&
+       (!cl.DockStretchX ||
+        (abs(left - cl.DockMargins.Left) <= 16 && abs(right - cl.DockMargins.Right) <= 16)) {
+        cl.DockStretchX = true
+        cl.DockMargins.Left, cl.DockMargins.Right = left, right
+        if cl.Strut.Top > 0 {
+            cl.DockMargins.Top = max(i32(0), top)
+        } else {
+            cl.DockMargins.Bottom = max(i32(0), bottom)
+        }
+    }
+    if (cl.Strut.Left > 0 || cl.Strut.Right > 0) &&
+       top >= 0 && top <= DOCK_EDGE_MARGIN_LIMIT &&
+       bottom >= 0 && bottom <= DOCK_EDGE_MARGIN_LIMIT &&
+       (!cl.DockStretchY ||
+        (abs(top - cl.DockMargins.Top) <= 16 && abs(bottom - cl.DockMargins.Bottom) <= 16)) {
+        cl.DockStretchY = true
+        cl.DockMargins.Top, cl.DockMargins.Bottom = top, bottom
+        if cl.Strut.Left > 0 {
+            cl.DockMargins.Left = max(i32(0), left)
+        } else {
+            cl.DockMargins.Right = max(i32(0), right)
+        }
+    }
+}
+
+Remap_Dock_To_Output :: proc(cl: ^Client, o: ^Output) {
+    if cl == nil || o == nil || rect_empty(cl.FloatingRect) { return }
+    r, g, margins := cl.FloatingRect, o.Geom, cl.DockMargins
+    if cl.DockStretchX {
+        r.X = g.X + margins.Left
+        r.W = max(i32(1), g.W - margins.Left - margins.Right)
+        if cl.Strut.Top > 0 {
+            r.Y = g.Y + margins.Top
+        } else if cl.Strut.Bottom > 0 {
+            r.Y = g.Y + g.H - margins.Bottom - r.H
+        }
+    }
+    if cl.DockStretchY {
+        r.Y = g.Y + margins.Top
+        r.H = max(i32(1), g.H - margins.Top - margins.Bottom)
+        if cl.Strut.Left > 0 {
+            r.X = g.X + margins.Left
+        } else if cl.Strut.Right > 0 {
+            r.X = g.X + g.W - margins.Right - r.W
+        }
+    }
+    cl.FloatingRect = r
+}
+
 // Add_Dock registers a dock client on the active output. Docks are ws-less
 // (Ws == nil) so they are never tiled, parked, or focusable, and they are
 // visible on every workspace. They are still registered in m.Clients/ByXid
@@ -282,22 +352,37 @@ Add_Dock_To_Output :: proc(m: ^Manager, o: ^Output, cl: ^Client) {
     cl.Out = o
     cl.Dock = true
     cl.Floating = false // docks are not ws floaters; they are output-level
+    Capture_Dock_Anchors(cl, o, true)
     append(&o.Docks, cl)
     register_client(m, cl)
     Update_Reserved(m)
 }
 
-// Update_Reserved recomputes each output's Reserved area as the per-side max
-// over the struts claimed by its dock clients. Call whenever a dock is added,
-// removed, or changes its strut.
+// Update_Reserved recomputes every logical screen's Reserved area. A dock is
+// owned/rendered once, but its partial span can intersect more than one sibling
+// logical screen on the same physical output.
 Update_Reserved :: proc(m: ^Manager) {
     for o in m.Outputs {
         o.Reserved = Insets {}
-        for d in o.Docks {
-            o.Reserved.Left = max(o.Reserved.Left, d.Strut.Left)
-            o.Reserved.Right = max(o.Reserved.Right, d.Strut.Right)
-            o.Reserved.Top = max(o.Reserved.Top, d.Strut.Top)
-            o.Reserved.Bottom = max(o.Reserved.Bottom, d.Strut.Bottom)
+        for d in m.Clients {
+            if !d.Dock || d.Out == nil || d.Out.Parent != o.Parent { continue }
+            r := d.FloatingRect
+            if rect_empty(r) {
+                parent_geom := d.Out.Geom
+                if d.Out.Parent != nil { parent_geom = d.Out.Parent.Geom }
+                height := max(i32(1), d.Strut.Top)
+                r = Rect{X = parent_geom.X, Y = parent_geom.Y, W = parent_geom.W, H = height}
+            }
+            horizontal_hit := r.X < o.Geom.X + o.Geom.W && r.X + r.W > o.Geom.X
+            vertical_hit := r.Y < o.Geom.Y + o.Geom.H && r.Y + r.H > o.Geom.Y
+            if vertical_hit {
+                o.Reserved.Left = max(o.Reserved.Left, d.Strut.Left)
+                o.Reserved.Right = max(o.Reserved.Right, d.Strut.Right)
+            }
+            if horizontal_hit {
+                o.Reserved.Top = max(o.Reserved.Top, d.Strut.Top)
+                o.Reserved.Bottom = max(o.Reserved.Bottom, d.Strut.Bottom)
+            }
         }
     }
 }
@@ -596,8 +681,9 @@ Move_Tabbed_Column_To_Drop :: proc(m: ^Manager, member: ^Client, drop: Drop_Targ
     return true
 }
 
-// Move_Floating_To_Output transfers a floating client to another output's
-// visible workspace without changing its root-coordinate drag rectangle.
+// Move_Floating_To_Output transfers a floating client during an active pointer
+// drag. Keep root coordinates here: translating would make the window jump
+// away from the pointer as it crosses a logical-screen boundary.
 Move_Floating_To_Output :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output) -> bool {
     if m == nil || cl == nil || cl.Ws == nil || !cl.Floating || cl.Fullscreen ||
        dst_o == nil || dst_o == cl.Out || dst_o.Current == nil {
@@ -675,8 +761,12 @@ Move_Focused_To_Output_Rel :: proc(m: ^Manager, dir: int) -> bool {
     cl.Fullscreen = false
     if cl.Floating {
         remove_floater(src, cl)
-        p := compute_params(m.Cfg, dst_o.Geom, 0, dst_o.Reserved)
-        cl.FloatingRect = default_float_rect(p, dst_o.Geom)
+        if rect_empty(cl.FloatingRect) {
+            p := compute_params(m.Cfg, dst_o.Geom, 0, dst_o.Reserved)
+            cl.FloatingRect = default_float_rect(p, dst_o.Geom)
+        } else {
+            cl.FloatingRect = translate_floating_rect(cl.FloatingRect, src_o.Geom, dst_o.Geom)
+        }
         append(&dst.Floaters, cl)
         cl.Ws, cl.Out = dst, dst_o
         dst.Focus = cl
@@ -755,6 +845,7 @@ Summon_Client :: proc(m: ^Manager, cl: ^Client, as_float: bool = false) -> bool 
         Focus_Client(m, cl)
         return true
     }
+    src_o := cl.Out
     if cl.Ws != nil { detach_from_workspace(m, cl) }
     cl.Stashed = false
     cl.Out = o
@@ -764,6 +855,8 @@ Summon_Client :: proc(m: ^Manager, cl: ^Client, as_float: bool = false) -> bool 
         if rect_empty(cl.FloatingRect) {
             p := compute_params(m.Cfg, o.Geom, 0, o.Reserved)
             cl.FloatingRect = default_float_rect(p, o.Geom)
+        } else if src_o != nil && src_o != o {
+            cl.FloatingRect = translate_floating_rect(cl.FloatingRect, src_o.Geom, o.Geom)
         }
         append(&ws.Floaters, cl)
         cl.Ws = ws
@@ -1069,7 +1162,6 @@ Unmanage_Client :: proc(m: ^Manager, cl: ^Client) -> ^Client {
                 }
             }
         }
-        Update_Reserved(m)
     }
     if ws != nil {
         ci, col, row := column_of(ws, cl)
@@ -1107,6 +1199,7 @@ Unmanage_Client :: proc(m: ^Manager, cl: ^Client) -> ^Client {
         }
     }
     delete_key(&m.ByXid, cl.Xid)
+    if cl.Dock { Update_Reserved(m) }
     for number, registered in m.Scratchpad_Registers {
         if registered == cl { delete_key(&m.Scratchpad_Registers, number) }
     }

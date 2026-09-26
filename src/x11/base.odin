@@ -650,6 +650,8 @@ foreign xcb {
     xcb_poly_fill_rectangle :: proc(c: ^Connection, drawable, gc: u32, rectangles_len: u32, rectangles: ^Rectangle) -> Cookie ---
 
     xcb_set_input_focus :: proc(c: ^Connection, revert_to: u8, focus: u32, time: u32) -> Cookie ---
+    xcb_grab_server   :: proc(c: ^Connection) -> Cookie ---
+    xcb_ungrab_server :: proc(c: ^Connection) -> Cookie ---
 
     xcb_grab_key   :: proc(c: ^Connection, owner_events: u8, grab_window: u32, modifiers: u16, key: u8, pointer_mode: u8, keyboard_mode: u8) -> Cookie ---
     xcb_ungrab_key :: proc(c: ^Connection, key: u8, grab_window: u32, modifiers: u16) -> Cookie ---
