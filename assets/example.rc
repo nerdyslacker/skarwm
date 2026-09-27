@@ -8,8 +8,8 @@
 #
 # A '#' at the start of a line is a comment. Every line is `key : value`
 # (settings) or a directive with extra ':' fields. Legacy settings that only
-# decorate a titlebar skarwm does not draw (norm_bg, show_titlebar, snap, …)
-# are accepted and ignored for configuration compatibility.
+# belong to the old compatibility grammar (norm_bg, show_titlebar, snap, …)
+# are accepted and ignored. Native decoration settings use `decoration_*`.
 
 # ---- settings ---------------------------------------------------------------
 
@@ -32,6 +32,24 @@ corner_radius : 0
 # config compatibility; unfocused windows currently have no border.
 norm_outer_border : #504D47
 sel_outer_border  : #FCE8C3
+
+# Native client decorations are opt-in. They add a WM-owned titlebar/frame;
+# individual applications can opt out through a `decorate false` rule.
+decorations_enabled : false
+decoration_titlebar_height : 20
+decoration_border_width : 1
+decoration_resize_hit_width : 4
+decoration_show_title : true
+decoration_color_source : active-border
+# active-border/accent automatically use dark title text and controls when the
+# selected color is bright, and light foregrounds when it is dark.
+# decoration_accent : #89B4FA
+# decoration_active_background : #313244
+# decoration_inactive_background : #1E1E2E
+# decoration_active_foreground : #FFFFFF
+# decoration_inactive_foreground : #A6ADC8
+# decoration_active_border : #89B4FA
+# decoration_inactive_border : #45475A
 
 # True (default): moving the pointer over a window focuses it.
 focus_follows_mouse : true

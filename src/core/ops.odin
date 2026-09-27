@@ -907,6 +907,28 @@ Scratchpad_Register_Of :: proc(m: ^Manager, cl: ^Client) -> (int, bool) {
     return 0, false
 }
 
+// Scratchpad_Stash_Client is the semantic "minimize to scratchpad" path used
+// by native decorations. It preserves an existing register or assigns the
+// first free positive register so the normal toggle workflow can restore it.
+Scratchpad_Stash_Client :: proc(m: ^Manager, cl: ^Client) -> (register: int, ok: bool) {
+    if m == nil || cl == nil || cl.Dock || cl.Stashed || cl.Ws == nil { return 0, false }
+    existing, registered := Scratchpad_Register_Of(m, cl)
+    register = existing
+    if !registered {
+        register = 1
+        for {
+            if _, used := m.Scratchpad_Registers[register]; !used { break }
+            register += 1
+        }
+        m.Scratchpad_Registers[register] = cl
+    }
+    if !Stash_Client(m, cl) {
+        if !registered { delete_key(&m.Scratchpad_Registers, register) }
+        return 0, false
+    }
+    return register, true
+}
+
 Scratchpad_Match_Field :: enum { AppId, Class, Instance, Title }
 
 scratchpad_matches :: proc(cl: ^Client, field: Scratchpad_Match_Field, value: string) -> bool {

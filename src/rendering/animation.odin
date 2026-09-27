@@ -50,18 +50,38 @@ configure_client_geometry :: proc(
     border: i32,
     constrain_to_output := true,
 ) {
+    client_geom := geom
+    client_border := border
+    if cl.Decorated && cl.DecorationFrame != 0 && !cl.Fullscreen && !cl.Stashed && !cl.Dock {
+        frame := c.Decoration_Layout_Frame_Rect(geom, m.Cfg.BorderWidth)
+        client_geom = c.Decoration_Client_Rect(frame, m.Cfg.Decoration)
+        client_border = 0
+        frame_vals := [5]u32{
+            u32(i16(frame.X)), u32(i16(frame.Y)),
+            u32(max(i32(1), frame.W)), u32(max(i32(1), frame.H)), 0,
+        }
+        x11.xcb_configure_window(
+            conn, cl.DecorationFrame,
+            x11.CW_X | x11.CW_Y | x11.CW_WIDTH | x11.CW_HEIGHT | x11.CW_BORDER_WIDTH,
+            &frame_vals[0],
+        )
+    }
     vals := [5]u32 {
-        u32(i16(geom.X)),
-        u32(i16(geom.Y)),
-        u32(max(i32(1), geom.W)),
-        u32(max(i32(1), geom.H)),
-        u32(max(i32(0), border)),
+        u32(i16(client_geom.X)),
+        u32(i16(client_geom.Y)),
+        u32(max(i32(1), client_geom.W)),
+        u32(max(i32(1), client_geom.H)),
+        u32(max(i32(0), client_border)),
     }
     x11.xcb_configure_window(
         conn, cl.Xid,
         x11.CW_X | x11.CW_Y | x11.CW_WIDTH | x11.CW_HEIGHT | x11.CW_BORDER_WIDTH, &vals[0],
     )
-    shape_client(state, conn, m, cl, geom, border, constrain_to_output)
+    if cl.Decorated && cl.DecorationFrame != 0 && !cl.Fullscreen && !cl.Stashed && !cl.Dock {
+        stack_vals := [2]u32{cl.DecorationFrame, x11.STACK_MODE_ABOVE}
+        x11.xcb_configure_window(conn, cl.Xid, x11.CW_SIBLING | x11.CW_STACK_MODE, &stack_vals[0])
+    }
+    shape_client(state, conn, m, cl, client_geom, client_border, constrain_to_output)
 }
 
 // Preview_Client moves a dragged tile without changing its authoritative core
@@ -134,10 +154,19 @@ animation_schedule_next :: proc(state: ^State, m: ^c.Manager, now: time.Tick) {
 }
 
 animation_map_client :: proc(conn: ^x11.Connection, cl: ^c.Client, on_mapped: Mapped_Callback) {
-    if cl.Mapped { return }
-    x11.xcb_map_window(conn, cl.Xid)
-    cl.Mapped = true
-    if on_mapped != nil { on_mapped(cl) }
+    show_frame := cl.Decorated && cl.DecorationFrame != 0 && !cl.Fullscreen && !cl.Stashed && !cl.Dock
+    if show_frame && !cl.DecorationFrameMapped {
+        x11.xcb_map_window(conn, cl.DecorationFrame)
+        cl.DecorationFrameMapped = true
+    } else if !show_frame && cl.DecorationFrameMapped {
+        x11.xcb_unmap_window(conn, cl.DecorationFrame)
+        cl.DecorationFrameMapped = false
+    }
+    if !cl.Mapped {
+        x11.xcb_map_window(conn, cl.Xid)
+        cl.Mapped = true
+        if on_mapped != nil { on_mapped(cl) }
+    }
 }
 
 animation_clear_states :: proc(state: ^State) {
@@ -183,7 +212,7 @@ Commit :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, request_anim
             animation_sample(st, now)
             changed := st.Target != cl.Geom || st.Target_Border != cl.Border
             decoration_only := animation_is_decoration_only(st, cl.Geom, cl.Border)
-            snap := !enabled || decoration_only ||
+            snap := !enabled || decoration_only || cl.Decorated ||
                 animation_is_parked(cl, st.Current) || animation_is_parked(cl, cl.Geom)
             if changed && !snap {
                 st.Start = st.Current

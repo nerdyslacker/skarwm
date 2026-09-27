@@ -11,6 +11,11 @@ Tab_Decoration :: struct {
     Width: i32,
 }
 
+Frame_Decoration :: struct {
+    Xid: u32,
+    Client: ^c.Client,
+}
+
 State :: struct {
     Conn: ^x11.Connection,
     Root: u32,
@@ -18,6 +23,9 @@ State :: struct {
     Atoms: ^map[string]u32,
 
     Tabs: [dynamic]Tab_Decoration,
+    Decorations: [dynamic]Frame_Decoration,
+    DecorationCursors: [9]u32, // normal + eight directional resize cursors
+    DecorationCursorFont: u32,
     TabGC, TabFont: u32,
     HelpWindow: u32,
     NoticeWindow: u32,
@@ -47,6 +55,7 @@ Init :: proc(state: ^State, conn: ^x11.Connection, root, white_pixel: u32, atoms
     state.WhitePixel = white_pixel
     state.Atoms = atoms
     state.Tabs = make([dynamic]Tab_Decoration, 0, 8)
+    state.Decorations = make([dynamic]Frame_Decoration, 0, 16)
     state.ReminderListLines = make([dynamic]string, 0, 8)
 }
 

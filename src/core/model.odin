@@ -94,6 +94,11 @@ Client :: struct {
     // WM retains these anchors instead of accepting a stale panel resize.
     DockMargins: Insets,
     DockStretchX, DockStretchY: bool,
+    // Resolved once from the global default plus the first matching rule.
+    // Rendering remains a wm-layer responsibility.
+    Decorated: bool,
+    DecorationFrame: u32, // WM-owned override-redirect root child; 0 when absent
+    DecorationFrameMapped: bool,
 }
 
 Column_Layout :: enum u8 {

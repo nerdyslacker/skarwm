@@ -147,7 +147,7 @@ objects include:
 Active virtual screens are also published as standard RandR 1.5 monitor
 objects. Monitor-aware bars and shells therefore see the split through their
 ordinary multi-monitor path, just as they do when another display is attached;
-no Anush- or toolkit-specific integration is required. The objects use the
+no anush- or toolkit-specific integration is required. The objects use the
 same names and rectangles returned by `skarwm-msg get-outputs` and are removed
 when the screen is unsplit or skarwm exits.
 

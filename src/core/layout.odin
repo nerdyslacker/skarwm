@@ -664,6 +664,17 @@ Drop_Target_At_Point :: proc(
     current: Drop_Target = {},
 ) -> Drop_Target {
     if dragged != nil { return drop_target_at_point(m, x, y, dragged) }
+    return Edge_Drop_Target_At_Point(m, x, y, dragged, current)
+}
+
+// Edge_Drop_Target_At_Point resolves only the four workarea snap zones while
+// still excluding a tiled dragged client's source column from the destination.
+Edge_Drop_Target_At_Point :: proc(
+    m: ^Manager,
+    x, y: i32,
+    dragged: ^Client = nil,
+    current: Drop_Target = {},
+) -> Drop_Target {
     targets := Drop_Targets(m, dragged)
     defer delete(targets)
 

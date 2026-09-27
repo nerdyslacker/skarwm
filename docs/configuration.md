@@ -23,6 +23,19 @@ Without a file, built-in settings and bindings are used. Copy
 | `corner_radius : 0` | Rounded-corner radius; `0` disables shaping. |
 | `norm_outer_border : #504D47` | Compatibility colour; unfocused borders are hidden. |
 | `sel_outer_border : #FF5F00` | Focused border colour. |
+| `decorations_enabled : false` | Opt in to skarwm-owned client titlebars and frames. |
+| `decoration_titlebar_height : 20` | Compact titlebar height in pixels, `16..128`. |
+| `decoration_border_width : 1` | Painted decoration frame width, `0..32`. |
+| `decoration_resize_hit_width : 4` | Edge/corner input target width, `1..32`; independent of the painted width. |
+| `decoration_show_title : true` | Draw the client title when the decoration renderer is enabled. |
+| `decoration_color_source : active-border` | Style source: `active-border`, `accent`, or `explicit`. |
+| `decoration_accent : #89B4FA` | Accent used by the `accent` source. |
+| `decoration_active_background : #313244` | Explicit active titlebar background. |
+| `decoration_inactive_background : #1E1E2E` | Explicit inactive titlebar background. |
+| `decoration_active_foreground : #FFFFFF` | Active title foreground. |
+| `decoration_inactive_foreground : #A6ADC8` | Inactive title foreground. |
+| `decoration_active_border : #89B4FA` | Explicit active frame colour. |
+| `decoration_inactive_border : #45475A` | Explicit inactive frame colour. |
 | `focus_follows_mouse : true` | Focus a window when the pointer enters it. |
 | `animations : true` | Enable layout transitions. |
 | `animation_duration_ms : 180` | Transition duration, `0..5000`. |
@@ -63,7 +76,7 @@ bar_block : workspaces : left
 bar_block : systray : right
 bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
 virtual_screen : DP-1 : split : 75 : -30
-rule : class : Firefox : workspace 3 floating
+rule : class : Firefox : workspace 3 floating decorate false
 ```
 
 `bind` launches a shell command. `call` invokes a WM action. `workspace view`
@@ -94,8 +107,9 @@ take a name, interval in seconds, timeout in seconds, and a shell command. See
 [Built-in bar](bar.md) for limits, failure handling, and security details.
 
 Rules use a substring match against `class`, `instance`, or `title`. Effects are
-`workspace N`, `floating`, and `floating true|false`; the first matching rule is
-used.
+`workspace N`, `floating`, `floating true|false`, `decorate`, and
+`decorate true|false`; the first matching rule is used. A decoration rule
+overrides the global `decorations_enabled` value for that client.
 
 `Super+Shift+r` runs `reload_config`. Reload is atomic: malformed input leaves
 the active configuration unchanged.

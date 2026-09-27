@@ -15,6 +15,7 @@ import x11 "../x11"
 
 import "core:time"
 import "core:strings"
+import "core:fmt"
 
 Tiled_Resize_State :: struct {
     Active: bool,
@@ -45,12 +46,16 @@ Wm :: struct {
     running:  bool,
     mouse_client: ^c.Client,
     mouse_resize: bool,
+    mouse_resize_hit: c.Decoration_Hit,
     mouse_tiled_drag: bool,
     mouse_tabbed_drag: bool,
     mouse_column_drag: bool,
+    mouse_decoration_drag: bool,
+    mouse_decoration_tile_drag: bool,
     tiled_resize: Tiled_Resize_State,
     mouse_root_x, mouse_root_y: i16,
     mouse_start: c.Rect,
+    mouse_preview: c.Rect,
     ui: ui.State,
     white_pixel: u32,
     tab_spawn_target: u32,
@@ -122,6 +127,7 @@ render_focus :: proc() {
         if cl == focused { col = m.Cfg.FocusedBorder }
         x11.xcb_change_window_attributes(g_wm.conn, cl.Xid, x11.CW_BORDER_PIXEL, &col)
     }
+    ui.Draw_All_Decorations(&g_wm.ui, m)
     if focused != nil && focused.Floating { raise_focused() }
     apply_x_focus()
 }
@@ -144,6 +150,9 @@ apply_x_focus :: proc() {
 raise_focused :: proc() {
     if f := g_wm.m.Focused; f != nil {
         stack := x11.STACK_MODE_ABOVE
+        if f.DecorationFrame != 0 && !f.Fullscreen {
+            x11.xcb_configure_window(g_wm.conn, f.DecorationFrame, x11.CW_STACK_MODE, &stack)
+        }
         x11.xcb_configure_window(g_wm.conn, f.Xid, x11.CW_STACK_MODE, &stack)
     }
     raise_docks()
@@ -228,11 +237,13 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
         c.Activate_WS(m, ws)
     }
     floating := float_override
+    cl.Decorated = decoration_for_client(cl)
     if tgt, fl, hit := rule_for_client(cl); hit {
         if tgt != nil { ws = tgt }
         floating = floating || fl
     }
     c.Add_Managed(m, ws, cl, floating, tab_target)
+    ui.Ensure_Decoration(&g_wm.ui, m, cl)
     adopt_pre_wm_state(cl) // inherit fullscreen/maximize set before mapping
     ewmh_client_managed(cl) // _NET_CLIENT_LIST + _NET_WM_DESKTOP
     reflow()
@@ -416,6 +427,11 @@ read_size_hints :: proc(cl: ^c.Client) {
 
 constrain_floating_rect :: proc(cl: ^c.Client, r: c.Rect) -> c.Rect {
     result := r
+    if cl.Decorated && cl.DecorationFrame != 0 && !cl.Fullscreen {
+        content := c.Decoration_Client_Rect(r, g_wm.m.Cfg.Decoration)
+        content.W, content.H = c.Constrain_Size(cl.SizeHints, content.W, content.H)
+        return c.Decoration_Frame_Rect(content, g_wm.m.Cfg.Decoration)
+    }
     b := max(i32(0), cl.Border)
     content_w := max(i32(1), r.W - 2 * b)
     content_h := max(i32(1), r.H - 2 * b)
@@ -465,6 +481,7 @@ unmanage :: proc(cl: ^c.Client) {
     new_focus := g_wm.m.Focused
     ewmh_client_unmanaged(cl) // WM_STATE Withdrawn + _NET_CLIENT_LIST refresh
     rendering.Forget(&g_wm.rendering, cl.Xid)
+    ui.Destroy_Decoration(&g_wm.ui, cl)
     // drop events so the X server stops notifying us about this window
     c.Free_Client(cl)
     if dock {
@@ -1009,10 +1026,15 @@ output_at_pointer :: proc() -> ^c.Output {
 
 on_enter :: proc(ev: ^x11.Enter_Notify_Event) {
     if ev.mode != NOTIFY_MODE_NORMAL { return } // ignore grabs / synthetic
+    if ui.Decoration_Client(&g_wm.ui, ev.event) != nil {
+        ui.Update_Decoration_Cursor(&g_wm.ui, g_wm.m, ev.event, i32(ev.event_x), i32(ev.event_y))
+    }
     if scroll_preview_hover(i32(ev.root_x), i32(ev.root_y)) { return }
     if !g_wm.m.Cfg.FocusFollowsMouse { return }
     xid := ev.event
-    if cl := g_wm.m.ByXid[xid]; cl != nil {
+    cl := g_wm.m.ByXid[xid]
+    if cl == nil { cl = ui.Decoration_Client(&g_wm.ui, xid) }
+    if cl != nil {
         // Docks have Ws == nil, so on_current_ws below is false for them and
         // focus-follows-mouse can never land on a panel.
         if !on_current_ws(cl) { return }
@@ -1133,6 +1155,7 @@ show_tiled_drag_preview :: proc(cl: ^c.Client, root_x, root_y: i32, header_heigh
             H = max(i32(1), preview.H - header_h),
         },
     )
+    g_wm.mouse_preview = preview
     return preview
 }
 
@@ -1152,6 +1175,95 @@ tiled_resize_motion :: proc(root_x, root_y: i32) {
     g_wm.mouse_root_y = i16(root_y)
 }
 
+decoration_stash_client :: proc(cl: ^c.Client) {
+    if cl == nil { return }
+    old_focus := g_wm.m.Focused
+    title := cl.Title
+    if title == "" { title = cl.Class }
+    if title == "" { title = "Window" }
+    register, ok := c.Scratchpad_Stash_Client(g_wm.m, cl)
+    if !ok { return }
+    reflow()
+    ipc_broadcast_focus_change(old_focus, g_wm.m.Focused)
+    ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
+    notice := fmt.aprintf("%s moved to scratchpad %d", title, register)
+    defer delete(notice)
+    ui.Show_Notice(&g_wm.ui, g_wm.m, notice)
+}
+
+decoration_begin_drag :: proc(cl: ^c.Client, ev: ^x11.Button_Press_Event) {
+    if cl == nil || cl.Fullscreen || !on_current_ws(cl) { return }
+    if cl.Maximized {
+        maximized_frame := c.Decoration_Layout_Frame_Rect(cl.Geom, g_wm.m.Cfg.BorderWidth)
+        c.Set_Maximized(cl, false)
+        reflow_immediate()
+        if cl.Floating {
+            r := cl.FloatingRect
+            anchor := clamp(i32(ev.event_x), i32(0), max(i32(1), maximized_frame.W))
+            r.X = i32(ev.root_x) - r.W*anchor/max(i32(1), maximized_frame.W)
+            r.Y = i32(ev.root_y) - g_wm.m.Cfg.Decoration.TitlebarHeight/2
+            cl.FloatingRect = r
+            reflow_immediate()
+        }
+        ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
+    }
+    g_wm.mouse_client = cl
+    g_wm.mouse_decoration_drag = true
+    clean := ev.state & ~(g_wm.lock | g_wm.numlock)
+    g_wm.mouse_decoration_tile_drag = clean & x11.MOD_MASK_MOD1 != 0
+    g_wm.mouse_root_x = ev.root_x
+    g_wm.mouse_root_y = ev.root_y
+    g_wm.mouse_start = cl.FloatingRect
+    if cl.Floating {
+        if g_wm.mouse_decoration_tile_drag {
+            ui.Update_Drop(&g_wm.ui, g_wm.m, cl, i32(ev.root_x), i32(ev.root_y))
+        }
+        return
+    }
+    g_wm.mouse_tiled_drag = true
+    // The decoration renderer adds its own titlebar around this preview.
+    show_tiled_drag_preview(cl, i32(ev.root_x), i32(ev.root_y))
+    raise_focused()
+    if g_wm.mouse_decoration_tile_drag {
+        ui.Update_Drop(&g_wm.ui, g_wm.m, cl, i32(ev.root_x), i32(ev.root_y))
+    }
+}
+
+decoration_button_press :: proc(cl: ^c.Client, ev: ^x11.Button_Press_Event) {
+    if cl == nil || ev.detail != 1 || !on_current_ws(cl) { return }
+    old := g_wm.m.Focused
+    if old != cl {
+        c.Focus_Client(g_wm.m, cl)
+        reflow_immediate()
+        ipc_broadcast_focus_change(old, cl)
+    }
+    frame := c.Decoration_Layout_Frame_Rect(cl.Geom, g_wm.m.Cfg.BorderWidth)
+    hit := c.Decoration_Hit_Test(frame.W, frame.H, i32(ev.event_x), i32(ev.event_y), g_wm.m.Cfg.Decoration)
+    switch hit {
+    case .Close:
+        close_client(cl)
+    case .Maximize:
+        toggle_client_maximized(cl)
+    case .Minimize:
+        decoration_stash_client(cl)
+    case .Title:
+        decoration_begin_drag(cl, ev)
+    case .Resize_Top, .Resize_Bottom, .Resize_Left, .Resize_Right,
+         .Resize_Top_Left, .Resize_Top_Right, .Resize_Bottom_Left, .Resize_Bottom_Right:
+        if cl.Floating && !cl.Maximized {
+            g_wm.mouse_client = cl
+            g_wm.mouse_resize = true
+            g_wm.mouse_resize_hit = hit
+            g_wm.mouse_root_x = ev.root_x
+            g_wm.mouse_root_y = ev.root_y
+            g_wm.mouse_start = cl.FloatingRect
+        } else if !cl.Floating {
+            begin_tiled_resize(cl, i32(ev.root_x), i32(ev.root_y))
+        }
+    case .None:
+    }
+}
+
 on_button_press :: proc(ev: ^x11.Button_Press_Event) {
     if field, ok := ui.Reminder_Input_At_Window(&g_wm.ui, ev.event); ok {
         ui.Set_Reminder_Field(&g_wm.ui, g_wm.m, field)
@@ -1167,6 +1279,10 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
     }
     if ev.event == g_wm.ui.NoticeWindow {
         ui.Hide_Notice(&g_wm.ui)
+        return
+    }
+    if cl := ui.Decoration_Client(&g_wm.ui, ev.event); cl != nil {
+        decoration_button_press(cl, ev)
         return
     }
     clean := ev.state & ~(g_wm.lock | g_wm.numlock)
@@ -1252,6 +1368,7 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
     if floating_drag || tiled_drag {
         g_wm.mouse_client = cl
         g_wm.mouse_resize = floating_drag && ev.detail == 3
+        if g_wm.mouse_resize { g_wm.mouse_resize_hit = .Resize_Bottom_Right }
         g_wm.mouse_tiled_drag = tiled_drag
         g_wm.mouse_tabbed_drag = tabbed_drag
         g_wm.mouse_root_x = ev.root_x
@@ -1262,6 +1379,10 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
             raise_focused()
             if tabbed_drag {
                 ui.Update_Tabbed_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+            } else if g_wm.mouse_decoration_drag {
+                if g_wm.mouse_decoration_tile_drag {
+                    ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+                }
             } else {
                 ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
             }
@@ -1276,6 +1397,10 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
 on_motion :: proc(ev: ^x11.Motion_Notify_Event) {
     cl := g_wm.mouse_client
     if cl == nil {
+        if ui.Decoration_Client(&g_wm.ui, ev.event) != nil {
+            ui.Update_Decoration_Cursor(&g_wm.ui, g_wm.m, ev.event, i32(ev.event_x), i32(ev.event_y))
+            return
+        }
         scroll_preview_hover(i32(ev.root_x), i32(ev.root_y))
         return
     }
@@ -1292,6 +1417,10 @@ on_motion :: proc(ev: ^x11.Motion_Notify_Event) {
             show_tiled_drag_preview(cl, i32(ev.root_x), i32(ev.root_y))
             if g_wm.mouse_tabbed_drag {
                 ui.Update_Tabbed_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+            } else if g_wm.mouse_decoration_drag {
+                if g_wm.mouse_decoration_tile_drag {
+                    ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+                }
             } else {
                 ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
             }
@@ -1315,15 +1444,73 @@ on_motion :: proc(ev: ^x11.Motion_Notify_Event) {
     dy := i32(ev.root_y - g_wm.mouse_root_y)
     r := g_wm.mouse_start
     if g_wm.mouse_resize {
-        r.W = max(i32(80), r.W + dx)
-        r.H = max(i32(60), r.H + dy)
+        hit := g_wm.mouse_resize_hit
+        left := hit == .Resize_Left || hit == .Resize_Top_Left || hit == .Resize_Bottom_Left
+        right := hit == .Resize_Right || hit == .Resize_Top_Right || hit == .Resize_Bottom_Right
+        top := hit == .Resize_Top || hit == .Resize_Top_Left || hit == .Resize_Top_Right
+        bottom := hit == .Resize_Bottom || hit == .Resize_Bottom_Left || hit == .Resize_Bottom_Right
+        old_right, old_bottom := r.X+r.W, r.Y+r.H
+        if left { r.X += dx; r.W -= dx }
+        if right { r.W += dx }
+        if top { r.Y += dy; r.H -= dy }
+        if bottom { r.H += dy }
+        r.W = max(i32(80), r.W)
+        r.H = max(i32(60), r.H)
+        r = constrain_floating_rect(cl, r)
+        if left { r.X = old_right-r.W }
+        if top { r.Y = old_bottom-r.H }
     } else {
         r.X += dx
         r.Y += dy
     }
-    if g_wm.mouse_resize { r = constrain_floating_rect(cl, r) }
+    if g_wm.mouse_resize && g_wm.mouse_resize_hit == .None { r = constrain_floating_rect(cl, r) }
     cl.FloatingRect = r
     reflow_immediate()
+    if g_wm.mouse_decoration_drag && g_wm.mouse_decoration_tile_drag && !g_wm.mouse_resize {
+        ui.Update_Drop(&g_wm.ui, g_wm.m, cl, i32(ev.root_x), i32(ev.root_y))
+    }
+}
+
+decoration_float_tiled_drag :: proc(cl: ^c.Client, root_x, root_y: i32) {
+    if cl == nil || cl.Floating { return }
+    old_output, old_ws := cl.Out, cl.Ws
+    c.Set_Floating(g_wm.m, cl, true)
+    output := c.Output_At_Point(g_wm.m, root_x, root_y)
+    c.Move_Floating_To_Output(g_wm.m, cl, output)
+    // The 300px tiled-drag preview is only a gesture affordance. Undocking
+    // uses the client's remembered floating size, or Set_Floating's normal
+    // ~60% default, and places that useful-sized window under the pointer.
+    r := cl.FloatingRect
+    r.X = root_x - r.W / 2
+    r.Y = root_y - g_wm.m.Cfg.Decoration.TitlebarHeight / 2
+    cl.FloatingRect = constrain_floating_rect(cl, r)
+    reflow()
+    raise_focused()
+    if cl.Out != old_output {
+        ipc_broadcast_output_event("focus", cl.Out.Name)
+        ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, cl.Ws, old_ws)
+    }
+    ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
+}
+
+decoration_tile_floating_drag :: proc(cl: ^c.Client, target: c.Drop_Target) -> bool {
+    if cl == nil || !cl.Floating || target.Kind == .None { return false }
+    saved := cl.FloatingRect
+    old_output, old_ws := cl.Out, cl.Ws
+    c.Set_Floating(g_wm.m, cl, false)
+    if !c.Move_Client_To_Drop(g_wm.m, cl, target) {
+        c.Set_Floating(g_wm.m, cl, true)
+        cl.FloatingRect = saved
+        return false
+    }
+    reflow()
+    raise_focused()
+    if cl.Out != old_output {
+        ipc_broadcast_output_event("focus", cl.Out.Name)
+        ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, cl.Ws, old_ws)
+    }
+    ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
+    return true
 }
 
 on_button_release :: proc(ev: ^x11.Button_Press_Event) {
@@ -1338,9 +1525,9 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
             moved = c.Move_Tabbed_Column_To_Drop(g_wm.m, cl, target)
         } else if g_wm.mouse_tabbed_drag {
             moved = c.Move_Client_To_Tabbed_Drop(g_wm.m, cl, target)
-        } else {
-            // Re-resolve directional targets at release to retain hysteresis
-            // when the final motion event arrived just before the button event.
+        } else if !g_wm.mouse_decoration_drag || g_wm.mouse_decoration_tile_drag {
+            // Re-resolve the destination at release in case the final motion
+            // event arrived just before the button event.
             target = c.Drop_Target_At_Point(
                 g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, target,
             )
@@ -1354,6 +1541,13 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
             reflow()
             raise_focused()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
+        } else if g_wm.mouse_decoration_drag && !g_wm.mouse_decoration_tile_drag &&
+                  !g_wm.mouse_column_drag && !g_wm.mouse_tabbed_drag {
+            decoration_float_tiled_drag(cl, i32(ev.root_x), i32(ev.root_y))
+        } else if g_wm.mouse_decoration_drag && g_wm.mouse_decoration_tile_drag {
+            // An Alt decoration drag with no valid destination is cancelled,
+            // matching the normal modified tiled-drag behavior.
+            reflow()
         } else if g_wm.mouse_column_drag {
             // Restore both the client and its WM-owned header strip when the
             // group was released without a valid destination.
@@ -1361,6 +1555,15 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
         }
     } else if g_wm.mouse_tiled_drag {
         ui.Hide_Drop(&g_wm.ui)
+    } else if cl != nil && g_wm.mouse_decoration_drag && cl.Floating && !g_wm.mouse_resize {
+        target := g_wm.ui.DropTarget
+        ui.Hide_Drop(&g_wm.ui)
+        if g_wm.mouse_decoration_tile_drag {
+            target = c.Drop_Target_At_Point(
+                g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, target,
+            )
+            decoration_tile_floating_drag(cl, target)
+        }
     } else if cl != nil && g_wm.tiled_resize.Active {
         ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
     }
@@ -1369,12 +1572,16 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
 
 cancel_pointer_operation :: proc() {
     if g_wm.mouse_client != nil { x11.xcb_ungrab_pointer(g_wm.conn, x11.CURRENT_TIME) }
-    if g_wm.mouse_tiled_drag { ui.Hide_Drop(&g_wm.ui) }
+    if g_wm.mouse_tiled_drag || g_wm.mouse_decoration_drag { ui.Hide_Drop(&g_wm.ui) }
     g_wm.mouse_client = nil
     g_wm.mouse_resize = false
+    g_wm.mouse_resize_hit = .None
     g_wm.mouse_tiled_drag = false
     g_wm.mouse_tabbed_drag = false
     g_wm.mouse_column_drag = false
+    g_wm.mouse_decoration_drag = false
+    g_wm.mouse_decoration_tile_drag = false
+    g_wm.mouse_preview = {}
     g_wm.tiled_resize = {}
 }
 
@@ -1428,11 +1635,14 @@ apply_float_configure :: proc(cl: ^c.Client, ev: ^x11.Configure_Request_Event) {
     // configures itself to 0x0.
     if ev.width == 0 || ev.height == 0 { return }
     r := cl.FloatingRect
+    decorated := cl.Decorated && cl.DecorationFrame != 0 && !cl.Fullscreen && !cl.Dock
+    if decorated { r = c.Decoration_Client_Rect(r, g_wm.m.Cfg.Decoration) }
     mask := u32(ev.value_mask)
     if mask & x11.CW_X != 0 { r.X = i32(ev.x) }
     if mask & x11.CW_Y != 0 { r.Y = i32(ev.y) }
     if mask & x11.CW_WIDTH != 0 { r.W = i32(ev.width) }
     if mask & x11.CW_HEIGHT != 0 { r.H = i32(ev.height) }
+    if decorated { r = c.Decoration_Frame_Rect(r, g_wm.m.Cfg.Decoration) }
     if !cl.Dock { r = constrain_floating_rect(cl, r) }
     cl.FloatingRect = r
     if cl.Dock && cl.Out != nil {
@@ -1458,6 +1668,7 @@ on_property_notify :: proc(ev: ^x11.Property_Notify_Event) {
             ipc_broadcast_window_event(c.IPC_WINDOW_TITLE, cl)
             if old != "" { delete(old) }
             ui.Render_Tabs(&g_wm.ui, g_wm.m)
+            if cl.DecorationFrame != 0 { ui.Draw_Decoration(&g_wm.ui, g_wm.m, cl.DecorationFrame) }
             x11.xcb_flush(g_wm.conn)
         } else if fresh != "" {
             delete(fresh)
