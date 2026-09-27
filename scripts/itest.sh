@@ -808,7 +808,7 @@ fi
 # ------------------------------------------------------------------------------
 # ---- 13. docks and struts ------------------------------------------------------
 # An EWMH dock (panel) window fabricated with python-xlib (scripts/xdock.py):
-# classified by _NET_WM_WINDOW_TYPE, never focused, visible on every workspace,
+# classified by _NET_WM_WINDOW_TYPE, never pointer-focused, visible on every workspace,
 # stacked above ordinary windows but below fullscreen, and its _NET_WM_STRUT_PARTIAL
 # shrinks the tiling work area live. Work-area numbers below assume the built-in
 # defaults (outer 8 / border 2): baseline client 1260x780+10+10; a 24 px top
@@ -840,7 +840,7 @@ tree_pos() { xwininfo -root -tree 2>/dev/null | grep -n "$1" | head -1 | cut -d:
 
 DOCK_DIR="${TMPDIR:-/tmp}/skarwm_itest_dock"
 rm -rf "$DOCK_DIR"; mkdir -p "$DOCK_DIR"; mkfifo "$DOCK_DIR/ctl"
-python3 scripts/xdock.py --ctl "$DOCK_DIR/ctl" --id-file "$DOCK_DIR/id" new --top 24 >"$DOCK_DIR/log" 2>&1 &
+python3 scripts/xdock.py --ctl "$DOCK_DIR/ctl" --id-file "$DOCK_DIR/id" new --top 24 --focusable >"$DOCK_DIR/log" 2>&1 &
 dock_pid=$!
 exec 9>"$DOCK_DIR/ctl"   # hold the write end: the keeper exits when we close it
 
@@ -889,6 +889,19 @@ else
   fail "dock: focus stolen by hover (focused=$f)"
 fi
 xdotool mousemove 640 795 >/dev/null 2>&1; sleep 0.3
+
+# A dock remains excluded from pointer focus, but an interactive shell panel
+# that explicitly advertises InputHint=true may request keyboard activation.
+xdotool windowactivate "$DOCK" >/dev/null 2>&1
+if wait_focus "$(printf '%d' "$DOCK")"; then
+  pass "dock: explicit activation focuses an input-capable panel"
+else
+  fail "dock: input-capable panel activation was ignored"
+fi
+xdotool windowactivate "$xt" >/dev/null 2>&1
+if ! wait_focus "$(printf '%d' "$xt")"; then
+  fail "dock: could not restore normal client focus"
+fi
 
 # workarea root property mirrors the current work rect (one desktop so far)
 if wait_xp "8, 32, 1264, 760" -root _NET_WORKAREA; then

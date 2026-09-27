@@ -373,7 +373,11 @@ ewmh_on_client_message :: proc(ev: ^x11.Client_Message_Event) {
             cl = m.ByXid[target]
         }
         if cl != nil {
-            ewmh_activate(cl)
+            if cl.Dock {
+                ewmh_activate_focusable_dock(cl)
+            } else {
+                ewmh_activate(cl)
+            }
         } else {
             ewmh_activate_popup(target)
         }
@@ -421,6 +425,37 @@ ewmh_activate_popup :: proc(xid: u32) {
     }
     x11.xcb_set_input_focus(g_wm.conn, x11.INPUT_FOCUS_POINTER_ROOT, xid, x11.CURRENT_TIME)
     x11.xcb_flush(g_wm.conn)
+}
+
+// Most docks are passive bars and must never take keyboard focus. Interactive
+// shell panels are the exception: Qt marks PanelWindow { focusable: true } with
+// an explicit, true ICCCM WM_HINTS input field and sends _NET_ACTIVE_WINDOW
+// when requestActivate() is called. Honour only that opt-in form.
+ewmh_activate_focusable_dock :: proc(cl: ^c.Client) {
+    if cl == nil || !cl.Dock || !cl.Mapped || !dock_accepts_input(cl.Xid) {
+        return
+    }
+    x11.xcb_set_input_focus(
+        g_wm.conn,
+        x11.INPUT_FOCUS_POINTER_ROOT,
+        cl.Xid,
+        x11.CURRENT_TIME,
+    )
+    ewmh_announce_take_focus(cl)
+    x11.xcb_flush(g_wm.conn)
+}
+
+// ICCCM WM_HINTS consists of 32-bit fields: flags followed by input. Require
+// InputHint itself as well as a true input value so a plain bar with no hint
+// cannot become focusable merely by sending an activation request.
+dock_accepts_input :: proc(xid: u32) -> bool {
+    data, ok := x11.get_prop(g_wm.conn, xid, atom("WM_HINTS"), 0)
+    if !ok { return false }
+    defer delete(data)
+    if len(data) < 8 { return false }
+    values := ([^]u32)(raw_data(data))[:len(data) / 4]
+    input_hint := u32(1 << 0)
+    return values[0] & input_hint != 0 && values[1] != 0
 }
 
 // ewmh_state_request applies fullscreen and paired maximize requests. Maximize
