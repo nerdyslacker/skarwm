@@ -386,6 +386,10 @@ Rectangle :: struct {
     width, height: u16,
 }
 
+Segment :: struct {
+    x1, y1, x2, y2: i16,
+}
+
 // -- ABI guards ------------------------------------------------------------
 
 #assert(size_of(Screen) == 40)
@@ -420,6 +424,7 @@ Rectangle :: struct {
 #assert(size_of(Grab_Keyboard_Reply) == 32)
 #assert(size_of(Event_Header) == 4)
 #assert(size_of(Rectangle) == 8)
+#assert(size_of(Segment) == 8)
 #assert(offset_of(Get_Property_Reply, type_) == 8)
 #assert(offset_of(Get_Property_Reply, value_len) == 16)
 #assert(offset_of(Query_Tree_Reply, children_len) == 16)
@@ -638,6 +643,12 @@ foreign xcb {
     xcb_change_save_set :: proc(c: ^Connection, mode: u8, window: u32) -> Cookie ---
     xcb_configure_window :: proc(c: ^Connection, window: u32, value_mask: u32, value_list: ^u32) -> Cookie ---
     xcb_clear_area :: proc(c: ^Connection, exposures: u8, window: u32, x, y: i16, width, height: u16) -> Cookie ---
+    xcb_create_glyph_cursor :: proc(
+        c: ^Connection, cid, source_font, mask_font: u32,
+        source_char, mask_char, fore_red, fore_green, fore_blue,
+        back_red, back_green, back_blue: u16,
+    ) -> Cookie ---
+    xcb_free_cursor :: proc(c: ^Connection, cursor: u32) -> Cookie ---
 
     xcb_open_font :: proc(c: ^Connection, fid: u32, name_len: u16, name: cstring) -> Cookie ---
     xcb_open_font_checked :: proc(c: ^Connection, fid: u32, name_len: u16, name: cstring) -> Cookie ---
@@ -648,6 +659,7 @@ foreign xcb {
     xcb_free_gc :: proc(c: ^Connection, gc: u32) -> Cookie ---
     xcb_image_text_8 :: proc(c: ^Connection, string_len: u8, drawable, gc: u32, x, y: i16, string: cstring) -> Cookie ---
     xcb_poly_fill_rectangle :: proc(c: ^Connection, drawable, gc: u32, rectangles_len: u32, rectangles: ^Rectangle) -> Cookie ---
+    xcb_poly_segment :: proc(c: ^Connection, drawable, gc: u32, segments_len: u32, segments: ^Segment) -> Cookie ---
 
     xcb_set_input_focus :: proc(c: ^Connection, revert_to: u8, focus: u32, time: u32) -> Cookie ---
     xcb_grab_server   :: proc(c: ^Connection) -> Cookie ---

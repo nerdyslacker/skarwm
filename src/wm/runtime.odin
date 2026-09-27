@@ -137,6 +137,7 @@ cleanup_all :: proc() {
     ui.Hide_Notice(&g_wm.ui)
     reminder_destroy_all()
     ui.Shutdown_Reminder_Panel(&g_wm.ui)
+    ui.Shutdown_Decorations(&g_wm.ui)
     ui.Shutdown_Tabs(&g_wm.ui)
     release_bindings(&g_wm.bindings)
     release_rules(&g_wm.rules)
@@ -363,6 +364,8 @@ handle_event :: proc(ev: ^x11.Event) {
             ui.Draw_Notice(&g_wm.ui, g_wm.m)
         } else if ui.Is_Reminder_Panel_Window(&g_wm.ui, xid) {
             ui.Draw_Reminder_Panel(&g_wm.ui, g_wm.m)
+        } else if ui.Decoration_Client(&g_wm.ui, xid) != nil {
+            ui.Draw_Decoration(&g_wm.ui, g_wm.m, xid)
         } else {
             ui.Draw_Tab(&g_wm.ui, xid)
         }

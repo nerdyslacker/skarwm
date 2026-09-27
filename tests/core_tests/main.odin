@@ -39,6 +39,7 @@ GEOM :: c.Rect{X = 0, Y = 0, W = 1920, H = 1080}
 
 main :: proc() {
     test_config()
+    test_decoration()
     test_animation_math()
     test_resize_math()
     test_workspaces()
@@ -85,6 +86,36 @@ main :: proc() {
         fmt.eprintln("UNIT TESTS FAILED")
         os.exit(1)
     }
+}
+
+test_decoration :: proc() {
+    cfg := c.Default_Decoration_Config()
+    ok(!cfg.Enabled, "native decorations are opt-in")
+    client := c.Rect{X = 100, Y = 80, W = 640, H = 480}
+    frame := c.Decoration_Frame_Rect(client, cfg)
+    eq(frame, c.Rect{X = 96, Y = 59, W = 648, H = 505}, "client-to-frame geometry includes titlebar and resize gutter")
+    eq(c.Decoration_Client_Rect(frame, cfg), client, "frame/client geometry round trips")
+    eq(c.Decoration_Layout_Frame_Rect(client, 2), c.Rect{X = 98, Y = 78, W = 644, H = 484},
+       "decoration frame consumes the existing reserved-border tile")
+
+    eq(c.Decoration_Hit_Test(frame.W, frame.H, 0, 0, cfg), c.Decoration_Hit.Resize_Top_Left, "top-left resize target")
+    eq(c.Decoration_Hit_Test(frame.W, frame.H, frame.W-1, frame.H-1, cfg), c.Decoration_Hit.Resize_Bottom_Right, "bottom-right resize target")
+    eq(c.Decoration_Hit_Test(frame.W, frame.H, frame.W-10, 15, cfg), c.Decoration_Hit.Close, "close button target")
+    eq(c.Decoration_Hit_Test(frame.W, frame.H, frame.W-40, 15, cfg), c.Decoration_Hit.Maximize, "maximize button target")
+    eq(c.Decoration_Hit_Test(frame.W, frame.H, frame.W-50, 10, cfg), c.Decoration_Hit.Minimize, "minimize button target")
+    eq(c.Decoration_Hit_Test(frame.W, frame.H, 100, 15, cfg), c.Decoration_Hit.Title, "title drag target")
+    eq(c.Decoration_Hit_Test(frame.W, frame.H, 100, 100, cfg), c.Decoration_Hit.None, "client area is not a decoration target")
+
+    active := c.Resolve_Decoration_Colors(cfg, 0x112233, 0x445566, true)
+    inactive := c.Resolve_Decoration_Colors(cfg, 0x112233, 0x445566, false)
+    eq(active.Border, u32(0x112233), "active-border source follows focused border")
+    eq(inactive.Border, u32(0x445566), "active-border source follows unfocused border")
+    eq(c.Decoration_Contrast_Foreground(0xFCE8C3), u32(0x181818), "bright decoration colors use dark text and icons")
+    eq(c.Decoration_Contrast_Foreground(0x181818), u32(0xF2F2F2), "dark decoration colors use light text and icons")
+    cfg.ColorSource = .Explicit
+    eq(c.Resolve_Decoration_Colors(cfg, 0, 0, true).Background, cfg.ActiveBackground, "explicit source uses active background")
+    cfg.ColorSource = .Accent
+    eq(c.Resolve_Decoration_Colors(cfg, 0, 0, true).Border, cfg.Accent, "accent source uses accent border")
 }
 
 // ----------------------------------------------------------------------------
@@ -696,6 +727,16 @@ test_pointer_column_move :: proc() {
     right_neighbor := add_tiled(m, 201)
     c.Focus_Client(m, target)
     c.Arrange_All(m)
+
+    decoration_center := c.Edge_Drop_Target_At_Point(
+        m, right.Geom.X + right.Geom.W/2, right.Geom.Y + right.Geom.H/2, target,
+    )
+    eq(decoration_center.Kind, c.Drop_Kind.None, "decoration drag center leaves a tiled window undocked")
+    decoration_top := c.Edge_Drop_Target_At_Point(
+        m, right.Geom.X + right.Geom.W/2, right.Geom.Y + 10, target,
+    )
+    _, target_col, _ := c.Column_Of(target)
+    ok(decoration_top.Col != target_col, "edge target excludes the dragged source column")
 
     center := c.Drop_Target_At_Point(m, right.Geom.X + right.Geom.W / 2, right.Geom.Y + right.Geom.H / 2)
     eq(center.Kind, c.Drop_Kind.None, "drag center has no active drop zone")
@@ -1681,6 +1722,13 @@ test_scratchpads :: proc() {
     ok(count == 1 && changed && b.Stashed, "metadata target stashes exact matches")
     count, changed = c.Scratchpad_Toggle_Target(m, .AppId, "Term")
     ok(count == 1 && changed && !b.Stashed, "appid target summons class/instance match")
+
+    c.Focus_Client(m, a)
+    auto_register, auto_stashed := c.Scratchpad_Stash_Client(m, a)
+    ok(auto_stashed && auto_register == 1, "decoration minimize assigns the first free scratchpad register")
+    ok(a.Stashed && a.Ws == nil, "decoration scratchpad path uses normal stash lifecycle")
+    ok(c.Scratchpad_Toggle_Register(m, auto_register), "auto-assigned register restores through normal toggle")
+    ok(!a.Stashed && a.Ws == c.Current_WS(m), "auto-stashed client restores to the active workspace")
 
     c.Unmanage_Client(m, b)
     _, registered = c.Scratchpad_Register_Of(m, b)

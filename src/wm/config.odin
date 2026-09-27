@@ -84,8 +84,10 @@ Raw_Rule :: struct {
     class, instance, title: string,
     ws:                 int,
     floating:           bool,
+    decorate:           bool,
     ws_set:             bool,
     floating_set:       bool,
+    decorate_set:       bool,
 }
 
 Bar_Block_Kind :: enum u8 { Workspaces, Script, Systray }
@@ -133,6 +135,7 @@ Load_Scratch :: struct {
     animation_duration_ms, animation_fps: i32,
     animation_easing: c.Animation_Easing,
     focused, unfocused: u32,
+    decoration: c.Decoration_Config,
     bar_enabled: bool,
     bar_position: c.Bar_Position,
     bar_height, bar_tag_count, bar_font_size: i32,
@@ -144,6 +147,13 @@ Load_Scratch :: struct {
     gap_set, outer_set, inner_set, border_set, corner_radius_set, ffm_set: bool,
     animations_set, animation_duration_set, animation_fps_set, animation_easing_set: bool,
     focused_set, unfocused_set: bool,
+    decoration_enabled_set, decoration_titlebar_height_set: bool,
+    decoration_border_width_set, decoration_resize_hit_width_set: bool,
+    decoration_show_title_set, decoration_color_source_set: bool,
+    decoration_accent_set, decoration_active_background_set: bool,
+    decoration_inactive_background_set, decoration_active_foreground_set: bool,
+    decoration_inactive_foreground_set, decoration_active_border_set: bool,
+    decoration_inactive_border_set: bool,
     bar_enabled_set, bar_position_set, bar_height_set, bar_tag_count_set: bool,
     bar_font_set, bar_font_size_set, bar_font_weight_set: bool,
     bar_foreground_set, bar_background_set: bool,
@@ -532,6 +542,19 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.animation_easing_set { r.cfg.AnimationEasing = sc.animation_easing }
     if sc.focused_set { r.cfg.FocusedBorder = sc.focused }
     if sc.unfocused_set { r.cfg.UnfocusedBorder = sc.unfocused }
+    if sc.decoration_enabled_set { r.cfg.Decoration.Enabled = sc.decoration.Enabled }
+    if sc.decoration_titlebar_height_set { r.cfg.Decoration.TitlebarHeight = sc.decoration.TitlebarHeight }
+    if sc.decoration_border_width_set { r.cfg.Decoration.BorderWidth = sc.decoration.BorderWidth }
+    if sc.decoration_resize_hit_width_set { r.cfg.Decoration.ResizeHitWidth = sc.decoration.ResizeHitWidth }
+    if sc.decoration_show_title_set { r.cfg.Decoration.ShowTitle = sc.decoration.ShowTitle }
+    if sc.decoration_color_source_set { r.cfg.Decoration.ColorSource = sc.decoration.ColorSource }
+    if sc.decoration_accent_set { r.cfg.Decoration.Accent = sc.decoration.Accent }
+    if sc.decoration_active_background_set { r.cfg.Decoration.ActiveBackground = sc.decoration.ActiveBackground }
+    if sc.decoration_inactive_background_set { r.cfg.Decoration.InactiveBackground = sc.decoration.InactiveBackground }
+    if sc.decoration_active_foreground_set { r.cfg.Decoration.ActiveForeground = sc.decoration.ActiveForeground }
+    if sc.decoration_inactive_foreground_set { r.cfg.Decoration.InactiveForeground = sc.decoration.InactiveForeground }
+    if sc.decoration_active_border_set { r.cfg.Decoration.ActiveBorder = sc.decoration.ActiveBorder }
+    if sc.decoration_inactive_border_set { r.cfg.Decoration.InactiveBorder = sc.decoration.InactiveBorder }
     if sc.bar_enabled_set { r.cfg.BarEnabled = sc.bar_enabled }
     if sc.bar_position_set { r.cfg.BarPosition = sc.bar_position }
     if sc.bar_height_set { r.cfg.BarHeight = sc.bar_height }
@@ -676,6 +699,56 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         v, ok := parse_color(value)
         if !ok { append(errs, fmt.aprintf("norm_outer_border: expected #RRGGBB, got %q", value)); return false }
         sc.unfocused = v; sc.unfocused_set = true
+        return true
+
+    case "decorations_enabled":
+        v, ok := parse_bool_value(value)
+        if !ok { append(errs, fmt.aprintf("decorations_enabled: expected true/false, got %q", value)); return false }
+        sc.decoration.Enabled = v; sc.decoration_enabled_set = true
+        return true
+    case "decoration_titlebar_height", "titlebar_height":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 16 || n > 128 { append(errs, fmt.aprintf("decoration_titlebar_height: expected 16..128, got %q", value)); return false }
+        sc.decoration.TitlebarHeight = n; sc.decoration_titlebar_height_set = true
+        return true
+    case "decoration_border_width":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 0 || n > 32 { append(errs, fmt.aprintf("decoration_border_width: expected 0..32, got %q", value)); return false }
+        sc.decoration.BorderWidth = n; sc.decoration_border_width_set = true
+        return true
+    case "decoration_resize_hit_width":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 1 || n > 32 { append(errs, fmt.aprintf("decoration_resize_hit_width: expected 1..32, got %q", value)); return false }
+        sc.decoration.ResizeHitWidth = n; sc.decoration_resize_hit_width_set = true
+        return true
+    case "decoration_show_title":
+        v, ok := parse_bool_value(value)
+        if !ok { append(errs, fmt.aprintf("decoration_show_title: expected true/false, got %q", value)); return false }
+        sc.decoration.ShowTitle = v; sc.decoration_show_title_set = true
+        return true
+    case "decoration_color_source":
+        switch quoted_trim(value) {
+        case "active-border", "active_border": sc.decoration.ColorSource = .Active_Border
+        case "accent": sc.decoration.ColorSource = .Accent
+        case "explicit": sc.decoration.ColorSource = .Explicit
+        case: append(errs, fmt.aprintf("decoration_color_source: expected active-border/accent/explicit, got %q", value)); return false
+        }
+        sc.decoration_color_source_set = true
+        return true
+    case "decoration_accent", "decoration_active_background", "decoration_inactive_background",
+         "decoration_active_foreground", "decoration_inactive_foreground",
+         "decoration_active_border", "decoration_inactive_border":
+        v, ok := parse_color(value)
+        if !ok { append(errs, fmt.aprintf("%s: expected #RRGGBB, got %q", key, value)); return false }
+        switch key {
+        case "decoration_accent": sc.decoration.Accent = v; sc.decoration_accent_set = true
+        case "decoration_active_background": sc.decoration.ActiveBackground = v; sc.decoration_active_background_set = true
+        case "decoration_inactive_background": sc.decoration.InactiveBackground = v; sc.decoration_inactive_background_set = true
+        case "decoration_active_foreground": sc.decoration.ActiveForeground = v; sc.decoration_active_foreground_set = true
+        case "decoration_inactive_foreground": sc.decoration.InactiveForeground = v; sc.decoration_inactive_foreground_set = true
+        case "decoration_active_border": sc.decoration.ActiveBorder = v; sc.decoration_active_border_set = true
+        case "decoration_inactive_border": sc.decoration.InactiveBorder = v; sc.decoration_inactive_border_set = true
+        }
         return true
 
     case "focus_follows_mouse":
@@ -1070,8 +1143,15 @@ parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]st
                     if toks[i] == "true" { i += 1 }
                     else if toks[i] == "false" { rr.floating = false; i += 1 }
                 }
+            case "decorate":
+                rr.decorate = true; rr.decorate_set = true
+                i += 1
+                if i < len(toks) {
+                    if toks[i] == "true" { i += 1 }
+                    else if toks[i] == "false" { rr.decorate = false; i += 1 }
+                }
             case:
-                append(errs, fmt.aprintf("rule %q: unknown effect %q (want workspace <N> or floating)", pattern, toks[i]))
+                append(errs, fmt.aprintf("rule %q: unknown effect %q (want workspace <N>, floating, or decorate)", pattern, toks[i]))
                 bad = true
                 i += 1
             }
@@ -1251,6 +1331,10 @@ cfg_apply :: proc(r: ^Config_Result, label: string) {
     release_rules(&g_wm.rules)
     g_wm.rules = r.rules
     r.rules = {}
+    for cl in g_wm.m.Clients {
+        if !cl.Dock { cl.Decorated = decoration_for_client(cl) }
+    }
+    ui.Sync_Decorations(&g_wm.ui, g_wm.m)
 
     release_bar_blocks(&g_wm.bar_blocks)
     g_wm.bar_blocks = r.bar_blocks
@@ -1472,6 +1556,16 @@ rule_matches :: proc(r: Raw_Rule, cl: ^c.Client) -> bool {
     return true
 }
 
+decoration_for_client :: proc(cl: ^c.Client) -> bool {
+    enabled := g_wm.m.Cfg.Decoration.Enabled
+    for r in g_wm.rules {
+        if !rule_matches(r, cl) { continue }
+        if r.decorate_set { enabled = r.decorate }
+        break // all rule effects consistently use the first matching rule
+    }
+    return enabled
+}
+
 // rule_for_client returns the first matching rule's effects. hit is false when
 // no rule matches. A rule that names a workspace sends the window there (the
 // workspace is created on demand if it does not exist yet).
@@ -1482,7 +1576,7 @@ rule_for_client :: proc(cl: ^c.Client) -> (tgt: ^c.Workspace, floating: bool, hi
             tgt = c.Ensure_WS(g_wm.m, r.ws)
         }
         floating = r.floating_set && r.floating
-        hit = r.ws_set || r.floating_set
+        hit = r.ws_set || r.floating_set || r.decorate_set
         return tgt, floating, hit
     }
     return nil, false, false

@@ -77,7 +77,7 @@ if DISPLAY="$nested_display" xwininfo -root >/dev/null 2>&1; then
 fi
 
 printf 'Starting Xephyr on %s (%s mode)\n' "$nested_display" "$mode"
-Xephyr "$nested_display" -screen 1600x900 -ac -br -noreset >"$log_path" 2>&1 &
+Xephyr "$nested_display" -screen 1800x1024 -ac -br -noreset >"$log_path" 2>&1 &
 xephyr_pid=$!
 
 ready=false

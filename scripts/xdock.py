@@ -13,7 +13,7 @@
 #     quit          destroy the window and exit
 #
 # usage:
-#     python3 scripts/xdock.py --ctl FIFO --id-file FILE new --top N
+#     python3 scripts/xdock.py --ctl FIFO --id-file FILE new --top N [--focusable]
 #
 # Prints the hex window id to --id-file once the window exists. Exits when the
 # FIFO closes or on "quit". It is a test harness, not a skarwm feature, and
@@ -44,13 +44,15 @@ class Dock:
         )
         self.win.set_wm_class(CLS[0], CLS[1])
 
-    def declare(self, width):
+    def declare(self, width, focusable):
         def atom(name):
             return self.dpy.intern_atom(name)
 
         win = self.win
         win.change_property(atom("_NET_WM_WINDOW_TYPE"), atom("ATOM"), 32,
                             [atom("_NET_WM_WINDOW_TYPE_DOCK")])
+        if focusable:
+            win.set_wm_hints(flags=1, input=1)
         # No _NET_WM_DESKTOP on purpose: skarwm never writes one for a dock
         # (Ws == nil), and the test asserts the property stays absent.
         self.set_strut_top(0, width)
@@ -82,11 +84,13 @@ def main():
     ap.add_argument("sub", choices=["new"])
     ap.add_argument("--top", type=int, default=24, metavar="N",
                     help="initial top strut (and window height): N px")
+    ap.add_argument("--focusable", action="store_true",
+                    help="advertise ICCCM InputHint=true")
     args = ap.parse_args()
 
     dpy = display.Display()
     dock = Dock(dpy, args.x, args.y, args.width, args.top)
-    dock.declare(args.width)
+    dock.declare(args.width, args.focusable)
     dock.set_strut_top(args.top, args.width)
     dock.map()
     try:
