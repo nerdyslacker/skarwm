@@ -111,6 +111,11 @@ Virtual_Screen_Profile :: struct {
     offset: i32,
 }
 
+Workspace_Layout_Rule :: struct {
+    workspace: int,
+    layout: c.Workspace_Layout,
+}
+
 // Config_Result is the fully-resolved product of a config load, ready to apply.
 Config_Result :: struct {
     cfg:       c.Config,
@@ -120,6 +125,7 @@ Config_Result :: struct {
     startups:  [dynamic]string,
     bar_blocks: [dynamic]Raw_Bar_Block,
     virtual_screens: [dynamic]Virtual_Screen_Profile,
+    workspace_layouts: [dynamic]Workspace_Layout_Rule,
 }
 
 // Load_Scratch accumulates raw settings + directives while the file is scanned.
@@ -166,6 +172,7 @@ Load_Scratch :: struct {
     bar_blocks: [dynamic]Raw_Bar_Block,
     bar_blocks_set: bool,
     virtual_screens: [dynamic]Virtual_Screen_Profile,
+    workspace_layouts: [dynamic]Workspace_Layout_Rule,
     warned:   [dynamic]string, // unknown settings already warned about
 }
 
@@ -183,6 +190,7 @@ scratch_new :: proc() -> ^Load_Scratch {
     sc.startups = make([dynamic]string, 0, 8)
     sc.bar_blocks = make([dynamic]Raw_Bar_Block, 0, 8)
     sc.virtual_screens = make([dynamic]Virtual_Screen_Profile, 0, 2)
+    sc.workspace_layouts = make([dynamic]Workspace_Layout_Rule, 0, 4)
     sc.warned = make([dynamic]string, 0, 8)
     return sc
 }
@@ -202,6 +210,7 @@ scratch_destroy :: proc(sc: ^Load_Scratch) {
     delete(sc.startups)
     release_bar_blocks(&sc.bar_blocks)
     release_virtual_screens(&sc.virtual_screens)
+    delete(sc.workspace_layouts)
     for w in sc.warned { if w != "" { delete(w) } }
     delete(sc.warned)
     free(sc)
@@ -631,6 +640,8 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
         r.virtual_screens[i] = profile
         r.virtual_screens[i].output = strings.clone(profile.output)
     }
+    r.workspace_layouts = make([dynamic]Workspace_Layout_Rule, len(sc.workspace_layouts))
+    copy(r.workspace_layouts[:], sc.workspace_layouts[:])
     return r
 }
 
@@ -641,6 +652,7 @@ destroy_result :: proc(r: ^Config_Result) {
     delete(r.startups)
     release_bar_blocks(&r.bar_blocks)
     release_virtual_screens(&r.virtual_screens)
+    delete(r.workspace_layouts)
     r^ = {}
 }
 
@@ -1010,10 +1022,58 @@ parse_virtual_screen :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]st
     return true
 }
 
+parse_workspace_layout :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string) -> bool {
+    fields := strings.split(rest, ":")
+    defer delete(fields)
+    if len(fields) != 2 {
+        append(errs, fmt.aprintf(
+            "workspace_layout: expected workspace : layout, got %q", rest,
+        ))
+        return false
+    }
+    workspace_text := strings.trim_space(fields[0])
+    layout_text := strings.trim_space(fields[1])
+    workspace, ok := parse_i32_value(workspace_text)
+    if !ok || workspace < 1 || workspace > c.IPC_MAX_WORKSPACE_ID {
+        append(errs, fmt.aprintf(
+            "workspace_layout: workspace must be 1..%d, got %q",
+            c.IPC_MAX_WORKSPACE_ID, workspace_text,
+        ))
+        return false
+    }
+    layout: c.Workspace_Layout
+    switch layout_text {
+    case "scrolling-tile", "scrolling_tile", "scroller", "scroll": layout = .Scroller
+    case "dwindle", "fibonacci": layout = .Dwindle
+    case "monocle": layout = .Monocle
+    case "floating", "float": layout = .Floating
+    case:
+        append(errs, fmt.aprintf(
+            "workspace_layout(%d): unknown layout %q", workspace, layout_text,
+        ))
+        return false
+    }
+    for rule in sc.workspace_layouts {
+        if rule.workspace == int(workspace) {
+            append(errs, fmt.aprintf(
+                "workspace_layout: duplicate workspace %d", workspace,
+            ))
+            return false
+        }
+    }
+    append(&sc.workspace_layouts, Workspace_Layout_Rule{
+        workspace = int(workspace), layout = layout,
+    })
+    return true
+}
+
 // parse_directive handles bind/call/workspace/rule/autostart/bar_block,
-// virtual_screen, and mousebind lines.
+// virtual_screen, workspace_layout, and mousebind lines.
 parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]string) -> bool {
     switch key {
+    case "workspace_layout", "tag_layout":
+        return parse_workspace_layout(sc, rest, errs)
+
     case "virtual_screen":
         return parse_virtual_screen(sc, rest, errs)
 
@@ -1214,7 +1274,8 @@ scan_rc :: proc(sc: ^Load_Scratch, data: []byte, errs: ^[dynamic]string) -> bool
         rest := strings.trim_space(line[colon + 1:])
 
         switch key {
-        case "bind", "call", "workspace", "rule", "autostart", "bar_block", "virtual_screen", "mousebind":
+        case "bind", "call", "workspace", "workspace_layout", "tag_layout",
+             "rule", "autostart", "bar_block", "virtual_screen", "mousebind":
             if !parse_directive(sc, key, rest, errs) { ok = false }
         case:
             if !parse_setting(sc, key, rest, errs) { ok = false }
@@ -1328,6 +1389,37 @@ apply_virtual_profiles :: proc(next: ^[dynamic]Virtual_Screen_Profile) {
     }
 }
 
+apply_workspace_layout_rules :: proc() {
+    m := g_wm.m
+    if m == nil || len(g_wm.workspace_layouts) == 0 { return }
+    saved_active := m.Active
+    saved_currents := make([]^c.Workspace, len(m.Outputs), context.temp_allocator)
+    for o, i in m.Outputs { saved_currents[i] = o.Current }
+
+    for o, output_index in m.Outputs {
+        m.Active = output_index
+        for rule in g_wm.workspace_layouts {
+            ws := c.Ensure_WS_On_Output(o, rule.workspace)
+            if ws == nil { continue }
+            o.Current = ws
+            m.Focused = ws.Focus
+            _ = c.Set_Workspace_Layout(m, rule.layout)
+        }
+    }
+    for o, i in m.Outputs { o.Current = saved_currents[i] }
+    m.Active = saved_active
+    active := c.Active_Output(m)
+    m.Focused = nil
+    if active != nil && active.Current != nil { m.Focused = active.Current.Focus }
+}
+
+apply_workspace_layout_config :: proc(next: ^[dynamic]Workspace_Layout_Rule) {
+    delete(g_wm.workspace_layouts)
+    g_wm.workspace_layouts = next^
+    next^ = {}
+    apply_workspace_layout_rules()
+}
+
 // cfg_apply swaps the live WM state to r. After this call every heap resource r
 // owned has been moved into the WM or freed, so the caller must not destroy it
 // again.
@@ -1354,6 +1446,7 @@ cfg_apply :: proc(r: ^Config_Result, label: string) {
     r.bar_blocks = {}
 
     apply_virtual_profiles(&r.virtual_screens)
+    apply_workspace_layout_config(&r.workspace_layouts)
 
     // Startup commands run once per command text, so a reload never relaunches
     // programs the running config already started.

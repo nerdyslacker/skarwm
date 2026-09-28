@@ -69,6 +69,7 @@ Wm :: struct {
     bar_managed_started: bool,
     bar_blocks: [dynamic]Raw_Bar_Block,
     virtual_screens: [dynamic]Virtual_Screen_Profile,
+    workspace_layouts: [dynamic]Workspace_Layout_Rule,
 }
 
 g_wm: Wm

@@ -95,6 +95,10 @@ bar_block : systray : right
 # controls the left region and the signed final field nudges the boundary.
 # virtual_screen : DP-1 : split : 75 : -30
 
+# Give individual workspaces/tags a default layout. `tag_layout` is an alias.
+# workspace_layout : 3 : dwindle
+# workspace_layout : 5 : monocle
+
 # ---- launching ----------------------------------------------------------------
 
 # bind: run a shell command. Combo = modifier tokens + one key.

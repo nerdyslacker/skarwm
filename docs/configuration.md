@@ -72,6 +72,7 @@ call : mod + Control + Alt + r : reminder_show_all
 call : mod + Control + Shift + r : reminder_clear_all
 workspace : mod + 1 : view 1
 workspace : mod + Shift + 1 : tag 1
+workspace_layout : 3 : dwindle
 autostart : "xsetroot -solid '#202020'"
 bar_block : workspaces : left
 bar_block : systray : right
@@ -83,6 +84,13 @@ rule : class : Firefox : workspace 3 floating decorate false
 `bind` launches a shell command. `call` invokes a WM action. `workspace view`
 switches workspace and `workspace tag` sends the focused window. `autostart`
 runs once at startup and is not run again by configuration reloads.
+
+`workspace_layout : ID : LAYOUT` gives that workspace/tag a persistent default
+layout on every output. `tag_layout` is an alias. Supported names are
+`scrolling-tile`, `dwindle` (`fibonacci` is an alias), `monocle`, and
+`floating`. Matching workspaces are created and updated when the configuration
+loads or reloads, so windows opened later use the declared layout. A manual
+layout selection may override it until the next reload.
 
 Workspace-wide layout actions are `layout_scrolling_tile`, `layout_dwindle`
 (`layout_fibonacci` is an alias), `layout_monocle`, `layout_floating`, and
