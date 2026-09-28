@@ -14,12 +14,15 @@ usage :: proc() {
     fmt.eprintln("queries: get-workspaces | get-windows | get-outputs | get-version")
     fmt.eprintln("events:  subscribe [workspace] [window] [output]")
     fmt.eprintln("actions: focus DIR | move DIR | workspace N|next|prev | move workspace N")
-    fmt.eprintln("         layout tabbed|stacked|toggle | toggle-tabbed | show-bindings")
+    fmt.eprintln("         layout scrolling-tile|dwindle|monocle|floating|next")
+    fmt.eprintln("         layout tabbed|stacked|toggle | toggle-floating")
+    fmt.eprintln("         switch-layout | toggle-tabbed | show-bindings")
     fmt.eprintln("         reminder add MINUTES MESSAGE")
     fmt.eprintln("         scratchpad toggle|toggle-float|remove N")
     fmt.eprintln("         scratchpad target|target-float FIELD VALUE [--spawn COMMAND]")
     fmt.eprintln("         focus output next|prev | move output next|prev")
     fmt.eprintln("         screen split toggle|enable|disable|resize DELTA|ratio FRACTION")
+    fmt.eprintln("         decorations enable|disable|toggle")
     fmt.eprintln("         close | reload | quit | toggle-floating | toggle-fullscreen")
 }
 

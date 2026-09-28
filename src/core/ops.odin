@@ -193,15 +193,23 @@ fallback_focus_for_ws :: proc(ws: ^Workspace) -> ^Client {
 // first column of an empty workspace) and become focused. Floating windows go
 // to ws.Floaters with a centred default rect.
 Add_Managed :: proc(m: ^Manager, ws: ^Workspace, cl: ^Client, floating: bool, tab_target: ^Client = nil) {
+    workspace_floating := ws != nil && ws.Layout == .Floating
+    layout_floating := workspace_floating && !floating
+    effective_floating := floating || workspace_floating
     cl.Ws = ws
     cl.Out = Output_Of_WS(m, ws)
-    cl.Floating = floating
-    if floating {
+    cl.Floating = effective_floating
+    if effective_floating {
+        cl.LayoutFloating = layout_floating
         cl.FloatingRect = Rect {}
         o := cl.Out
         if o != nil {
             p := compute_params(m.Cfg, o.Geom, 0) // ColW unused for floating
-            cl.FloatingRect = default_float_rect(p, o.Geom)
+            if workspace_floating {
+                cl.FloatingRect = cascaded_float_rect(p, o.Geom, len(ws.Floaters))
+            } else {
+                cl.FloatingRect = default_float_rect(p, o.Geom)
+            }
         } else {
             cl.FloatingRect = Rect { X = 40, Y = 40, W = 640, H = 480 }
         }
@@ -1003,6 +1011,9 @@ Toggle_Maximized :: proc(cl: ^Client) -> bool {
 // being tiled again becomes its own new column to the right of the focus.
 Set_Floating :: proc(m: ^Manager, cl: ^Client, on: bool) {
     if cl == nil || cl.Ws == nil { return }
+    // Direct per-window use takes ownership away from workspace-wide Floating
+    // mode. The global transition marks converted clients again afterwards.
+    cl.LayoutFloating = false
     // Changing layout mode is an explicit replacement for maximize. Restore
     // the saved base state before moving between structural containers.
     if cl.Maximized { Set_Maximized(cl, false) }
@@ -1103,6 +1114,83 @@ Toggle_Column_Layout :: proc(m: ^Manager) -> bool {
     return true
 }
 
+// Set_Workspace_Layout changes every window's workspace-wide presentation.
+// Dwindle and Monocle retain column membership; Floating temporarily converts
+// tiled clients to floaters and restores only those layout-owned floaters to
+// tiling when it ends. The selected mode also governs newly attached windows.
+Set_Workspace_Layout :: proc(m: ^Manager, layout: Workspace_Layout) -> bool {
+    ws := Current_WS(m)
+    if ws == nil { return false }
+    changed := ws.Layout != layout
+    old_layout := ws.Layout
+    ws.Layout = layout
+    ws.ViewportX = 0
+    // Match mango's global set_layout behavior: a new layout replaces
+    // transient fullscreen and maximize overrides.
+    for col in ws.Cols {
+        for cl in col.Wins {
+            if cl.Fullscreen {
+                cl.Fullscreen = false
+                changed = true
+            }
+            if cl.Maximized {
+                Set_Maximized(cl, false)
+                changed = true
+            }
+        }
+    }
+    for cl in ws.Floaters {
+        if cl.Fullscreen {
+            cl.Fullscreen = false
+            changed = true
+        }
+        if cl.Maximized {
+            Set_Maximized(cl, false)
+            changed = true
+        }
+    }
+
+    focused := ws.Focus
+    if layout == .Floating {
+        tiled := workspace_tiled_clients(ws)
+        o := Active_Output(m)
+        p := Layout_Params{}
+        if o != nil { p = compute_params(m.Cfg, o.Geom, 0, o.Reserved) }
+        first_slot := len(ws.Floaters)
+        for cl, i in tiled {
+            if o != nil {
+                cl.FloatingRect = cascaded_float_rect(p, o.Geom, first_slot + i)
+            }
+            Set_Floating(m, cl, true)
+            cl.LayoutFloating = true
+            changed = true
+        }
+        delete(tiled)
+    } else if old_layout == .Floating && layout != .Floating {
+        restore := make([dynamic]^Client, 0, len(ws.Floaters))
+        for cl in ws.Floaters {
+            if cl.LayoutFloating { append(&restore, cl) }
+        }
+        for cl in restore { Set_Floating(m, cl, false) }
+        delete(restore)
+        changed = true
+    }
+    if focused != nil && focused.Ws == ws { Focus_Client(m, focused) }
+    return changed
+}
+
+Cycle_Workspace_Layout :: proc(m: ^Manager) -> bool {
+    ws := Current_WS(m)
+    if ws == nil { return false }
+    switch ws.Layout {
+    case .Scroller: return Set_Workspace_Layout(m, .Dwindle)
+    case .Dwindle:  return Set_Workspace_Layout(m, .Monocle)
+    case .Monocle:  return Set_Workspace_Layout(m, .Floating)
+    case .Floating: return Set_Workspace_Layout(m, .Scroller)
+    }
+    return false
+}
+
 // Scroll_Output_Viewport pans an output's visible workspace one column step.
 // A positive
 // direction reveals content to the right (windows move left); a negative
@@ -1112,7 +1200,7 @@ Scroll_Output_Viewport :: proc(m: ^Manager, o: ^Output, dir: int) -> bool {
     if dir == 0 { return false }
     if o == nil { return false }
     ws := o.Current
-    if ws == nil || len(ws.Cols) == 0 { return false }
+    if ws == nil || ws.Layout != .Scroller || len(ws.Cols) == 0 { return false }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
     sign := i32(dir / abs(dir))
     next := ws.ViewportX
@@ -1253,7 +1341,7 @@ Sync_Focus :: proc(m: ^Manager) {
 // fullscreen focus. Call Arrange_All afterwards.
 Ensure_Active_Focus_Visible :: proc(m: ^Manager) {
     ws := Current_WS(m)
-    if ws == nil || ws.Focus == nil { return }
+    if ws == nil || ws.Layout != .Scroller || ws.Focus == nil { return }
     cl := ws.Focus
     if cl.Floating || cl.Fullscreen { return }
     ci, _, _ := column_of(ws, cl)

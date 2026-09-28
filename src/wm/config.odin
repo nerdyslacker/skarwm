@@ -170,6 +170,7 @@ Load_Scratch :: struct {
 }
 
 g_cfg_flag: string // -c FILE (owned; freed in cleanup_all)
+g_active_config_path: string // successfully loaded absolute path (owned)
 
 // ----------------------------------------------------------------------------
 // Scratch / list helpers
@@ -439,6 +440,18 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
     case "layout_stacked",
          "stacked":          base.action = .Layout_Stacked;    return base, ""
     case "toggle_tabbed":    base.action = .Layout_Toggle;     return base, ""
+    case "layout_scroller", "layout_scroll":
+        base.action = .Layout_Scroller; return base, ""
+    case "layout_scrolling_tile", "layout_scrolling-tile", "scrolling_tile", "scrolling-tile":
+        base.action = .Layout_Scroller; return base, ""
+    case "layout_dwindle", "layout_fibonacci", "dwindle", "fibonacci":
+        base.action = .Layout_Dwindle; return base, ""
+    case "layout_monocle", "monocle":
+        base.action = .Layout_Monocle; return base, ""
+    case "layout_floating", "floating_all":
+        base.action = .Layout_Floating; return base, ""
+    case "layout_next", "switch_layout":
+        base.action = .Layout_Next; return base, ""
     case "overview_next":    base.action = .Overview_Next;     return base, ""
     case "overview_prev":    base.action = .Overview_Prev;     return base, ""
     case "scratchpad_toggle", "scratchpad":
@@ -1453,6 +1466,7 @@ cfg_apply_default :: proc() {
     add_bind_def(sc, "Mod4+space", "togglefloating", "")
     add_bind_def(sc, "Mod4+f", "togglefullscreen", "")
     add_bind_def(sc, "Mod4+t", "toggle_tabbed", "")
+    add_bind_def(sc, "Mod4+g", "layout_next", "")
     add_bind_def(sc, "Mod4+slash", "show_bindings", "")
     add_bind_def(sc, "Mod4+Control+Alt+h", "show_bindings", "")
     add_bind_def(sc, "Mod4+Control+Alt+t", "show_datetime", "")
@@ -1494,6 +1508,10 @@ cfg_apply_default :: proc() {
         destroy_result(&r)
         return
     }
+    if g_active_config_path != "" {
+        delete(g_active_config_path)
+        g_active_config_path = ""
+    }
     cfg_apply(&r, "built-in defaults")
 }
 
@@ -1515,6 +1533,10 @@ load_config_path :: proc(path, verb: string) {
         destroy_result(&r)
         return
     }
+    active_path, path_error := os.get_absolute_path(path, context.allocator)
+    if path_error != nil { active_path = strings.clone(path) }
+    if g_active_config_path != "" { delete(g_active_config_path) }
+    g_active_config_path = active_path
     label := fmt.aprintf("%s from %s", verb, path)
     cfg_apply(&r, label)
     delete(label)

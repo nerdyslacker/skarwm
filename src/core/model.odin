@@ -64,6 +64,10 @@ Client :: struct {
     FloatingRect: Rect,
 
     Floating:   bool, // participates in floating layout (in ws.Floaters)
+    // Set only when workspace-wide Floating mode moved this client out of the
+    // tiled structure. It lets a later workspace layout restore those clients
+    // without disturbing windows the user floated individually.
+    LayoutFloating: bool,
     Fullscreen: bool, // covers the whole output while its workspace is current
     // Maximized is a work-area layout override, distinct from fullscreen and
     // from structural tiled/floating membership.  The restore snapshot lets
@@ -106,6 +110,27 @@ Column_Layout :: enum u8 {
     Tabbed,  // only the focused window occupies the column
 }
 
+// Workspace-wide presentation. Scroller preserves the column strip and its
+// per-column stacked/tabbed grouping. Dwindle and Monocle present those tiled
+// clients without scrolling; Floating changes workspace-managed windows to
+// floating membership until another workspace layout is selected.
+Workspace_Layout :: enum u8 {
+    Scroller,
+    Dwindle,
+    Monocle,
+    Floating,
+}
+
+Workspace_Layout_Name :: proc(layout: Workspace_Layout) -> string {
+    switch layout {
+    case .Scroller: return "scrolling-tile"
+    case .Dwindle:  return "dwindle"
+    case .Monocle:  return "monocle"
+    case .Floating: return "floating"
+    }
+    return "scrolling-tile"
+}
+
 // One group of windows on the horizontal strip. A column is either a vertical
 // stack or a tabbed container; Focus is also the active tab in tabbed mode.
 Column :: struct {
@@ -118,6 +143,7 @@ Column :: struct {
 // A horizontal scrolling workspace.
 Workspace :: struct {
     Id: int,
+    Layout: Workspace_Layout,
     Cols:      [dynamic]^Column,
     Floaters:  [dynamic]^Client,
     Focus:     ^Client, // most recently focused client of this workspace (any kind)

@@ -63,6 +63,7 @@ launch options.
 ```rc
 bind : mod + Return : "xterm"
 call : mod + f : togglefullscreen
+call : mod + g : layout_next
 call : mod + Control + Alt + h : show_bindings
 call : mod + Control + Alt + t : show_datetime
 call : mod + Control + Alt + b : show_battery
@@ -82,6 +83,13 @@ rule : class : Firefox : workspace 3 floating decorate false
 `bind` launches a shell command. `call` invokes a WM action. `workspace view`
 switches workspace and `workspace tag` sends the focused window. `autostart`
 runs once at startup and is not run again by configuration reloads.
+
+Workspace-wide layout actions are `layout_scrolling_tile`, `layout_dwindle`
+(`layout_fibonacci` is an alias), `layout_monocle`, `layout_floating`, and
+`layout_next`. The last one cycles Scrolling Tile → Dwindle/Fibonacci →
+Monocle → Floating and is bound to `Super+g` by the built-in defaults.
+`layout_scroller` remains a compatibility alias. `togglefloating` changes only
+the focused window.
 
 `virtual_screen` declares a horizontal logical split for a named physical
 RandR output. The split is a percentage from 10 through 90; the optional final

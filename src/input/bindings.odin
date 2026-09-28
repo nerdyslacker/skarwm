@@ -11,6 +11,7 @@ Action_Kind :: enum u8 {
     Toggle_Floating,
     Toggle_Fullscreen,
     Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
+    Layout_Scroller, Layout_Dwindle, Layout_Monocle, Layout_Next,
     Overview_Next, Overview_Prev,
     Scratchpad_Toggle, Scratchpad_Toggle_Float, Scratchpad_Remove,
     Show_Bindings,

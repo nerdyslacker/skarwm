@@ -148,6 +148,7 @@ cleanup_all :: proc() {
         delete(g_wm.ran_startups)
     }
     if g_cfg_flag != "" { delete(g_cfg_flag) }
+    if g_active_config_path != "" { delete(g_active_config_path) }
     rendering.Shutdown(&g_wm.rendering)
     if g_wm.m != nil do c.Destroy_Manager(g_wm.m)
     ewmh_free() // destroy the check window, drop EWMH caches

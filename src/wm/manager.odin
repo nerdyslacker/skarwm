@@ -575,7 +575,8 @@ on_keypress :: proc(ev: ^x11.Key_Press_Event) {
             if b.action != .Spawn || b.keycode == 0 { continue }
             if b.effective_mods == base_mods && ev.detail == b.keycode {
                 g_wm.tab_spawn_target = 0
-                if focused := g_wm.m.Focused; focused != nil && !focused.Floating {
+                if focused := g_wm.m.Focused; focused != nil && !focused.Floating &&
+                   focused.Ws != nil && focused.Ws.Layout == .Scroller {
                     if _, col, _ := c.Column_Of(focused); col != nil && col.Layout == .Tabbed {
                         g_wm.tab_spawn_target = focused.Xid
                         g_wm.tab_spawn_started = time.tick_now()
@@ -710,7 +711,7 @@ dispatch_action :: proc(b: ^input.Binding) {
             reflow()
         }
     case .Layout_Floating:
-        if m.Focused != nil && !m.Focused.Floating && c.Toggle_Floating(m) {
+        if c.Set_Workspace_Layout(m, .Floating) {
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
@@ -719,6 +720,7 @@ dispatch_action :: proc(b: ^input.Binding) {
         if m.Focused != nil && m.Focused.Floating {
             changed = c.Toggle_Floating(m)
         }
+        changed = c.Set_Workspace_Layout(m, .Scroller) || changed
         changed = c.Set_Column_Layout(m, .Tabbed) || changed
         if changed {
             reflow()
@@ -729,6 +731,7 @@ dispatch_action :: proc(b: ^input.Binding) {
         if m.Focused != nil && m.Focused.Floating {
             changed = c.Toggle_Floating(m)
         }
+        changed = c.Set_Workspace_Layout(m, .Scroller) || changed
         changed = c.Set_Column_Layout(m, .Stacked) || changed
         if changed {
             reflow()
@@ -736,6 +739,18 @@ dispatch_action :: proc(b: ^input.Binding) {
         }
     case .Layout_Toggle:
         if c.Toggle_Column_Layout(m) {
+            reflow()
+            ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
+        }
+    case .Layout_Scroller, .Layout_Dwindle, .Layout_Monocle, .Layout_Next:
+        changed := false
+        #partial switch b.action {
+        case .Layout_Scroller: changed = c.Set_Workspace_Layout(m, .Scroller)
+        case .Layout_Dwindle:  changed = c.Set_Workspace_Layout(m, .Dwindle)
+        case .Layout_Monocle:  changed = c.Set_Workspace_Layout(m, .Monocle)
+        case .Layout_Next:     changed = c.Cycle_Workspace_Layout(m)
+        }
+        if changed {
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
