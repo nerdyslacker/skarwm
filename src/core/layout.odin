@@ -281,6 +281,7 @@ Scroll_Previews :: proc(m: ^Manager, o: ^Output) -> [dynamic]Scroll_Preview {
     result := make([dynamic]Scroll_Preview, 0, 4)
     if m == nil || o == nil || o.Current == nil { return result }
     ws := o.Current
+    if ws.Layout != .Scroller { return result }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
     partial_left, partial_right := custom_partial_columns(ws, p)
     if workspace_has_custom_widths(ws) && (partial_left >= 0 || partial_right >= 0) {
@@ -372,6 +373,7 @@ Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) ->
     if m == nil || o == nil || ws == nil || col_index < 0 || col_index >= len(ws.Cols) {
         return {}, false
     }
+    if ws.Layout != .Scroller { return {}, false }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
     if p.ColW <= 0 || p.WorkH <= 1 { return {}, false }
     col_w := column_width(p, ws.Cols[col_index])
@@ -863,6 +865,98 @@ place_client_in_tile :: proc(ws: ^Workspace, cl: ^Client, tile: Rect, border: i3
 // Arrange
 // ----------------------------------------------------------------------------
 
+workspace_tiled_clients :: proc(ws: ^Workspace) -> [dynamic]^Client {
+    clients := make([dynamic]^Client, 0, len(ws.Cols))
+    for col in ws.Cols {
+        for cl in col.Wins { append(&clients, cl) }
+    }
+    return clients
+}
+
+hide_tiled_except :: proc(clients: []^Client, visible: ^Client, hide: Rect) {
+    for cl in clients {
+        if cl == visible { continue }
+        cl.Geom = hide
+        cl.Border = 0
+    }
+}
+
+// Dwindle/Fibonacci consumes half of the remaining rectangle for each client,
+// alternating vertical and horizontal splits. The structural client order is
+// the stable leaf order, avoiding a second tree that could drift out of sync
+// after moves, tab grouping, scratchpad operations, or unmanage events.
+arrange_dwindle :: proc(ws: ^Workspace, clients: []^Client, p: Layout_Params) {
+    if len(clients) == 0 { return }
+    remaining := Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}
+    for cl, i in clients {
+        if i + 1 == len(clients) {
+            place_client_in_tile(ws, cl, remaining, p.Border)
+            break
+        }
+        tile := remaining
+        split_vertical := i % 2 == 0
+        if split_vertical && remaining.W <= 1 && remaining.H > 1 {
+            split_vertical = false
+        } else if !split_vertical && remaining.H <= 1 && remaining.W > 1 {
+            split_vertical = true
+        }
+        if split_vertical && remaining.W > 1 {
+            gap := min(p.Inner, max(i32(0), remaining.W - 2))
+            usable := remaining.W - gap
+            first := usable / 2
+            tile.W = first
+            remaining.X += first + gap
+            remaining.W = usable - first
+        } else if remaining.H > 1 {
+            gap := min(p.Inner, max(i32(0), remaining.H - 2))
+            usable := remaining.H - gap
+            first := usable / 2
+            tile.H = first
+            remaining.Y += first + gap
+            remaining.H = usable - first
+        }
+        tile.W = max(i32(1), tile.W)
+        tile.H = max(i32(1), tile.H)
+        remaining.W = max(i32(1), remaining.W)
+        remaining.H = max(i32(1), remaining.H)
+        place_client_in_tile(ws, cl, tile, p.Border)
+    }
+}
+
+// Returns true when a non-scrolling workspace mode handled tiled placement.
+arrange_workspace_mode :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect) -> bool {
+    if ws.Layout == .Scroller || ws.Layout == .Floating { return false }
+    clients := workspace_tiled_clients(ws)
+    defer delete(clients)
+    if len(clients) == 0 { return true }
+    hide := Rect{X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H}
+
+    // Maximizing after choosing a global mode remains a temporary work-area
+    // override, just as it is in the scrolling layout.
+    if ws.Focus != nil && !ws.Focus.Floating && ws.Focus.Maximized {
+        place_client_in_tile(ws, ws.Focus,
+            Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}, p.Border)
+        hide_tiled_except(clients[:], ws.Focus, hide)
+        return true
+    }
+
+    switch ws.Layout {
+    case .Dwindle:
+        arrange_dwindle(ws, clients[:], p)
+    case .Monocle:
+        active := ws.Focus
+        if active == nil || active.Floating {
+            active = fallback_focus_for_ws(ws)
+        }
+        hide_tiled_except(clients[:], active, hide)
+        place_client_in_tile(ws, active,
+            Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}, p.Border)
+    case .Scroller:
+    case .Floating:
+    }
+    return true
+}
+
 // arrange_workspace lays one workspace out into per-client rects.
 //
 // When `on_screen` is true the windows are positioned relative to the current
@@ -909,8 +1003,9 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
         return
     }
 
-    // 2) tiled columns
-    if n_cols > 0 && p.ColW > 0 && p.WorkH > 0 {
+    // 2) tiled clients. Whole-workspace modes bypass the scrolling strip.
+    workspace_mode_arranged := arrange_workspace_mode(ws, p, geom)
+    if !workspace_mode_arranged && n_cols > 0 && p.ColW > 0 && p.WorkH > 0 {
         base_x := p.WorkX - ws.ViewportX
         hide := Rect { X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H }
         custom_widths := workspace_has_custom_widths(ws)
@@ -1086,6 +1181,23 @@ default_float_rect :: proc(p: Layout_Params, geom: Rect) -> Rect {
         W = w,
         H = h,
     }
+}
+
+// cascaded_float_rect gives automatically floated windows distinct starting
+// positions while keeping their complete rectangles inside the usable work
+// area. Twelve slots form a small grid around the normal centered position;
+// pointer moves remain authoritative afterwards through FloatingRect.
+cascaded_float_rect :: proc(p: Layout_Params, geom: Rect, index: int) -> Rect {
+    r := default_float_rect(p, geom)
+    step := i32(32)
+    slot := max(0, index) % 12
+    col := i32(slot % 4)
+    row := i32(slot / 4)
+    center_x := p.WorkX + (p.WorkW - r.W) / 2
+    center_y := p.WorkY + (p.WorkH - r.H) / 2
+    r.X = clamp(center_x + (col - 1) * step, p.WorkX, p.WorkX + p.WorkW - r.W)
+    r.Y = clamp(center_y + (row - 1) * step, p.WorkY, p.WorkY + p.WorkH - r.H)
+    return r
 }
 
 // clamp_float_rect nudges a floating rect so part of it stays reachable.

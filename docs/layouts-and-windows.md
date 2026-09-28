@@ -1,5 +1,32 @@
 # Layouts and window actions
 
+## Workspace layouts
+
+`Super+g` / `layout_next` cycles the active workspace through four layouts:
+
+- **Scrolling Tile** — the original hybrid tiled-column layout: up to two
+  columns tile the work area and additional columns continue in a scrollable
+  strip.
+- **Dwindle/Fibonacci** — all tiled windows recursively split the remaining
+  work area, alternating left/right and top/bottom axes. It never scrolls.
+- **Monocle** — the focused tiled window fills the work area; the others are
+  parked off-screen until focused.
+- **Floating** — all current tiled windows become floating, and new windows
+  open floating until another workspace layout is selected. Automatically
+  floated windows start at slightly offset, fully visible positions instead of
+  overlapping exactly.
+
+The choice belongs to the workspace, survives workspace switches, and applies
+automatically to newly opened windows. Use `layout_scrolling_tile`,
+`layout_dwindle` (also `layout_fibonacci`), or `layout_monocle` to select one
+directly; `layout_floating` selects workspace-wide Floating. The older
+`layout_scroller` name remains an alias. Dwindle and Monocle leave existing
+stacked/tabbed column grouping intact when returning to Scrolling Tile.
+
+`Super+Space` / `togglefloating` continues to affect only the focused window.
+A window floated this way remains floating when the workspace enters and later
+leaves its all-window Floating mode.
+
 ## Columns
 
 New tiled windows become horizontal columns. One column fills the work area;

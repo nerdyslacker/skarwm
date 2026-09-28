@@ -55,6 +55,7 @@ main :: proc() {
     test_fullscreen()
     test_maximize()
     test_tabbed_layout()
+    test_workspace_layouts()
     test_multi_output()
     test_virtual_screens()
     test_multi_output_scrolling()
@@ -77,6 +78,7 @@ main :: proc() {
     test_ipc_outputs_payload()
     test_ipc_windows_payload()
     test_ipc_ws_event_payload()
+    test_ipc_version_payload()
     test_ipc_command_reply_payload()
     test_ipc_parse_subscribe()
     test_ipc_parse_command()
@@ -1214,6 +1216,91 @@ test_tabbed_layout :: proc() {
 
 }
 
+test_workspace_layouts :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    a := add_tiled(m, 401)
+    b := add_tiled(m, 402)
+    d := add_tiled(m, 403)
+
+    eq(ws.Layout, c.Workspace_Layout.Scroller, "workspace defaults to scrolling layout")
+    c.Set_Maximized(d, true)
+    d.Fullscreen = true
+    ok(c.Set_Workspace_Layout(m, .Dwindle), "select dwindle for whole workspace")
+    eq(ws.Layout, c.Workspace_Layout.Dwindle, "workspace remembers dwindle layout")
+    ok(!d.Maximized && !d.Fullscreen, "workspace layout selection clears view overrides")
+    c.Arrange_All(m)
+    eq(a.Geom, c.Rect{X = 10, Y = 10, W = 944, H = 1060},
+        "dwindle gives first window the left half")
+    eq(b.Geom, c.Rect{X = 966, Y = 10, W = 944, H = 524},
+        "dwindle splits remaining space across the next axis")
+    eq(d.Geom, c.Rect{X = 966, Y = 546, W = 944, H = 524},
+        "dwindle keeps every window on screen without scrolling")
+    eq(ws.ViewportX, i32(0), "dwindle resets the scrolling viewport")
+    ok(!c.Scroll_Viewport(m, 1), "dwindle rejects viewport scrolling")
+
+    fresh := add_tiled(m, 404)
+    c.Arrange_All(m)
+    ok(fresh.Geom.X >= 0 && fresh.Geom.X < GEOM.W,
+        "new tiled window automatically enters selected dwindle layout")
+    ok(fresh.Geom.Y >= 0 && fresh.Geom.Y < GEOM.H,
+        "new dwindle window stays inside the work area")
+
+    ok(c.Cycle_Workspace_Layout(m), "layout cycle advances to monocle")
+    eq(ws.Layout, c.Workspace_Layout.Monocle, "cycle selects monocle after dwindle")
+    c.Arrange_All(m)
+    eq(fresh.Geom, c.Rect{X = 10, Y = 10, W = 1900, H = 1060},
+        "monocle shows focused tiled window across work area")
+    ok(a.Geom.X <= c.HIDE_X && b.Geom.X <= c.HIDE_X && d.Geom.X <= c.HIDE_X,
+        "monocle parks every non-focused tiled window")
+
+    ok(c.Cycle_Workspace_Layout(m), "layout cycle advances to floating")
+    eq(ws.Layout, c.Workspace_Layout.Floating, "cycle selects floating after monocle")
+    eq(len(ws.Cols), 0, "workspace floating mode converts every tiled column")
+    eq(len(ws.Floaters), 4, "workspace floating mode includes every open window")
+    for fl, i in ws.Floaters {
+        ok(fl.Floating && fl.LayoutFloating, "global floating client records layout ownership")
+        r := fl.FloatingRect
+        ok(r.X >= 8 && r.Y >= 8 && r.X + r.W <= 1912 && r.Y + r.H <= 1072,
+            "global floating placement stays completely inside work area")
+        for j in 0 ..< i {
+            ok(r != ws.Floaters[j].FloatingRect,
+                "global floating windows receive distinct cascaded positions")
+        }
+    }
+    global_new := add_tiled(m, 405)
+    ok(global_new.Floating && global_new.LayoutFloating,
+        "new window opens floating while workspace floating mode is active")
+    ok(global_new.FloatingRect != ws.Floaters[0].FloatingRect,
+        "new global floating window advances the placement cascade")
+    ok(c.Toggle_Floating(m), "focused window can leave floating independently")
+    ok(!global_new.Floating && !global_new.LayoutFloating,
+        "per-window floating toggle remains independent from workspace mode")
+
+    ok(c.Cycle_Workspace_Layout(m), "layout cycle returns to scrolling tile")
+    eq(ws.Layout, c.Workspace_Layout.Scroller, "cycle selects scrolling tile after floating")
+    eq(len(ws.Floaters), 0, "leaving global floating restores layout-owned windows to tiling")
+    c.Arrange_All(m)
+    ok(a.Geom.X >= 0, "returning to scrolling tile restores tiled structure")
+
+    ws2 := c.Switch_WS_Id(m, 2)
+    eq(ws2.Layout, c.Workspace_Layout.Scroller, "new workspace has independent layout")
+    ok(c.Set_Workspace_Layout(m, .Monocle), "second workspace selects its own layout")
+    c.Switch_WS_Id(m, 1)
+    eq(ws.Layout, c.Workspace_Layout.Scroller, "workspace layout persists independently")
+    c.Switch_WS_Id(m, 2)
+    eq(ws2.Layout, c.Workspace_Layout.Monocle, "second workspace remembers monocle")
+
+    manual := add_tiled(m, 406)
+    ok(c.Toggle_Floating(m), "single window can be floated before global floating mode")
+    ok(c.Set_Workspace_Layout(m, .Floating), "workspace enters floating mode with manual floater")
+    ok(c.Set_Workspace_Layout(m, .Scroller), "workspace leaves floating mode")
+    ok(manual.Floating && !manual.LayoutFloating,
+        "leaving global floating preserves independently floated window")
+}
+
 test_multi_output :: proc() {
     m := c.New_Manager()
     defer c.Destroy_Manager(m)
@@ -2049,9 +2136,9 @@ test_ipc_workspaces_payload :: proc() {
     defer delete(pl)
     // fixture output "eDP-1" spans 1920x1080 at (0,0); ws1 current -> focused.
     eq(string(pl), `[{"id":1,"num":1,"name":"1","visible":true,"focused":true,"urgent":false,` +
-        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0},` +
+        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0,"layout":"scrolling-tile"},` +
         `{"id":2,"num":2,"name":"2","visible":false,"focused":false,"urgent":false,` +
-        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0}]`,
+        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0,"layout":"scrolling-tile"}]`,
         "GET_WORKSPACES: id order, ws1 focused")
 
     // switching to 2 flips the flags; id 3 created on demand joins sorted
@@ -2060,11 +2147,11 @@ test_ipc_workspaces_payload :: proc() {
     pl2 := c.ipc_workspaces_payload(m)
     defer delete(pl2)
     eq(string(pl2), `[{"id":1,"num":1,"name":"1","visible":false,"focused":false,"urgent":false,` +
-        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0},` +
+        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0,"layout":"scrolling-tile"},` +
         `{"id":2,"num":2,"name":"2","visible":true,"focused":true,"urgent":false,` +
-        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0},` +
+        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0,"layout":"scrolling-tile"},` +
         `{"id":3,"num":3,"name":"3","visible":false,"focused":false,"urgent":false,` +
-        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0}]`,
+        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0,"layout":"scrolling-tile"}]`,
         "GET_WORKSPACES: ws2 focused, empty ws3 listed")
 
     // no workspaces yet -> empty array (server-side guard; still valid JSON)
@@ -2168,9 +2255,9 @@ test_ipc_ws_event_payload :: proc() {
     defer delete(pl)
     eq(string(pl), `{"change":"focus",` +
         `"current":{"id":2,"num":2,"name":"2","visible":false,"focused":false,"urgent":false,` +
-        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0},` +
+        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0,"layout":"scrolling-tile"},` +
         `"old":{"id":1,"num":1,"name":"1","visible":true,"focused":true,"urgent":false,` +
-        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0}}`,
+        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0,"layout":"scrolling-tile"}}`,
         "workspace focus event carries current + old objects")
 
     // init/empty: no old workspace
@@ -2178,14 +2265,26 @@ test_ipc_ws_event_payload :: proc() {
     defer delete(pl2)
     eq(string(pl2), `{"change":"init",` +
         `"current":{"id":2,"num":2,"name":"2","visible":false,"focused":false,"urgent":false,` +
-        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0},` +
+        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0,"layout":"scrolling-tile"},` +
         `"old":null}`, "workspace init event has no old")
     pl3 := c.ipc_ws_event_payload(m, c.IPC_CHANGE_EMPTY, ws1, nil)
     defer delete(pl3)
     eq(string(pl3), `{"change":"empty",` +
         `"current":{"id":1,"num":1,"name":"1","visible":true,"focused":true,"urgent":false,` +
-        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0},` +
+        `"rect":{"x":0,"y":0,"width":1920,"height":1080},"output":"eDP-1","windows":0,"layout":"scrolling-tile"},` +
         `"old":null}`, "workspace empty event has no old")
+}
+
+test_ipc_version_payload :: proc() {
+    pl := c.ipc_version_payload(`/tmp/skarwm "active".rc`)
+    defer delete(pl)
+    ok(strings.contains(string(pl),
+       `"loaded_config_file_name":"/tmp/skarwm \"active\".rc"`),
+       "GET_VERSION reports and JSON-escapes the active config path")
+    empty := c.ipc_version_payload("")
+    defer delete(empty)
+    ok(strings.contains(string(empty), `"loaded_config_file_name":null`),
+       "GET_VERSION reports null for built-in config")
 }
 
 test_ipc_command_reply_payload :: proc() {
@@ -2286,12 +2385,47 @@ test_ipc_parse_command :: proc() {
     cmd, err, fine = c.ipc_parse_command(bytes_of(`layout stacking`))
     ok(fine && cmd.action == .Layout_Stacked, "layout stacking alias parsed")
     if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`layout dwindle`))
+    ok(fine && cmd.action == .Layout_Dwindle, "workspace dwindle layout parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`layout scrolling-tile`))
+    ok(fine && cmd.action == .Layout_Scroller, "recognizable scrolling tile name parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`layout fibonacci`))
+    ok(fine && cmd.action == .Layout_Dwindle, "fibonacci aliases dwindle layout")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`layout monocle`))
+    ok(fine && cmd.action == .Layout_Monocle, "workspace monocle layout parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`layout next`))
+    ok(fine && cmd.action == .Layout_Next, "workspace layout cycle parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`switch-layout`))
+    ok(fine && cmd.action == .Layout_Next, "switch-layout alias parsed")
+    if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`gaps 16`))
     ok(fine && cmd.action == .Set_Gaps && cmd.arg == 16, "runtime gaps parsed")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`gaps 101`))
     ok(!fine, "runtime gaps enforce upper bound")
     eq(err, "gaps: expected a value from 0 to 100", "runtime gaps error")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`decorations enable`))
+    ok(fine && cmd.action == .Set_Decorations && cmd.arg == 1,
+       "runtime decorations enable parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`decorations false`))
+    ok(fine && cmd.action == .Set_Decorations && cmd.arg == 0,
+       "runtime decorations false alias parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`decorations toggle`))
+    ok(fine && cmd.action == .Set_Decorations && cmd.arg == 2,
+       "runtime decorations toggle parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`decorations maybe`))
+    ok(!fine, "runtime decorations reject invalid state")
+    eq(err, "decorations: expected enable, disable, or toggle",
+       "runtime decorations error")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`toggle-tabbed`))
     ok(fine && cmd.action == .Layout_Toggle, "toggle-tabbed parsed")

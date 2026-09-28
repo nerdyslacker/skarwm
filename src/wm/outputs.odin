@@ -380,6 +380,7 @@ randr_scan :: proc(emit_event: bool) {
         // Re-derive configured logical geometry from the authoritative current
         // physical rectangle after hotplug or resolution changes.
         apply_current_virtual_screens()
+        apply_workspace_layout_rules()
         // The target output or its workarea may have disappeared. Require a
         // fresh drag instead of leaving an indicator at stale root geometry.
         if g_wm.mouse_client != nil { cancel_pointer_operation() }

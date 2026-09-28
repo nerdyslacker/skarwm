@@ -309,7 +309,7 @@ ipc_handle_frame :: proc(cl: ^Ipc_Client, f: c.Ipc_Frame) -> bool {
         delete(pl)
 
     case .Get_Version:
-        pl := c.ipc_version_payload()
+        pl := c.ipc_version_payload(g_active_config_path)
         ipc_send(cl, msg, pl)
         delete(pl)
 
@@ -358,6 +358,10 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
     case .Layout_Tabbed:     b.action = .Layout_Tabbed
     case .Layout_Stacked:    b.action = .Layout_Stacked
     case .Layout_Toggle:     b.action = .Layout_Toggle
+    case .Layout_Scroller:   b.action = .Layout_Scroller
+    case .Layout_Dwindle:    b.action = .Layout_Dwindle
+    case .Layout_Monocle:    b.action = .Layout_Monocle
+    case .Layout_Next:       b.action = .Layout_Next
     case .Scratchpad_Toggle: b.action = .Scratchpad_Toggle
     case .Scratchpad_Toggle_Float: b.action = .Scratchpad_Toggle_Float
     case .Scratchpad_Remove: b.action = .Scratchpad_Remove
@@ -392,6 +396,17 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
         g_wm.m.Cfg.Gap = 0
         g_wm.m.Cfg.OuterGap = gap
         g_wm.m.Cfg.InnerGap = gap
+        reflow()
+        ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, g_wm.m.Focused)
+        return
+    case .Set_Decorations:
+        enabled := cmd.arg == 1
+        if cmd.arg == 2 { enabled = !g_wm.m.Cfg.Decoration.Enabled }
+        g_wm.m.Cfg.Decoration.Enabled = enabled
+        for cl in g_wm.m.Clients {
+            if !cl.Dock { cl.Decorated = decoration_for_client(cl) }
+        }
+        ui.Sync_Decorations(&g_wm.ui, g_wm.m)
         reflow()
         ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, g_wm.m.Focused)
         return

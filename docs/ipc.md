@@ -20,7 +20,10 @@ skarwm-msg move workspace N
 skarwm-msg move workspace next|prev
 skarwm-msg toggle-floating
 skarwm-msg toggle-fullscreen
+skarwm-msg layout scrolling-tile|dwindle|fibonacci|monocle|floating|next
+skarwm-msg decorations enable|disable|toggle
 skarwm-msg layout tabbed|stacked|toggle
+skarwm-msg switch-layout
 skarwm-msg toggle-tabbed
 skarwm-msg show-bindings
 skarwm-msg reminder add MINUTES MESSAGE
@@ -73,8 +76,11 @@ skarwm-msg get-version
 `get-workspaces` and `get-outputs` use i3-compatible message types and object
 fields. `get-workspaces` includes every output; `visible` means current on its
 output, while `focused` additionally requires that output to be active.
+`get-version` reports the resolved active configuration path in the standard
+`loaded_config_file_name` field, or null when built-in defaults are active.
 Workspace objects add a `windows` count so a shell can distinguish an empty
-workspace without fetching the window list. `get-windows` is skarwm
+workspace without fetching the window list, plus a `layout` name of
+`scrolling-tile`, `dwindle`, `monocle`, or `floating`. `get-windows` is skarwm
 extension type 100 and returns metadata, workspace membership, state, and the
 last arranged geometry for every managed client. Tiled clients also include
 `column`, `column_layout`, `tab_index`, `tab_count`, and `tab_active`;

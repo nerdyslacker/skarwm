@@ -62,7 +62,8 @@ Ipc_Action :: enum {
     Move_To_Workspace, Move_To_Workspace_Next, Move_To_Workspace_Prev,
     Toggle_Floating, Toggle_Fullscreen,
     Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
-    Set_Gaps,
+    Layout_Scroller, Layout_Dwindle, Layout_Monocle, Layout_Next,
+    Set_Gaps, Set_Decorations,
     Scratchpad_Toggle, Scratchpad_Toggle_Float, Scratchpad_Remove,
     Scratchpad_Target_AppId, Scratchpad_Target_Class,
     Scratchpad_Target_Instance, Scratchpad_Target_Title,
@@ -299,6 +300,8 @@ ipc_ws_entry :: proc(sb: ^strings.Builder, m: ^Manager, o: ^Output, ws: ^Workspa
     ipc_json_string(sb, o.Name)
     strings.write_string(sb, `,"windows":`)
     strings.write_int(sb, workspace_window_count(ws))
+    strings.write_string(sb, `,"layout":`)
+    ipc_json_string(sb, Workspace_Layout_Name(ws.Layout))
     strings.write_string(sb, "}")
 }
 
@@ -545,11 +548,13 @@ ipc_window_event_payload :: proc(m: ^Manager, change: string, cl: ^Client) -> []
     return sb_bytes(&sb)
 }
 
-ipc_version_payload :: proc() -> []byte {
-    s := `{"human_readable":"skarwm","loaded_config_file_name":null,"major":0,"minor":1,"patch":0,"protocol":"i3-ipc+skarwm-v1"}`
-    out := make([]byte, len(s))
-    copy(out, s)
-    return out
+ipc_version_payload :: proc(config_path: string) -> []byte {
+    sb := strings.builder_make()
+    defer strings.builder_destroy(&sb)
+    strings.write_string(&sb, `{"human_readable":"skarwm","loaded_config_file_name":`)
+    if config_path == "" { strings.write_string(&sb, "null") } else { ipc_json_string(&sb, config_path) }
+    strings.write_string(&sb, `,"major":0,"minor":1,"patch":0,"protocol":"i3-ipc+skarwm-v1"}`)
+    return sb_bytes(&sb)
 }
 
 // ---------------------------------------------------------------------------
@@ -755,6 +760,7 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
         case "toggle-floating":   action = .Toggle_Floating
         case "toggle-fullscreen": action = .Toggle_Fullscreen
         case "toggle-tabbed":     action = .Layout_Toggle
+        case "switch-layout":     action = .Layout_Next
         case "show-bindings":     action = .Show_Bindings
         }
         if action != .Invalid { return Ipc_Command{action = action}, "", true }
@@ -767,6 +773,11 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
         case "tabbed":           return Ipc_Command{action = .Layout_Tabbed}, "", true
         case "stacked", "stacking": return Ipc_Command{action = .Layout_Stacked}, "", true
         case "toggle":           return Ipc_Command{action = .Layout_Toggle}, "", true
+        case "scroller", "scroll", "scrolling-tile", "scrolling_tile":
+            return Ipc_Command{action = .Layout_Scroller}, "", true
+        case "dwindle", "fibonacci": return Ipc_Command{action = .Layout_Dwindle}, "", true
+        case "monocle":          return Ipc_Command{action = .Layout_Monocle}, "", true
+        case "next":             return Ipc_Command{action = .Layout_Next}, "", true
         }
     }
 
@@ -780,6 +791,18 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
         }
         if valid { return Ipc_Command{action = .Set_Gaps, arg = value}, "", true }
         return {}, strings.clone("gaps: expected a value from 0 to 100"), false
+    }
+
+    if len(tokens) == 2 && tokens[0] == "decorations" {
+        switch tokens[1] {
+        case "enable", "enabled", "on", "true":
+            return Ipc_Command{action = .Set_Decorations, arg = 1}, "", true
+        case "disable", "disabled", "off", "false":
+            return Ipc_Command{action = .Set_Decorations, arg = 0}, "", true
+        case "toggle":
+            return Ipc_Command{action = .Set_Decorations, arg = 2}, "", true
+        }
+        return {}, strings.clone("decorations: expected enable, disable, or toggle"), false
     }
 
     if len(tokens) >= 4 && tokens[0] == "reminder" && tokens[1] == "add" {

@@ -34,6 +34,23 @@ for _ in $(seq 1 30); do xdpyinfo -display "$DISP" >/dev/null 2>&1 && break; sle
 WM_PID=$!
 for _ in $(seq 1 30); do ./build/skarwm-msg get-windows >/dev/null 2>&1 && break; sleep 0.1; done
 
+workspaces=$(./build/skarwm-msg get-workspaces 2>/dev/null)
+if [[ $workspaces == *'"id":3'*'"layout":"dwindle"'* ]]; then
+  pass "configured workspace layout pre-creates tag 3 as dwindle"
+else
+  fail "configured workspace layout initial state"
+fi
+./build/skarwm-msg workspace 3 >/dev/null 2>&1
+./build/skarwm-msg layout monocle >/dev/null 2>&1
+./build/skarwm-msg reload >/dev/null 2>&1
+workspaces=$(./build/skarwm-msg get-workspaces 2>/dev/null)
+if [[ $workspaces == *'"id":3'*'"layout":"dwindle"'* ]]; then
+  pass "config reload restores the workspace layout default"
+else
+  fail "configured workspace layout reload state"
+fi
+./build/skarwm-msg workspace 1 >/dev/null 2>&1
+
 xterm -title DecorationTest >/dev/null 2>&1 &
 TERM_PID=$!
 client=""

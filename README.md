@@ -161,6 +161,7 @@ Default interaction highlights:
 - `Super+Control+n/p`: send to the next/previous workspace;
 - `Super+Space`: toggle floating;
 - `Super+t`: toggle tabbed mode for the focused column;
+- `Super+g`: cycle the workspace through Scrolling Tile, Dwindle/Fibonacci, Monocle, and Floating;
 - `Super+Ctrl+Alt+h`: show or hide the keybindings help overlay;
 - `Super+Ctrl+Alt+t`: show local date and time in a temporary notice;
 - `Super+Ctrl+Alt+b`: show battery percentage and charging state;

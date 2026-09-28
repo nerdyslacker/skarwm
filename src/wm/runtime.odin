@@ -143,11 +143,13 @@ cleanup_all :: proc() {
     release_rules(&g_wm.rules)
     release_bar_blocks(&g_wm.bar_blocks)
     release_virtual_screens(&g_wm.virtual_screens)
+    delete(g_wm.workspace_layouts)
     if g_wm.ran_startups != nil {
         for s in g_wm.ran_startups { if s != "" { delete(s) } }
         delete(g_wm.ran_startups)
     }
     if g_cfg_flag != "" { delete(g_cfg_flag) }
+    if g_active_config_path != "" { delete(g_active_config_path) }
     rendering.Shutdown(&g_wm.rendering)
     if g_wm.m != nil do c.Destroy_Manager(g_wm.m)
     ewmh_free() // destroy the check window, drop EWMH caches
