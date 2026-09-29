@@ -303,8 +303,8 @@ Query_Tree_Reply :: struct {
     length:        u32,
     root:          u32,
     parent:        u32,
-    children_len:  u32,
-    pad:           [12]u8,
+    children_len:  u16,
+    pad:           [14]u8,
 }
 
 Query_Pointer_Reply :: struct {
@@ -490,7 +490,7 @@ MOD_MASK_MOD4    :: u16(ModMask.MOD4)
 MOD_MASK_MOD5    :: u16(ModMask.MOD5)
 MOD_MASK_ANY     :: u16(ModMask.ANY)
 
-ConfigWindowMask :: enum u32 {
+ConfigWindowMask :: enum u16 {
     X           = 1 << 0,
     Y           = 1 << 1,
     WIDTH       = 1 << 2,
@@ -500,13 +500,13 @@ ConfigWindowMask :: enum u32 {
     STACK_MODE  = 1 << 6,
 }
 
-CW_X :: u32(ConfigWindowMask.X)
-CW_Y :: u32(ConfigWindowMask.Y)
-CW_WIDTH :: u32(ConfigWindowMask.WIDTH)
-CW_HEIGHT :: u32(ConfigWindowMask.HEIGHT)
-CW_BORDER_WIDTH :: u32(ConfigWindowMask.BORDER_WIDTH)
-CW_SIBLING :: u32(ConfigWindowMask.SIBLING)
-CW_STACK_MODE :: u32(ConfigWindowMask.STACK_MODE)
+CW_X :: u16(ConfigWindowMask.X)
+CW_Y :: u16(ConfigWindowMask.Y)
+CW_WIDTH :: u16(ConfigWindowMask.WIDTH)
+CW_HEIGHT :: u16(ConfigWindowMask.HEIGHT)
+CW_BORDER_WIDTH :: u16(ConfigWindowMask.BORDER_WIDTH)
+CW_SIBLING :: u16(ConfigWindowMask.SIBLING)
+CW_STACK_MODE :: u16(ConfigWindowMask.STACK_MODE)
 
 // change-window-attributes value masks (subset used)
 CW_OVERRIDE_REDIRECT :: u32(1 << 9)
@@ -641,7 +641,7 @@ foreign xcb {
     xcb_unmap_window   :: proc(c: ^Connection, window: u32) -> Cookie ---
     xcb_reparent_window :: proc(c: ^Connection, window, parent: u32, x, y: i16) -> Cookie ---
     xcb_change_save_set :: proc(c: ^Connection, mode: u8, window: u32) -> Cookie ---
-    xcb_configure_window :: proc(c: ^Connection, window: u32, value_mask: u32, value_list: ^u32) -> Cookie ---
+    xcb_configure_window :: proc(c: ^Connection, window: u32, value_mask: u16, value_list: ^u32) -> Cookie ---
     xcb_clear_area :: proc(c: ^Connection, exposures: u8, window: u32, x, y: i16, width, height: u16) -> Cookie ---
     xcb_create_glyph_cursor :: proc(
         c: ^Connection, cid, source_font, mask_font: u32,
@@ -695,6 +695,8 @@ foreign xcb {
 
     xcb_get_property      :: proc(c: ^Connection, _delete: u8, window: u32, property: u32, type_: u32, long_offset: u32, long_length: u32) -> Cookie ---
     xcb_get_property_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Get_Property_Reply ---
+    xcb_get_property_value :: proc(reply: ^Get_Property_Reply) -> rawptr ---
+    xcb_get_property_value_length :: proc(reply: ^Get_Property_Reply) -> i32 ---
     xcb_delete_property   :: proc(c: ^Connection, window: u32, property: u32) -> Cookie ---
 
     xcb_get_geometry       :: proc(c: ^Connection, drawable: u32) -> Cookie ---
@@ -705,6 +707,8 @@ foreign xcb {
 
     xcb_query_tree       :: proc(c: ^Connection, window: u32) -> Cookie ---
     xcb_query_tree_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Query_Tree_Reply ---
+    xcb_query_tree_children :: proc(reply: ^Query_Tree_Reply) -> [^]u32 ---
+    xcb_query_tree_children_length :: proc(reply: ^Query_Tree_Reply) -> i32 ---
 
     xcb_query_pointer       :: proc(c: ^Connection, window: u32) -> Cookie ---
     xcb_query_pointer_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Query_Pointer_Reply ---
@@ -714,12 +718,18 @@ foreign xcb {
 
     xcb_get_atom_name :: proc(c: ^Connection, atom: u32) -> Cookie ---
     xcb_get_atom_name_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Get_Atom_Name_Reply ---
+    xcb_get_atom_name_name :: proc(reply: ^Get_Atom_Name_Reply) -> [^]u8 ---
+    xcb_get_atom_name_name_length :: proc(reply: ^Get_Atom_Name_Reply) -> i32 ---
 
     xcb_get_modifier_mapping       :: proc(c: ^Connection) -> Cookie ---
     xcb_get_modifier_mapping_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Get_Modifier_Mapping_Reply ---
+    xcb_get_modifier_mapping_keycodes :: proc(reply: ^Get_Modifier_Mapping_Reply) -> [^]u8 ---
+    xcb_get_modifier_mapping_keycodes_length :: proc(reply: ^Get_Modifier_Mapping_Reply) -> i32 ---
 
     xcb_get_keyboard_mapping       :: proc(c: ^Connection, first_keycode: u8, count: u8) -> Cookie ---
     xcb_get_keyboard_mapping_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Get_Keyboard_Mapping_Reply ---
+    xcb_get_keyboard_mapping_keysyms :: proc(reply: ^Get_Keyboard_Mapping_Reply) -> [^]u32 ---
+    xcb_get_keyboard_mapping_keysyms_length :: proc(reply: ^Get_Keyboard_Mapping_Reply) -> i32 ---
 
     xcb_poll_for_event        :: proc(c: ^Connection) -> ^Event ---
     xcb_poll_for_queued_event :: proc(c: ^Connection) -> ^Event ---

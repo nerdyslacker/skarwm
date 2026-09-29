@@ -50,21 +50,58 @@ get_prop :: proc(c: ^Connection, window: u32, prop: u32, wanted_type: u32 = 0) -
         if reply == nil {
             return nil, false
         }
-        defer free_libc(reply)
-
-        if reply.format == 0 || reply.value_len == 0 {
+        if reply.type_ == ATOM_NONE || (wanted_type != ATOM_NONE && reply.type_ != wanted_type) {
+            free_libc(reply)
+            return nil, false
+        }
+        if reply.format == 0 {
+            free_libc(reply)
+            return nil, false
+        }
+        if reply.value_len == 0 {
+            free_libc(reply)
             return nil, true // present but empty
         }
-        nbytes := int(reply.value_len) * int(reply.format) / 8
-        if reply.bytes_after > 0 && uint(reply.bytes_after) > uint(nbytes) {
-            read_len = read_len * 4 // grow and retry
+        nbytes := int(xcb_get_property_value_length(reply))
+        if nbytes < 0 {
+            free_libc(reply)
+            return nil, false
+        }
+        if reply.bytes_after > 0 {
+            // long_length is expressed in 32-bit units. Retry whenever any
+            // bytes remain; checking whether the remainder exceeds this chunk
+            // silently truncated properties just over the requested size.
+            total_units := (u32(nbytes) + reply.bytes_after + 3) / 4
+            read_len = max(read_len * 2, total_units)
+            free_libc(reply)
             continue
         }
-        src := rawptr(uintptr(rawptr(reply)) + uintptr(size_of(Get_Property_Reply)))
         dst := make([]byte, nbytes)
-        copy(dst, mem_to_bytes(src, nbytes))
+        copy(dst, mem_to_bytes(xcb_get_property_value(reply), nbytes))
+        free_libc(reply)
         return dst, true
     }
+}
+
+// get_atom_name returns an owned copy of an atom's server-side name. XCB's
+// generated accessor is used because variable-length reply payloads are not a
+// public struct-layout contract.
+get_atom_name :: proc(c: ^Connection, atom: u32) -> (name: string, ok: bool) {
+    if c == nil || atom == 0 { return "", false }
+    e: ^Error
+    reply := xcb_get_atom_name_reply(c, xcb_get_atom_name(c, atom), &e)
+    if e != nil {
+        free_libc(e)
+        return "", false
+    }
+    if reply == nil { return "", false }
+    defer free_libc(reply)
+    n := int(xcb_get_atom_name_name_length(reply))
+    source := xcb_get_atom_name_name(reply)
+    if n <= 0 || source == nil { return "", false }
+    bytes := make([]byte, n)
+    copy(bytes, source[:n])
+    return string(bytes), true
 }
 
 // mem_to_bytes views `n` bytes starting at p as a byte slice (no copy).

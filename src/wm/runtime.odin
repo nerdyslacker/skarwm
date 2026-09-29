@@ -193,10 +193,11 @@ adopt_existing :: proc() {
     if reply == nil { return }
     defer x11.free_libc(reply)
 
-    n := int(reply.children_len)
-    if n == 0 { return }
-    src := rawptr(uintptr(rawptr(reply)) + uintptr(size_of(x11.Query_Tree_Reply)))
-    ids := ([^]u32)(src)[:n]
+    n := int(x11.xcb_query_tree_children_length(reply))
+    if n <= 0 { return }
+    children := x11.xcb_query_tree_children(reply)
+    if children == nil { return }
+    ids := children[:n]
     for i in 0 ..< n {
         wid := ids[i]
         ok, override_redir, map_state, class := window_info(wid)

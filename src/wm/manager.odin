@@ -1724,7 +1724,7 @@ on_configure_request :: proc(ev: ^x11.Configure_Request_Event) {
         u32(ev.width), u32(ev.height), u32(ev.border_width),
         0, 0,
     }
-    x11.xcb_configure_window(g_wm.conn, xid, u32(ev.value_mask), &vals[0])
+    x11.xcb_configure_window(g_wm.conn, xid, ev.value_mask, &vals[0])
     x11.xcb_flush(g_wm.conn)
 }
 
@@ -1738,7 +1738,7 @@ apply_float_configure :: proc(cl: ^c.Client, ev: ^x11.Configure_Request_Event) {
     r := cl.FloatingRect
     decorated := cl.Decorated && cl.DecorationFrame != 0 && !cl.Fullscreen && !cl.Dock
     if decorated { r = c.Decoration_Client_Rect(r, g_wm.m.Cfg.Decoration) }
-    mask := u32(ev.value_mask)
+    mask := ev.value_mask
     if mask & x11.CW_X != 0 { r.X = i32(ev.x) }
     if mask & x11.CW_Y != 0 { r.Y = i32(ev.y) }
     if mask & x11.CW_WIDTH != 0 { r.W = i32(ev.width) }

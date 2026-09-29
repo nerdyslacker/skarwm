@@ -40,9 +40,11 @@ kbd_load :: proc(c: ^x11.Connection) -> (m: Kbd_Map, ok: bool) {
     kpm := int(reply.keysyms_per_keycode)
     if kpm == 0 { return m, false }
     n := KEYCODE_COUNT * kpm
+    available := int(x11.xcb_get_keyboard_mapping_keysyms_length(reply))
+    source := x11.xcb_get_keyboard_mapping_keysyms(reply)
+    if available < n || source == nil { return m, false }
     arr := make([]u32, n)
-    src := rawptr(uintptr(rawptr(reply)) + uintptr(size_of(x11.Get_Keyboard_Mapping_Reply)))
-    copy(arr, ([^]u32)(src)[:n])
+    copy(arr, source[:n])
     m.keysyms_per_keycode = kpm
     m.syms = arr
     return m, true
@@ -62,9 +64,11 @@ mod_load :: proc(c: ^x11.Connection) -> (m: Mod_Map, ok: bool) {
     kcpm := int(reply.keycodes_per_modifier)
     if kcpm == 0 { return m, false }
     n := 8 * kcpm
+    available := int(x11.xcb_get_modifier_mapping_keycodes_length(reply))
+    source := x11.xcb_get_modifier_mapping_keycodes(reply)
+    if available < n || source == nil { return m, false }
     arr := make([]u8, n)
-    src := rawptr(uintptr(rawptr(reply)) + uintptr(size_of(x11.Get_Modifier_Mapping_Reply)))
-    copy(arr, ([^]u8)(src)[:n])
+    copy(arr, source[:n])
     m.keycodes_per_modifier = kcpm
     m.keycodes = arr
     return m, true

@@ -72,6 +72,8 @@ foreign xcb_randr {
     xcb_randr_get_monitors_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Randr_Get_Monitors_Reply ---
     xcb_randr_get_monitors_monitors_iterator :: proc(reply: ^Randr_Get_Monitors_Reply) -> Randr_Monitor_Iterator ---
     xcb_randr_monitor_info_next :: proc(iter: ^Randr_Monitor_Iterator) ---
+    xcb_randr_monitor_info_outputs :: proc(info: ^Randr_Monitor_Info) -> [^]u32 ---
+    xcb_randr_monitor_info_outputs_length :: proc(info: ^Randr_Monitor_Info) -> i32 ---
     xcb_randr_set_monitor_checked :: proc(c: ^Connection, window: u32, info: ^Randr_Monitor_Info) -> Cookie ---
     xcb_randr_delete_monitor_checked :: proc(c: ^Connection, window, name: u32) -> Cookie ---
 }
