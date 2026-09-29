@@ -62,6 +62,9 @@ Client :: struct {
 
     // User/session geometry: where a floating window lives.
     FloatingRect: Rect,
+    // Root geometry observed before the WM first arranged the window. Retained
+    // so a late DOCK type can undo provisional tiling without guessing.
+    InitialRect: Rect,
 
     Floating:   bool, // participates in floating layout (in ws.Floaters)
     // Set only when workspace-wide Floating mode moved this client out of the
@@ -116,6 +119,7 @@ Column_Layout :: enum u8 {
 // floating membership until another workspace layout is selected.
 Workspace_Layout :: enum u8 {
     Scroller,
+    Vertical_Scroller,
     Dwindle,
     Monocle,
     Floating,
@@ -124,6 +128,7 @@ Workspace_Layout :: enum u8 {
 Workspace_Layout_Name :: proc(layout: Workspace_Layout) -> string {
     switch layout {
     case .Scroller: return "scrolling-tile"
+    case .Vertical_Scroller: return "vertical-scrolling-tile"
     case .Dwindle:  return "dwindle"
     case .Monocle:  return "monocle"
     case .Floating: return "floating"
@@ -131,16 +136,18 @@ Workspace_Layout_Name :: proc(layout: Workspace_Layout) -> string {
     return "scrolling-tile"
 }
 
-// One group of windows on the horizontal strip. A column is either a vertical
-// stack or a tabbed container; Focus is also the active tab in tabbed mode.
+// One group of windows on a scrolling strip. It is a vertical column in the
+// horizontal scroller and a horizontal row in the vertical scroller. Focus is
+// also the active tab in tabbed mode.
 Column :: struct {
     Wins:  [dynamic]^Client, // top → bottom
     Focus: ^Client, // most recently focused window inside this column
     Layout: Column_Layout,
     Width: i32, // desired tile width; 0 means the layout-derived default
+    Height: i32, // desired vertical-scroller row height; 0 means default
 }
 
-// A horizontal scrolling workspace.
+// A workspace with independent horizontal and vertical scrolling viewports.
 Workspace :: struct {
     Id: int,
     Layout: Workspace_Layout,
@@ -148,6 +155,7 @@ Workspace :: struct {
     Floaters:  [dynamic]^Client,
     Focus:     ^Client, // most recently focused client of this workspace (any kind)
     ViewportX: i32, // px pan of the strip; kept per workspace
+    ViewportY: i32, // px pan of the vertical strip; kept per workspace
 }
 
 Physical_Output :: struct {

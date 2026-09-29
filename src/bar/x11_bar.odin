@@ -77,19 +77,8 @@ query_monitors :: proc(state: ^State) -> [dynamic]Monitor {
 }
 
 monitor_atom_name :: proc(state: ^State, id: u32) -> string {
-    e: ^x11.Error
-    reply := x11.xcb_get_atom_name_reply(state.Conn, x11.xcb_get_atom_name(state.Conn, id), &e)
-    if e != nil { x11.free_libc(e) }
-    if reply == nil || reply.name_len == 0 {
-        if reply != nil { x11.free_libc(reply) }
-        return x11.strings_clone_here("screen")
-    }
-    n := int(reply.name_len)
-    source := ([^]u8)(rawptr(uintptr(rawptr(reply)) + uintptr(size_of(x11.Get_Atom_Name_Reply))))[:n]
-    name := make([]byte, n)
-    copy(name, source)
-    x11.free_libc(reply)
-    return string(name)
+    if name, ok := x11.get_atom_name(state.Conn, id); ok { return name }
+    return x11.strings_clone_here("screen")
 }
 
 destroy_windows :: proc(state: ^State) {

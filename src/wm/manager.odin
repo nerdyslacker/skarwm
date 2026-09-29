@@ -65,6 +65,8 @@ Wm :: struct {
     reminders: [dynamic]Reminder,
     preview_hover_locked: bool,
     preview_hover_target: u32,
+    preview_hover_pending: u32,
+    preview_hover_due: time.Tick,
     rendering: rendering.State,
     bar_managed_started: bool,
     bar_blocks: [dynamic]Raw_Bar_Block,
@@ -196,6 +198,11 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     // timeout prevents a failed command from capturing an unrelated window.
     g_wm.tab_spawn_target = 0
     cl := c.New_Client(xid)
+    // Preserve the client's requested pre-layout rectangle. If a panel sets
+    // its DOCK type just after MapRequest, promotion can restore this geometry
+    // instead of retaining the temporary tile assigned by the WM.
+    read_dock_geometry(cl)
+    cl.InitialRect = cl.FloatingRect
     read_client_meta(cl)
     read_client_urgency(cl)
     read_size_hints(cl)
@@ -212,7 +219,6 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     // — a dock is a dock even if it carries fullscreen state or matches a rule.
     if read_window_type(cl) {
         cl.Dock = true
-        read_dock_geometry(cl)
         output := c.Output_At_Rect(m, cl.FloatingRect)
         read_struts(cl, output)
         c.Add_Dock_To_Output(m, output, cl)
@@ -222,6 +228,10 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
         ipc_broadcast_window_event(c.IPC_WINDOW_NEW, cl)
         return
     }
+    // InitialRect owns the pre-management snapshot. Normal clients keep the
+    // established empty FloatingRect sentinel so a later float toggle receives
+    // skarwm's centered default instead of the application's arbitrary hint.
+    cl.FloatingRect = {}
 
     // A MapRequest has no coordinates of its own. Its caller queries the root
     // pointer and supplies the output so normal clients open where the pointer
@@ -250,6 +260,31 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     reflow()
     raise_docks() // restore normal dock order (or fullscreen above all)
     ipc_broadcast_window_event(c.IPC_WINDOW_NEW, cl)
+    ipc_broadcast_focus_change(old_focus, m.Focused)
+}
+
+promote_client_to_dock :: proc(cl: ^c.Client) {
+    if cl == nil || cl.Dock { return }
+    m := g_wm.m
+    requested := cl.InitialRect
+    if requested.W <= 0 || requested.H <= 0 { read_dock_geometry(cl); requested = cl.FloatingRect }
+    old_focus := m.Focused
+
+    c.Unmanage_Client(m, cl)
+    ui.Destroy_Decoration(&g_wm.ui, cl)
+    rendering.Forget(&g_wm.rendering, cl.Xid)
+    cl.Decorated = false
+    cl.Fullscreen = false
+    if cl.Maximized { c.Set_Maximized(cl, false) }
+    cl.FloatingRect = requested
+
+    output := c.Output_At_Rect(m, requested)
+    read_struts(cl, output)
+    c.Add_Dock_To_Output(m, output, cl)
+    ewmh_client_became_dock(cl)
+    reflow()
+    raise_docks()
+    ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
     ipc_broadcast_focus_change(old_focus, m.Focused)
 }
 
@@ -681,6 +716,7 @@ dispatch_action :: proc(b: ^input.Binding) {
     // until pointer motion confirms it has left all preview zones.
     g_wm.preview_hover_locked = true
     g_wm.preview_hover_target = 0
+    g_wm.preview_hover_pending = 0
     switch b.action {
     case .None:
         return
@@ -721,7 +757,10 @@ dispatch_action :: proc(b: ^input.Binding) {
         if m.Focused != nil && m.Focused.Floating {
             changed = c.Toggle_Floating(m)
         }
-        changed = c.Set_Workspace_Layout(m, .Scroller) || changed
+        ws := c.Current_WS(m)
+        if ws == nil || ws.Layout != .Vertical_Scroller {
+            changed = c.Set_Workspace_Layout(m, .Scroller) || changed
+        }
         changed = c.Set_Column_Layout(m, .Tabbed) || changed
         if changed {
             reflow()
@@ -732,7 +771,10 @@ dispatch_action :: proc(b: ^input.Binding) {
         if m.Focused != nil && m.Focused.Floating {
             changed = c.Toggle_Floating(m)
         }
-        changed = c.Set_Workspace_Layout(m, .Scroller) || changed
+        ws := c.Current_WS(m)
+        if ws == nil || ws.Layout != .Vertical_Scroller {
+            changed = c.Set_Workspace_Layout(m, .Scroller) || changed
+        }
         changed = c.Set_Column_Layout(m, .Stacked) || changed
         if changed {
             reflow()
@@ -743,10 +785,11 @@ dispatch_action :: proc(b: ^input.Binding) {
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
-    case .Layout_Scroller, .Layout_Dwindle, .Layout_Monocle, .Layout_Next:
+    case .Layout_Scroller, .Layout_Vertical_Scroller, .Layout_Dwindle, .Layout_Monocle, .Layout_Next:
         changed := false
         #partial switch b.action {
         case .Layout_Scroller: changed = c.Set_Workspace_Layout(m, .Scroller)
+        case .Layout_Vertical_Scroller: changed = c.Set_Workspace_Layout(m, .Vertical_Scroller)
         case .Layout_Dwindle:  changed = c.Set_Workspace_Layout(m, .Dwindle)
         case .Layout_Monocle:  changed = c.Set_Workspace_Layout(m, .Monocle)
         case .Layout_Next:     changed = c.Cycle_Workspace_Layout(m)
@@ -1062,26 +1105,62 @@ on_enter :: proc(ev: ^x11.Enter_Notify_Event) {
     }
 }
 
-// scroll_preview_hover is shared by EnterNotify and MotionNotify. Once a
-// preview triggers it remains locked while the pointer is over any preview;
-// this prevents the opposite edge created by the reveal from immediately
-// navigating back underneath a stationary pointer.
-scroll_preview_hover :: proc(x, y: i32) -> bool {
-    preview, over := c.Scroll_Preview_At_Point(g_wm.m, x, y)
-    if !over {
+cancel_preview_hover :: proc(unlock: bool = true) {
+    g_wm.preview_hover_pending = 0
+    g_wm.preview_hover_due = {}
+    if unlock {
         g_wm.preview_hover_locked = false
         g_wm.preview_hover_target = 0
-        return false
     }
-    if g_wm.mouse_client != nil { return true }
-    if g_wm.preview_hover_locked { return true }
+}
 
+preview_hover_poll_timeout_ms :: proc() -> i32 {
+    if g_wm.preview_hover_pending == 0 { return -1 }
+    remaining := time.tick_diff(time.tick_now(), g_wm.preview_hover_due)
+    if remaining <= 0 { return 0 }
+    ns := i64(remaining)
+    return i32(min(i64(max(i32)), (ns + i64(time.Millisecond) - 1) / i64(time.Millisecond)))
+}
+
+preview_hover_run_due :: proc() {
+    target := g_wm.preview_hover_pending
+    if target == 0 || time.tick_diff(g_wm.preview_hover_due, time.tick_now()) < 0 { return }
+    g_wm.preview_hover_pending = 0
+
+    cookie := x11.xcb_query_pointer(g_wm.conn, g_wm.root)
+    e: ^x11.Error
+    reply := x11.xcb_query_pointer_reply(g_wm.conn, cookie, &e)
+    if e != nil { x11.free_libc(e) }
+    if reply == nil { return }
+    defer x11.free_libc(reply)
+    preview, over := c.Scroll_Preview_At_Point(g_wm.m, i32(reply.root_x), i32(reply.root_y))
+    if !over || preview.Client == nil || preview.Client.Xid != target {
+        return
+    }
     old := g_wm.m.Focused
-    if !c.Reveal_Scroll_Client(g_wm.m, preview.Client) { return true }
+    if !c.Reveal_Scroll_Client(g_wm.m, preview.Client) { return }
     g_wm.preview_hover_locked = true
     g_wm.preview_hover_target = preview.Client.Xid
     reflow_preserve_viewport()
     ipc_broadcast_focus_change(old, preview.Client)
+}
+
+// scroll_preview_hover schedules a reveal only after the pointer remains on
+// the same preview for the configured delay. Once revealed it stays locked
+// until the pointer leaves all preview zones, preventing an immediate bounce.
+scroll_preview_hover :: proc(x, y: i32) -> bool {
+    preview, over := c.Scroll_Preview_At_Point(g_wm.m, x, y)
+    if !over {
+        cancel_preview_hover()
+        return false
+    }
+    if g_wm.mouse_client != nil { return true }
+    if g_wm.preview_hover_locked { return true }
+    if g_wm.preview_hover_pending != preview.Client.Xid {
+        g_wm.preview_hover_pending = preview.Client.Xid
+        delay := time.Duration(max(i32(0), g_wm.m.Cfg.PreviewHoverDelayMs)) * time.Millisecond
+        g_wm.preview_hover_due = time.tick_add(time.tick_now(), delay)
+    }
     return true
 }
 
@@ -1281,6 +1360,11 @@ decoration_button_press :: proc(cl: ^c.Client, ev: ^x11.Button_Press_Event) {
 }
 
 on_button_press :: proc(ev: ^x11.Button_Press_Event) {
+    // A click is an explicit action; it must cancel any delayed passive reveal
+    // that was armed while the pointer approached this window.
+    cancel_preview_hover(false)
+    g_wm.preview_hover_locked = true
+    g_wm.preview_hover_target = 0
     if field, ok := ui.Reminder_Input_At_Window(&g_wm.ui, ev.event); ok {
         ui.Set_Reminder_Field(&g_wm.ui, g_wm.m, field)
         return
@@ -1340,6 +1424,7 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
         // the same stationary pointer into a second, implicit scroll.
         g_wm.preview_hover_locked = true
         g_wm.preview_hover_target = 0
+        g_wm.preview_hover_pending = 0
         dir := -1
         if ev.detail == 5 { dir = 1 }
         output := c.Output_At_Point(g_wm.m, i32(ev.root_x), i32(ev.root_y))
@@ -1639,7 +1724,7 @@ on_configure_request :: proc(ev: ^x11.Configure_Request_Event) {
         u32(ev.width), u32(ev.height), u32(ev.border_width),
         0, 0,
     }
-    x11.xcb_configure_window(g_wm.conn, xid, u32(ev.value_mask), &vals[0])
+    x11.xcb_configure_window(g_wm.conn, xid, ev.value_mask, &vals[0])
     x11.xcb_flush(g_wm.conn)
 }
 
@@ -1653,7 +1738,7 @@ apply_float_configure :: proc(cl: ^c.Client, ev: ^x11.Configure_Request_Event) {
     r := cl.FloatingRect
     decorated := cl.Decorated && cl.DecorationFrame != 0 && !cl.Fullscreen && !cl.Dock
     if decorated { r = c.Decoration_Client_Rect(r, g_wm.m.Cfg.Decoration) }
-    mask := u32(ev.value_mask)
+    mask := ev.value_mask
     if mask & x11.CW_X != 0 { r.X = i32(ev.x) }
     if mask & x11.CW_Y != 0 { r.Y = i32(ev.y) }
     if mask & x11.CW_WIDTH != 0 { r.W = i32(ev.width) }
@@ -1676,6 +1761,10 @@ apply_float_configure :: proc(cl: ^c.Client, ev: ^x11.Configure_Request_Event) {
 on_property_notify :: proc(ev: ^x11.Property_Notify_Event) {
     cl := g_wm.m.ByXid[ev.window]
     if cl == nil { return }
+    if ev.atom == atom("_NET_WM_WINDOW_TYPE") {
+        if !cl.Dock && read_window_type(cl) { promote_client_to_dock(cl) }
+        return
+    }
     if ev.atom == atom("_NET_WM_NAME") || ev.atom == atom("WM_NAME") {
         old := cl.Title
         fresh := read_client_title(cl.Xid)

@@ -54,6 +54,9 @@ decoration_color_source : active-border
 # True (default): moving the pointer over a window focuses it.
 focus_follows_mouse : true
 
+# A scroll preview focuses only after the pointer remains on it for this long.
+preview_hover_delay_ms : 250
+
 # Time-based layout transitions. Disable for immediate geometry updates and no
 # animation timer work. Easing may be `linear` or `ease_out_cubic`.
 animations : true
@@ -80,6 +83,9 @@ bar_block_foreground : #0E0D0C
 bar_block_background : #C5B088
 # Repeated directives define block order. Script fields are:
 # alignment : name : interval seconds : timeout seconds : shell command.
+# Button fields are: alignment : label : shell command. Buttons run their
+# command on left click. Examples:
+# bar_block : button : left : 󰀻 : "rofi -show drun"
 bar_block : workspaces : left
 # Use _ as the name to render only the command output. Other names render as
 # "name value" without inserted punctuation, which also works well for icons.
@@ -90,6 +96,8 @@ bar_block : script : right : 󰋊 : 30 : 1 : "df -P / | awk 'NR==2 {print $5}'"
 bar_block : script : right : 󰕾 : 1 : 1 : "pactl get-sink-volume @DEFAULT_SINK@ | grep -o '[0-9]*%' | head -1"
 bar_block : script : right : 󰁹 : 10 : 1 : "cat /sys/class/power_supply/BAT0/capacity; printf '%%'"
 bar_block : systray : right
+# bar_block : button : right :  : "maim -s ~/Pictures/Screenshot_$(date +%Y-%m-%d_%H-%M-%S).png"
+# bar_block : button : right : ⏻ : "rofi -show power-menu -modi power-menu:rofi-power-menu"
 
 # Optional WM-level ultrawide split. Output is the RandR monitor name; percent
 # controls the left region and the signed final field nudges the boundary.
@@ -118,13 +126,13 @@ autostart : "xsetroot -solid '#202020'"
 # picom enables shadows, fades, and true transparency for the drop overlay.
 # autostart : "picom --config ~/.config/picom/picom.conf -b"
 # autostart : "dunst -config ~/.config/dunst/dunstrc"
-# autostart : "feh --bg-fill ~/Pictures/wallpaper.jpg"
+# autostart : "if [ -f ~/.fehbg ]; then sh ~/.fehbg; else feh --bg-fill ~/.config/skarwm/wallpaper.jpeg; fi"
 
 # ---- key actions (call) ---------------------------------------------------------
 # Action tokens: focusleft/right/up/down resizeleft/right/up/down
 # moveleft/right/up/down ws_up ws_down
 # ws_next ws_prev togglefloating togglefullscreen layout_tabbed layout_stacked
-# toggle_tabbed layout_scrolling_tile layout_dwindle layout_monocle
+# toggle_tabbed layout_scrolling_tile layout_vertical_scroller layout_dwindle layout_monocle
 # layout_floating layout_next
 # show_bindings show_datetime show_battery
 # focus_output_next/prev move_to_output_next/prev
@@ -165,10 +173,10 @@ call : mod + Control + Shift + r : reminder_clear_all
 # only the focused column becomes a tab group. Move chosen windows into that
 # column with mod+Shift+h/l; mod+k/j selects tabs and mod+Shift+k/j reorders.
 # Toggling tabs off splits them back into separate horizontal columns.
-# `layout_next` cycles the whole workspace through Scrolling Tile,
-# Dwindle/Fibonacci, Monocle, and Floating. The selected workspace layout also
+# `layout_next` cycles the whole workspace through Scrolling Tile, Vertical
+# Scrolling Tile, Dwindle/Fibonacci, Monocle, and Floating. The selected workspace layout also
 # applies to windows opened later. Direct selectors are
-# `layout_scrolling_tile`, `layout_dwindle` (or `layout_fibonacci`),
+# `layout_scrolling_tile`, `layout_vertical_scroller`, `layout_dwindle` (or `layout_fibonacci`),
 # `layout_monocle`, and `layout_floating`. `togglefloating` changes only the
 # focused window; leaving workspace Floating preserves such manual floaters.
 call : mod + Shift + q : close_window

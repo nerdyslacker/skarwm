@@ -37,6 +37,7 @@ Without a file, built-in settings and bindings are used. Copy
 | `decoration_active_border : #89B4FA` | Explicit active frame colour. |
 | `decoration_inactive_border : #45475A` | Explicit inactive frame colour. |
 | `focus_follows_mouse : true` | Focus a window when the pointer enters it. |
+| `preview_hover_delay_ms : 250` | Delay before a stationary pointer reveals a scroll preview, `0..5000`. |
 | `animations : true` | Enable layout transitions. |
 | `animation_duration_ms : 180` | Transition duration, `0..5000`. |
 | `animation_fps : 60` | Animation target rate, `1..240`. |
@@ -87,15 +88,16 @@ runs once at startup and is not run again by configuration reloads.
 
 `workspace_layout : ID : LAYOUT` gives that workspace/tag a persistent default
 layout on every output. `tag_layout` is an alias. Supported names are
-`scrolling-tile`, `dwindle` (`fibonacci` is an alias), `monocle`, and
-`floating`. Matching workspaces are created and updated when the configuration
+`scrolling-tile`, `vertical-scrolling-tile`, `dwindle` (`fibonacci` is an
+alias), `monocle`, and `floating`. Matching workspaces are created and updated when the configuration
 loads or reloads, so windows opened later use the declared layout. A manual
 layout selection may override it until the next reload.
 
-Workspace-wide layout actions are `layout_scrolling_tile`, `layout_dwindle`
+Workspace-wide layout actions are `layout_scrolling_tile`,
+`layout_vertical_scroller`, `layout_dwindle`
 (`layout_fibonacci` is an alias), `layout_monocle`, `layout_floating`, and
-`layout_next`. The last one cycles Scrolling Tile → Dwindle/Fibonacci →
-Monocle → Floating and is bound to `Super+g` by the built-in defaults.
+`layout_next`. The last one cycles Scrolling Tile → Vertical Scrolling Tile →
+Dwindle/Fibonacci → Monocle → Floating and is bound to `Super+g` by the built-in defaults.
 `layout_scroller` remains a compatibility alias. `togglefloating` changes only
 the focused window.
 
@@ -118,7 +120,8 @@ call : mod + F8 : screen_split_grow 15
 ```
 
 `bar_block` directives define the built-in bar's blocks in declaration order.
-Workspace and `systray` blocks take an alignment. Script blocks additionally
+Workspace and `systray` blocks take an alignment. Button blocks take an
+alignment, display label, and left-click shell command. Script blocks additionally
 take a name, interval in seconds, timeout in seconds, and a shell command. See
 [Built-in bar](bar.md) for limits, failure handling, and security details.
 

@@ -11,7 +11,11 @@ launchers, and tools such as `wmctrl`:
 `_NET_WM_WINDOW_TYPE_DOCK` windows are managed as output-level bars rather than
 workspace clients. Their struts reserve tiling space, they remain visible across
 workspace switches, and they stay above ordinary windows. A fullscreen client
-is raised above the dock and covers the complete output.
+is raised above the dock and covers the complete output. Panels that publish
+their dock type immediately after mapping are promoted out of provisional
+tiling and restored to their original pre-layout geometry. Dock surfaces are
+kept fully inside their physical output; the partial off-screen allowance used
+for manually moved floating windows is never applied to panels.
 
 Focus follows the pointer by default:
 

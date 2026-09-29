@@ -116,8 +116,20 @@ Focus_Dir :: proc(m: ^Manager, dir: Dir) -> bool {
     ci, col, row := column_of(ws, cl)
     if col == nil { return false }
 
+    // In the vertical scroller the outer group axis and the in-group axis are
+    // transposed: Up/Down changes rows, Left/Right changes members of a row.
+    effective_dir := dir
+    if ws.Layout == .Vertical_Scroller {
+        switch effective_dir {
+        case .Left:  effective_dir = .Up
+        case .Right: effective_dir = .Down
+        case .Up:    effective_dir = .Left
+        case .Down:  effective_dir = .Right
+        }
+    }
+
     target: ^Client = nil
-    switch dir {
+    switch effective_dir {
     case .Left:
         if ci > 0 {
             tcol := ws.Cols[ci - 1]
@@ -204,7 +216,7 @@ Add_Managed :: proc(m: ^Manager, ws: ^Workspace, cl: ^Client, floating: bool, ta
         cl.FloatingRect = Rect {}
         o := cl.Out
         if o != nil {
-            p := compute_params(m.Cfg, o.Geom, 0) // ColW unused for floating
+            p := compute_params(m.Cfg, o.Geom, 0, o.Reserved) // ColW unused for floating
             if workspace_floating {
                 cl.FloatingRect = cascaded_float_rect(p, o.Geom, len(ws.Floaters))
             } else {
@@ -468,7 +480,17 @@ Move_Dir :: proc(m: ^Manager, dir: Dir) -> bool {
     ci, col, row := column_of(ws, cl)
     if col == nil { return false }
 
-    switch dir {
+    effective_dir := dir
+    if ws.Layout == .Vertical_Scroller {
+        switch effective_dir {
+        case .Left:  effective_dir = .Up
+        case .Right: effective_dir = .Down
+        case .Up:    effective_dir = .Left
+        case .Down:  effective_dir = .Right
+        }
+    }
+
+    switch effective_dir {
     case .Up:
         if row <= 0 { return false }
         col.Wins[row].TileWeight, col.Wins[row-1].TileWeight =
@@ -550,6 +572,7 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
         ci, source, row := column_of(src, cl)
         if source == nil { return false }
         source_width := source.Width
+        source_height := source.Height
         source_removed := source != drop.Col && len(source.Wins) == 1
         insert_at := drop.Row_Index
         if source == drop.Col {
@@ -571,6 +594,9 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
         // the resulting lone stack must not unexpectedly fill the screen.
         if source_removed && source_width > 0 && drop.Col.Width == 0 {
             drop.Col.Width = source_width
+        }
+        if source_removed && source_height > 0 && drop.Col.Height == 0 {
+            drop.Col.Height = source_height
         }
         cl.TileWeight = 0
         array_insert_at(&drop.Col.Wins, insert_at, cl)
@@ -597,6 +623,7 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
     insert_at := drop.Insert_Index
     source_removed := len(source.Wins) == 1
     source_width := source.Width
+    source_height := source.Height
 
     if source.Focus == cl { source.Focus = in_column_focus_after_removal(source, row) }
     ordered_remove(&source.Wins, row)
@@ -613,6 +640,7 @@ Move_Client_To_Drop :: proc(m: ^Manager, cl: ^Client, drop: Drop_Target) -> bool
     // column for both a pure reorder and extraction from a stack. The viewport
     // exposes neighboring strip content rather than changing either width.
     fresh.Width = source_width
+    fresh.Height = source_height
     cl.TileWeight = 0
     append(&fresh.Wins, cl)
     fresh.Focus = cl
@@ -1023,7 +1051,7 @@ Set_Floating :: proc(m: ^Manager, cl: ^Client, on: bool) {
         if rect_empty(cl.FloatingRect) {
             o := cl.Out
             if o != nil {
-                p := compute_params(m.Cfg, o.Geom, 0) // ColW unused for floating
+                p := compute_params(m.Cfg, o.Geom, 0, o.Reserved) // ColW unused for floating
                 cl.FloatingRect = default_float_rect(p, o.Geom)
             } else {
                 cl.FloatingRect = Rect { X = 40, Y = 40, W = 640, H = 480 }
@@ -1125,6 +1153,7 @@ Set_Workspace_Layout :: proc(m: ^Manager, layout: Workspace_Layout) -> bool {
     old_layout := ws.Layout
     ws.Layout = layout
     ws.ViewportX = 0
+    ws.ViewportY = 0
     // Match mango's global set_layout behavior: a new layout replaces
     // transient fullscreen and maximize overrides.
     for col in ws.Cols {
@@ -1183,7 +1212,8 @@ Cycle_Workspace_Layout :: proc(m: ^Manager) -> bool {
     ws := Current_WS(m)
     if ws == nil { return false }
     switch ws.Layout {
-    case .Scroller: return Set_Workspace_Layout(m, .Dwindle)
+    case .Scroller:          return Set_Workspace_Layout(m, .Vertical_Scroller)
+    case .Vertical_Scroller: return Set_Workspace_Layout(m, .Dwindle)
     case .Dwindle:  return Set_Workspace_Layout(m, .Monocle)
     case .Monocle:  return Set_Workspace_Layout(m, .Floating)
     case .Floating: return Set_Workspace_Layout(m, .Scroller)
@@ -1200,9 +1230,30 @@ Scroll_Output_Viewport :: proc(m: ^Manager, o: ^Output, dir: int) -> bool {
     if dir == 0 { return false }
     if o == nil { return false }
     ws := o.Current
-    if ws == nil || ws.Layout != .Scroller || len(ws.Cols) == 0 { return false }
+    if ws == nil || (ws.Layout != .Scroller && ws.Layout != .Vertical_Scroller) || len(ws.Cols) == 0 { return false }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
     sign := i32(dir / abs(dir))
+    if ws.Layout == .Vertical_Scroller {
+        next := ws.ViewportY
+        if sign > 0 {
+            for _, ci in ws.Cols {
+                top := workspace_row_top(ws, p, ci)
+                if top > ws.ViewportY { next = top; break }
+                if ci + 1 == len(ws.Cols) { next += vertical_row_height(p, ws, ci) + p.Inner }
+            }
+        } else {
+            next = 0
+            for _, ci in ws.Cols {
+                top := workspace_row_top(ws, p, ci)
+                if top >= ws.ViewportY { break }
+                next = top
+            }
+        }
+        next = clamp_vertical_viewport(next, ws, p)
+        if next == ws.ViewportY { return false }
+        ws.ViewportY = next
+        return true
+    }
     next := ws.ViewportX
     if sign > 0 {
         for col, ci in ws.Cols {
@@ -1244,6 +1295,14 @@ Reveal_Scroll_Client :: proc(m: ^Manager, cl: ^Client) -> bool {
     ci, col, _ := column_of(ws, cl)
     if col == nil { return false }
     p := compute_params(m.Cfg, cl.Out.Geom, len(ws.Cols), cl.Out.Reserved)
+    if ws.Layout == .Vertical_Scroller {
+        next := ensure_workspace_row_visible(ws.ViewportY, ws, p, ci)
+        changed := next != ws.ViewportY || m.Focused != cl
+        ws.ViewportY = next
+        Focus_Client(m, cl)
+        return changed
+    }
+    if ws.Layout != .Scroller { return false }
     next := ensure_workspace_col_visible(ws.ViewportX, ws, p, ci)
     changed := next != ws.ViewportX || m.Focused != cl
     ws.ViewportX = next
@@ -1341,7 +1400,7 @@ Sync_Focus :: proc(m: ^Manager) {
 // fullscreen focus. Call Arrange_All afterwards.
 Ensure_Active_Focus_Visible :: proc(m: ^Manager) {
     ws := Current_WS(m)
-    if ws == nil || ws.Layout != .Scroller || ws.Focus == nil { return }
+    if ws == nil || (ws.Layout != .Scroller && ws.Layout != .Vertical_Scroller) || ws.Focus == nil { return }
     cl := ws.Focus
     if cl.Floating || cl.Fullscreen { return }
     ci, _, _ := column_of(ws, cl)
@@ -1349,5 +1408,9 @@ Ensure_Active_Focus_Visible :: proc(m: ^Manager) {
     o := Active_Output(m)
     if o == nil { return }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
-    ws.ViewportX = ensure_workspace_col_visible(ws.ViewportX, ws, p, ci)
+    if ws.Layout == .Vertical_Scroller {
+        ws.ViewportY = ensure_workspace_row_visible(ws.ViewportY, ws, p, ci)
+    } else {
+        ws.ViewportX = ensure_workspace_col_visible(ws.ViewportX, ws, p, ci)
+    }
 }

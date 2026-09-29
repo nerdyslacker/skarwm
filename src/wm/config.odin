@@ -47,6 +47,7 @@ import x11 "../x11"
 //       autostart  : "<command>"
 //       bar_block  : workspaces : <left|center|right>
 //       bar_block  : systray : <left|center|right>
+//       bar_block  : button : <left|center|right> : <label> : "<command>"
 //       bar_block  : script : <left|center|right> : <name> : <interval seconds> :
 //                    <timeout seconds> : "<command>"
 //       virtual_screen : <output> : split : <percent> [: <pixel offset>]
@@ -90,11 +91,11 @@ Raw_Rule :: struct {
     decorate_set:       bool,
 }
 
-Bar_Block_Kind :: enum u8 { Workspaces, Script, Systray }
+Bar_Block_Kind :: enum u8 { Workspaces, Script, Systray, Button }
 Bar_Block_Alignment :: enum u8 { Left, Center, Right }
 
 // Raw_Bar_Block is owned configuration data. The WM publishes it for the
-// standalone bar, but never executes script commands itself.
+// standalone bar, but never executes script or button commands itself.
 Raw_Bar_Block :: struct {
     kind: Bar_Block_Kind,
     alignment: Bar_Block_Alignment,
@@ -138,7 +139,7 @@ Load_Scratch :: struct {
     // numeric / boolean / colour config overrides (defaults applied at build)
     gap, outer_gap, inner_gap, border, corner_radius: i32,
     ffm, animations: bool,
-    animation_duration_ms, animation_fps: i32,
+    animation_duration_ms, animation_fps, preview_hover_delay_ms: i32,
     animation_easing: c.Animation_Easing,
     focused, unfocused: u32,
     decoration: c.Decoration_Config,
@@ -151,7 +152,7 @@ Load_Scratch :: struct {
     bar_tag_foreground, bar_tag_background: u32,
     bar_block_foreground, bar_block_background: u32,
     gap_set, outer_set, inner_set, border_set, corner_radius_set, ffm_set: bool,
-    animations_set, animation_duration_set, animation_fps_set, animation_easing_set: bool,
+    animations_set, animation_duration_set, animation_fps_set, animation_easing_set, preview_hover_delay_set: bool,
     focused_set, unfocused_set: bool,
     decoration_enabled_set, decoration_titlebar_height_set: bool,
     decoration_border_width_set, decoration_resize_hit_width_set: bool,
@@ -453,6 +454,8 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
         base.action = .Layout_Scroller; return base, ""
     case "layout_scrolling_tile", "layout_scrolling-tile", "scrolling_tile", "scrolling-tile":
         base.action = .Layout_Scroller; return base, ""
+    case "layout_vertical_scroller", "layout_vertical_scrolling_tile", "vertical-scroller", "vertical-scrolling-tile":
+        base.action = .Layout_Vertical_Scroller; return base, ""
     case "layout_dwindle", "layout_fibonacci", "dwindle", "fibonacci":
         base.action = .Layout_Dwindle; return base, ""
     case "layout_monocle", "monocle":
@@ -558,6 +561,7 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.border_set  { r.cfg.BorderWidth = sc.border }
     if sc.corner_radius_set { r.cfg.CornerRadius = sc.corner_radius }
     if sc.ffm_set     { r.cfg.FocusFollowsMouse = sc.ffm }
+    if sc.preview_hover_delay_set { r.cfg.PreviewHoverDelayMs = sc.preview_hover_delay_ms }
     if sc.animations_set { r.cfg.Animations = sc.animations }
     if sc.animation_duration_set { r.cfg.AnimationDurationMs = sc.animation_duration_ms }
     if sc.animation_fps_set { r.cfg.AnimationFps = sc.animation_fps }
@@ -782,6 +786,15 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         sc.ffm = v; sc.ffm_set = true
         return true
 
+    case "preview_hover_delay_ms":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 0 || n > 5000 {
+            append(errs, fmt.aprintf("preview_hover_delay_ms: expected 0..5000, got %q", value))
+            return false
+        }
+        sc.preview_hover_delay_ms = n; sc.preview_hover_delay_set = true
+        return true
+
     case "animations":
         v, ok := parse_bool_value(value)
         if !ok { append(errs, fmt.aprintf("animations: expected true/false, got %q", value)); return false }
@@ -968,6 +981,23 @@ parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string)
             name = strings.clone(name), command = strings.clone(command),
             interval_ms = interval * 1000, timeout_ms = timeout * 1000,
         })
+    case "button":
+        alignment_text, ok_alignment := next_directive_field(&remaining)
+        label, ok_label := next_directive_field(&remaining)
+        alignment, valid_alignment := parse_bar_alignment(alignment_text)
+        command := quoted_trim(remaining)
+        if !ok_alignment || !valid_alignment || !ok_label || label == "" || len(label) > 64 ||
+           command == "" || len(command) >= 1024 {
+            append(errs, fmt.aprintf(
+                "bar_block(button): expected alignment : label : command, got %q",
+                remaining,
+            ))
+            return false
+        }
+        append(&sc.bar_blocks, Raw_Bar_Block{
+            kind = .Button, alignment = alignment,
+            name = strings.clone(label), command = strings.clone(command),
+        })
     case:
         append(errs, fmt.aprintf("bar_block: unknown block kind %q", kind))
         return false
@@ -1044,6 +1074,7 @@ parse_workspace_layout :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]
     layout: c.Workspace_Layout
     switch layout_text {
     case "scrolling-tile", "scrolling_tile", "scroller", "scroll": layout = .Scroller
+    case "vertical-scrolling-tile", "vertical_scrolling_tile", "vertical-scroller": layout = .Vertical_Scroller
     case "dwindle", "fibonacci": layout = .Dwindle
     case "monocle": layout = .Monocle
     case "floating", "float": layout = .Floating

@@ -65,7 +65,7 @@ Render_Tabs :: proc(state: ^State, m: ^c.Manager) {
     cfg := m.Cfg
     for o in m.Outputs {
         ws := o.Current
-        if ws == nil || ws.Layout != .Scroller { continue }
+        if ws == nil || (ws.Layout != .Scroller && ws.Layout != .Vertical_Scroller) { continue }
         for col, ci in ws.Cols {
             if col.Layout != .Tabbed || len(col.Wins) == 0 { continue }
             bar, ok := c.Tab_Bar_Rect(m, o, ws, ci)

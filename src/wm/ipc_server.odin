@@ -359,6 +359,7 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
     case .Layout_Stacked:    b.action = .Layout_Stacked
     case .Layout_Toggle:     b.action = .Layout_Toggle
     case .Layout_Scroller:   b.action = .Layout_Scroller
+    case .Layout_Vertical_Scroller: b.action = .Layout_Vertical_Scroller
     case .Layout_Dwindle:    b.action = .Layout_Dwindle
     case .Layout_Monocle:    b.action = .Layout_Monocle
     case .Layout_Next:       b.action = .Layout_Next

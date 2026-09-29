@@ -141,13 +141,15 @@ shape_client :: proc(
     bounding := c.Rect{X = -b, Y = -b, W = width, H = height}
     viewport := constrain_to_output && cl.Out != nil && !cl.Floating && !cl.Dock && !cl.Fullscreen
     if viewport {
-        output_local := c.Rect{
-            X = cl.Out.Geom.X - geom.X,
-            Y = cl.Out.Geom.Y - geom.Y,
-            W = cl.Out.Geom.W,
-            H = cl.Out.Geom.H,
+        clip := cl.Out.Geom
+        if c.Client_Needs_Work_Area_Clip(m, cl) { clip = c.Output_Work_Area(m, cl.Out) }
+        clip_local := c.Rect{
+            X = clip.X - geom.X,
+            Y = clip.Y - geom.Y,
+            W = clip.W,
+            H = clip.H,
         }
-        clipped_bounding := shape_intersection(bounding, output_local)
+        clipped_bounding := shape_intersection(bounding, clip_local)
         viewport = clipped_bounding != bounding
         if viewport {
             bounding = clipped_bounding
@@ -186,6 +188,37 @@ shape_client :: proc(
         xcb_shape_mask(conn, SHAPE_SET, SHAPE_CLIP, cl.Xid, 0, 0, 0)
     }
     state.WindowShapes[cl.Xid] = desired
+}
+
+// Native decoration frames are separate override-redirect windows. Clip them
+// with the same work-area region as their client, otherwise a preview's frame
+// can still show through a transparent bar after the client itself is clipped.
+shape_decoration_frame :: proc(
+    state: ^State,
+    conn: ^x11.Connection,
+    m: ^c.Manager,
+    cl: ^c.Client,
+    frame: c.Rect,
+    constrain_to_output: bool,
+) {
+    if !state.ShapeAvailable || cl == nil || cl.DecorationFrame == 0 { return }
+    bounding := c.Rect{X = 0, Y = 0, W = max(i32(1), frame.W), H = max(i32(1), frame.H)}
+    viewport := constrain_to_output && cl.Out != nil && !cl.Floating && !cl.Dock && !cl.Fullscreen
+    if viewport {
+        clip := cl.Out.Geom
+        if c.Client_Needs_Work_Area_Clip(m, cl) { clip = c.Output_Work_Area(m, cl.Out) }
+        clip_local := c.Rect{X = clip.X-frame.X, Y = clip.Y-frame.Y, W = clip.W, H = clip.H}
+        clipped := shape_intersection(bounding, clip_local)
+        viewport = clipped != bounding
+        if viewport { bounding = clipped }
+    }
+    xid := cl.DecorationFrame
+    if viewport {
+        shape_rectangle(conn, xid, SHAPE_SET, SHAPE_BOUNDING, bounding)
+    } else {
+        xcb_shape_mask(conn, SHAPE_SET, SHAPE_BOUNDING, xid, 0, 0, 0)
+    }
+    xcb_shape_mask(conn, SHAPE_SET, SHAPE_CLIP, xid, 0, 0, 0)
 }
 
 shape_forget :: proc(state: ^State, xid: u32) {

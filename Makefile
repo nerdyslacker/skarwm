@@ -69,7 +69,7 @@ xephyr-multi: build/skarwm build/skarwm-msg
 	SKARWM_XEPHYR_DISPLAY="$(XEPHYR_DISPLAY)" scripts/xephyr.sh multi
 
 xephyr-anush: build/skarwm build/skarwm-msg
-	SKARWM_XEPHYR_DISPLAY="$(XEPHYR_DISPLAY)" scripts/xephyr.sh single	-c "$(HOME)/Projects/Experimental/anush/config/skarwm/config.rc"
+	SKARWM_XEPHYR_DISPLAY="$(XEPHYR_DISPLAY)" scripts/xephyr.sh single -c "$(HOME)/.config/skarwm/config.rc"
 
 itest-decoration: build/skarwm build/skarwm-msg
 	bash scripts/itest-decoration.sh

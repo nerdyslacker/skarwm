@@ -287,19 +287,8 @@ randr_init :: proc() {
 }
 
 atom_name :: proc(id: u32) -> string {
-    e: ^x11.Error
-    reply := x11.xcb_get_atom_name_reply(g_wm.conn, x11.xcb_get_atom_name(g_wm.conn, id), &e)
-    if e != nil { x11.free_libc(e) }
-    if reply == nil || reply.name_len == 0 {
-        if reply != nil { x11.free_libc(reply) }
-        return ""
-    }
-    n := int(reply.name_len)
-    src := ([^]u8)(rawptr(uintptr(rawptr(reply)) + uintptr(size_of(x11.Get_Atom_Name_Reply))))[:n]
-    out := make([]byte, n)
-    copy(out, src)
-    x11.free_libc(reply)
-    return string(out)
+    name, _ := x11.get_atom_name(g_wm.conn, id)
+    return name
 }
 
 randr_scan :: proc(emit_event: bool) {
@@ -331,8 +320,9 @@ randr_scan :: proc(emit_event: bool) {
             })
             outputs := make([dynamic]u32, 0, int(mi.n_output))
             if mi.n_output > 0 {
-                source := ([^]u32)(rawptr(uintptr(rawptr(mi)) + uintptr(size_of(x11.Randr_Monitor_Info))))[:int(mi.n_output)]
-                append(&outputs, ..source)
+                count := int(x11.xcb_randr_monitor_info_outputs_length(mi))
+                source := x11.xcb_randr_monitor_info_outputs(mi)
+                if count > 0 && source != nil { append(&outputs, ..source[:count]) }
             }
             append(&physical, Randr_Physical_Monitor{
                 name = strings.clone(n), primary = mi.primary != 0,

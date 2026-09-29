@@ -15,6 +15,7 @@ Config :: struct {
     BorderWidth: i32,
     CornerRadius: i32, // 0 disables X Shape rounded corners
     FocusFollowsMouse: bool,
+    PreviewHoverDelayMs: i32,
     Animations: bool,
     AnimationDurationMs: i32,
     AnimationFps: i32,
@@ -49,6 +50,7 @@ Default_Config :: proc() -> Config {
         BorderWidth       = 2,
         CornerRadius      = 0,
         FocusFollowsMouse = true,
+        PreviewHoverDelayMs = 250,
         Animations        = true,
         AnimationDurationMs = 180,
         AnimationFps      = 60,
