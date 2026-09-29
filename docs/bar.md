@@ -57,8 +57,9 @@ bar_block_foreground : #262626
 bar_block_background : #AF5F5F
 ```
 
-Workspace cells and script blocks use their own foreground/background pairs,
-with the main bar background visible between aligned blocks.
+Workspace cells, script blocks, and button blocks use their own
+foreground/background pairs, with the main bar background visible between
+aligned blocks.
 
 ## Blocks and scripts
 
@@ -68,10 +69,18 @@ uses a single left-aligned workspace block.
 
 ```rc
 bar_block : workspaces : left
+bar_block : button : left : 󰀻 : "rofi -show drun"
 bar_block : script : right : _ : 2 : 1 : "cut -d ' ' -f 1 /proc/loadavg"
 bar_block : systray : right
+bar_block : button : right : ⏻ : "rofi -show power-menu -modi power-menu:rofi-power-menu"
 bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
 ```
+
+Button fields after the alignment are `label` and command. The label may be
+text or an icon glyph. A left click starts the command detached from the bar,
+so launchers and long-running menus do not block status updates. For example,
+use `rofi -show drun` for an application launcher, or replace the power-menu
+example with any dmenu/rofi script installed on your system.
 
 Script fields after the alignment are `name`, update interval in seconds,
 timeout in seconds, and command. Named blocks render as `name value`, so icon
@@ -79,8 +88,8 @@ labels do not acquire punctuation. Use `_` as the name to render only command
 output; a glyph or icon can be used as an ordinary name. Intervals are
 `1..86400`; timeouts are
 `1..60`. Commands deliberately run through `/bin/sh -c` with the user's
-permissions so shell pipelines and quoting work. Do not place untrusted text in
-these commands.
+permissions so shell pipelines and quoting work. Button commands use the same
+shell behavior. Do not place untrusted text in these commands.
 
 Each script has its own timer and is never launched by the render path. Output
 is limited to 4 KiB, trailing whitespace is removed, and embedded control

@@ -120,7 +120,8 @@ call : mod + F8 : screen_split_grow 15
 ```
 
 `bar_block` directives define the built-in bar's blocks in declaration order.
-Workspace and `systray` blocks take an alignment. Script blocks additionally
+Workspace and `systray` blocks take an alignment. Button blocks take an
+alignment, display label, and left-click shell command. Script blocks additionally
 take a name, interval in seconds, timeout in seconds, and a shell command. See
 [Built-in bar](bar.md) for limits, failure handling, and security details.
 

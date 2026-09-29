@@ -47,6 +47,7 @@ import x11 "../x11"
 //       autostart  : "<command>"
 //       bar_block  : workspaces : <left|center|right>
 //       bar_block  : systray : <left|center|right>
+//       bar_block  : button : <left|center|right> : <label> : "<command>"
 //       bar_block  : script : <left|center|right> : <name> : <interval seconds> :
 //                    <timeout seconds> : "<command>"
 //       virtual_screen : <output> : split : <percent> [: <pixel offset>]
@@ -90,11 +91,11 @@ Raw_Rule :: struct {
     decorate_set:       bool,
 }
 
-Bar_Block_Kind :: enum u8 { Workspaces, Script, Systray }
+Bar_Block_Kind :: enum u8 { Workspaces, Script, Systray, Button }
 Bar_Block_Alignment :: enum u8 { Left, Center, Right }
 
 // Raw_Bar_Block is owned configuration data. The WM publishes it for the
-// standalone bar, but never executes script commands itself.
+// standalone bar, but never executes script or button commands itself.
 Raw_Bar_Block :: struct {
     kind: Bar_Block_Kind,
     alignment: Bar_Block_Alignment,
@@ -979,6 +980,23 @@ parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string)
             kind = .Script, alignment = alignment,
             name = strings.clone(name), command = strings.clone(command),
             interval_ms = interval * 1000, timeout_ms = timeout * 1000,
+        })
+    case "button":
+        alignment_text, ok_alignment := next_directive_field(&remaining)
+        label, ok_label := next_directive_field(&remaining)
+        alignment, valid_alignment := parse_bar_alignment(alignment_text)
+        command := quoted_trim(remaining)
+        if !ok_alignment || !valid_alignment || !ok_label || label == "" || len(label) > 64 ||
+           command == "" || len(command) >= 1024 {
+            append(errs, fmt.aprintf(
+                "bar_block(button): expected alignment : label : command, got %q",
+                remaining,
+            ))
+            return false
+        }
+        append(&sc.bar_blocks, Raw_Bar_Block{
+            kind = .Button, alignment = alignment,
+            name = strings.clone(label), command = strings.clone(command),
         })
     case:
         append(errs, fmt.aprintf("bar_block: unknown block kind %q", kind))

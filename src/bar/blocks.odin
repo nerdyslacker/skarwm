@@ -7,7 +7,7 @@ import "core:strconv"
 import "core:strings"
 
 Block_Alignment :: enum u8 { Left, Center, Right }
-Block_Kind :: enum u8 { Workspaces, Script, Systray }
+Block_Kind :: enum u8 { Workspaces, Script, Systray, Button }
 
 Block_Measure_Proc :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32
 Block_Draw_Proc :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, block_index: int)
@@ -126,6 +126,13 @@ blocks_read_managed :: proc(state: ^State) -> bool {
         } else if len(fields) == 2 && fields[0] == "systray" {
             if alignment, valid := parse_block_alignment(fields[1]); valid {
                 append_systray_block(state, alignment)
+                parsed_any = true
+            }
+        } else if len(fields) == 4 && fields[0] == "button" {
+            if alignment, valid := parse_block_alignment(fields[1]); valid &&
+               fields[2] != "" && fields[3] != "" &&
+               len(fields[2]) <= 64 && len(fields[3]) < 1024 {
+                append_button_block(state, alignment, fields[2], fields[3])
                 parsed_any = true
             }
         }

@@ -54,6 +54,14 @@ bar_publish_blocks :: proc() {
             strings.write_string(&builder, "systray\t")
             strings.write_i64(&builder, i64(block.alignment))
             strings.write_byte(&builder, '\n')
+        case .Button:
+            strings.write_string(&builder, "button\t")
+            strings.write_i64(&builder, i64(block.alignment))
+            strings.write_byte(&builder, '\t')
+            bar_write_escaped(&builder, block.name)
+            strings.write_byte(&builder, '\t')
+            bar_write_escaped(&builder, block.command)
+            strings.write_byte(&builder, '\n')
         }
     }
     payload := strings.to_string(builder)
