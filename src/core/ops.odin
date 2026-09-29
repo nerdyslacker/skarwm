@@ -216,7 +216,7 @@ Add_Managed :: proc(m: ^Manager, ws: ^Workspace, cl: ^Client, floating: bool, ta
         cl.FloatingRect = Rect {}
         o := cl.Out
         if o != nil {
-            p := compute_params(m.Cfg, o.Geom, 0) // ColW unused for floating
+            p := compute_params(m.Cfg, o.Geom, 0, o.Reserved) // ColW unused for floating
             if workspace_floating {
                 cl.FloatingRect = cascaded_float_rect(p, o.Geom, len(ws.Floaters))
             } else {
@@ -1051,7 +1051,7 @@ Set_Floating :: proc(m: ^Manager, cl: ^Client, on: bool) {
         if rect_empty(cl.FloatingRect) {
             o := cl.Out
             if o != nil {
-                p := compute_params(m.Cfg, o.Geom, 0) // ColW unused for floating
+                p := compute_params(m.Cfg, o.Geom, 0, o.Reserved) // ColW unused for floating
                 cl.FloatingRect = default_float_rect(p, o.Geom)
             } else {
                 cl.FloatingRect = Rect { X = 40, Y = 40, W = 640, H = 480 }

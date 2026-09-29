@@ -54,6 +54,9 @@ decoration_color_source : active-border
 # True (default): moving the pointer over a window focuses it.
 focus_follows_mouse : true
 
+# A scroll preview focuses only after the pointer remains on it for this long.
+preview_hover_delay_ms : 250
+
 # Time-based layout transitions. Disable for immediate geometry updates and no
 # animation timer work. Easing may be `linear` or `ease_out_cubic`.
 animations : true

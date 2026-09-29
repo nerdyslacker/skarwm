@@ -62,6 +62,9 @@ Client :: struct {
 
     // User/session geometry: where a floating window lives.
     FloatingRect: Rect,
+    // Root geometry observed before the WM first arranged the window. Retained
+    // so a late DOCK type can undo provisional tiling without guessing.
+    InitialRect: Rect,
 
     Floating:   bool, // participates in floating layout (in ws.Floaters)
     // Set only when workspace-wide Floating mode moved this client out of the

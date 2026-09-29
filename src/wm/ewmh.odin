@@ -302,6 +302,16 @@ ewmh_client_managed :: proc(cl: ^c.Client) {
     ewmh_push_client_list()
 }
 
+// A panel may publish _NET_WM_WINDOW_TYPE_DOCK just after its MapRequest. Drop
+// the workspace property written during provisional normal-window management
+// when that late classification is corrected.
+ewmh_client_became_dock :: proc(cl: ^c.Client) {
+    if cl == nil { return }
+    delete_key(&g_wm.ewmh.win_desktop, cl.Xid)
+    x11.xcb_delete_property(g_wm.conn, cl.Xid, atom("_NET_WM_DESKTOP"))
+    ewmh_push_client_list()
+}
+
 // ewmh_client_unmanaged runs before the client is freed: withdraw it (while
 // the X window may still exist), drop it from _NET_CLIENT_LIST and forget the
 // dedupe caches so a later re-manage of the same xid starts clean.

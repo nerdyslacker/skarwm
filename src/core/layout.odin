@@ -60,6 +60,15 @@ compute_params :: proc(cfg: Config, geom: Rect, n_cols: int, res: Insets = {}) -
     return
 }
 
+// Output_Work_Area exposes the exact reserved-and-gapped viewport used by the
+// layout. The renderer uses the same rectangle to clip translated scroll
+// previews, preventing them from showing through transparent docks.
+Output_Work_Area :: proc(m: ^Manager, o: ^Output) -> Rect {
+    if m == nil || o == nil { return {} }
+    p := compute_params(m.Cfg, o.Geom, 0, o.Reserved)
+    return Rect{X = p.WorkX, Y = p.WorkY, W = max(i32(0), p.WorkW), H = max(i32(0), p.WorkH)}
+}
+
 // Resolve_Page_Width returns the uniform tile width for a workspace holding
 // `n_cols` columns. Fewer than PAGE_COLS columns expand to exactly fill the
 // work width; with PAGE_COLS or more each column is a page width chosen so that
@@ -255,24 +264,6 @@ Scroll_Preview :: struct {
     Side:   Scroll_Preview_Side,
     Client: ^Client,
     Geom:   Rect,
-}
-
-// Scroll_Preview_Allows_Passive_Reveal distinguishes intentional movement
-// into a content-edge preview from crossing that preview on the way to a dock.
-// A preview beside a reserved edge remains visible and clickable, but hover
-// alone must not reflow the workspace underneath the pointer before it reaches
-// the bar. This applies to all four orientations, including side panels.
-Scroll_Preview_Allows_Passive_Reveal :: proc(preview: Scroll_Preview) -> bool {
-    if preview.Client == nil || preview.Client.Out == nil { return true }
-    reserved := preview.Client.Out.Reserved
-    switch preview.Side {
-    case .Left:   return reserved.Left <= 0
-    case .Right:  return reserved.Right <= 0
-    case .Top:    return reserved.Top <= 0
-    case .Bottom: return reserved.Bottom <= 0
-    case .None:
-    }
-    return true
 }
 
 // scroll_preview_columns finds the nearest completely hidden column on each
@@ -568,6 +559,21 @@ client_outer_rect :: proc(cl: ^Client, border_width: i32) -> Rect {
         W = cl.Geom.W + 2 * border,
         H = cl.Geom.H + 2 * border,
     }
+}
+
+// Client_Needs_Work_Area_Clip identifies translated scroller previews (and
+// parked scroller clients) whose authoritative outer rectangle crosses a
+// reserved work-area edge. Ordinary tiled clients retain the older physical-
+// output mask, avoiding any startup interaction with panels being adopted.
+Client_Needs_Work_Area_Clip :: proc(m: ^Manager, cl: ^Client) -> bool {
+    if m == nil || cl == nil || cl.Ws == nil || cl.Out == nil || cl.Floating || cl.Dock {
+        return false
+    }
+    if cl.Ws.Layout != .Scroller && cl.Ws.Layout != .Vertical_Scroller { return false }
+    work := Output_Work_Area(m, cl.Out)
+    outer := client_outer_rect(cl, cl.Border)
+    return outer.X < work.X || outer.Y < work.Y ||
+        outer.X + outer.W > work.X + work.W || outer.Y + outer.H > work.Y + work.H
 }
 
 // drop_target_at_point: The window beneath the pointer (or the nearest visible tiled window)
@@ -1433,7 +1439,12 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
     for fl in ws.Floaters {
         r := fl.FloatingRect
         if rect_empty(r) { r = default_float_rect(p, geom) }
-        r = clamp_float_rect(r, geom)
+        if fl.LayoutFloating {
+            r = clamp_float_rect_to_work_area(r, p)
+            fl.FloatingRect = r
+        } else {
+            r = clamp_float_rect(r, geom)
+        }
         place_client_in_tile(ws, fl, r, p.Border)
     }
 
@@ -1454,11 +1465,23 @@ default_float_rect :: proc(p: Layout_Params, geom: Rect) -> Rect {
     if w > p.WorkW { w = p.WorkW }
     if h > p.WorkH { h = p.WorkH }
     return Rect {
-        X = geom.X + (geom.W - w) / 2,
-        Y = geom.Y + (geom.H - h) / 2,
+        X = p.WorkX + (p.WorkW - w) / 2,
+        Y = p.WorkY + (p.WorkH - h) / 2,
         W = w,
         H = h,
     }
+}
+
+// clamp_float_rect_to_work_area keeps workspace-layout-owned floating windows
+// fully inside the reserved-and-gapped work area. Manually positioned floaters
+// continue to use clamp_float_rect and may intentionally overlap panels.
+clamp_float_rect_to_work_area :: proc(r: Rect, p: Layout_Params) -> Rect {
+    result := r
+    result.W = clamp(result.W, i32(1), max(i32(1), p.WorkW))
+    result.H = clamp(result.H, i32(1), max(i32(1), p.WorkH))
+    result.X = clamp(result.X, p.WorkX, p.WorkX + p.WorkW - result.W)
+    result.Y = clamp(result.Y, p.WorkY, p.WorkY + p.WorkH - result.H)
+    return result
 }
 
 // cascaded_float_rect gives automatically floated windows distinct starting
@@ -1490,6 +1513,20 @@ clamp_float_rect :: proc(r: Rect, geom: Rect) -> Rect {
     return res
 }
 
+// clamp_dock_rect keeps the complete native panel surface inside its physical
+// output. The looser floating-window clamp above deliberately leaves only a
+// small grab handle visible when a user moves a window off-screen; applying
+// that policy to a dock can reduce a side bar to a narrow 40 px strip while
+// its shell is still settling its startup geometry.
+clamp_dock_rect :: proc(r: Rect, bounds: Rect) -> Rect {
+    res := r
+    res.W = clamp(res.W, i32(1), max(i32(1), bounds.W))
+    res.H = clamp(res.H, i32(1), max(i32(1), bounds.H))
+    res.X = clamp(res.X, bounds.X, bounds.X + bounds.W - res.W)
+    res.Y = clamp(res.Y, bounds.Y, bounds.Y + bounds.H - res.H)
+    return res
+}
+
 // Arrange_All recomputes every window rect: the current workspace on screen,
 // all others hidden, and output docks at their requested geometry. X stacking
 // keeps docks above normal windows and below fullscreen. Call after any
@@ -1513,7 +1550,20 @@ Arrange_All :: proc(m: ^Manager) {
             if rect_empty(r) {
                 r = Rect { X = o.Geom.X, Y = o.Geom.Y, W = o.Geom.W, H = 24 }
             }
-            d.Geom = clamp_float_rect(r, o.Geom)
+            // A logical output may be one virtual screen within a physical
+            // RandR output. A dock is allowed to span those siblings, so use
+            // the parent bounds while still forbidding any physical crop.
+            bounds := o.Geom
+            if o.Parent != nil { bounds = o.Parent.Geom }
+            normalized := clamp_dock_rect(r, bounds)
+            if normalized != r {
+                // Make the correction authoritative. Otherwise a later
+                // partial ConfigureRequest starts from the stale off-screen
+                // FloatingRect and can bring the crop back.
+                d.FloatingRect = normalized
+                Capture_Dock_Anchors(d, o, true)
+            }
+            d.Geom = normalized
             d.Border = 0
         }
     }

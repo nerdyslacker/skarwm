@@ -58,6 +58,8 @@ main :: proc() {
     test_workspace_layouts()
     test_vertical_scroller()
     test_vertical_scroller_drop_targets()
+    test_output_work_area()
+    test_floating_reserved_right_edge()
     test_multi_output()
     test_virtual_screens()
     test_multi_output_scrolling()
@@ -75,6 +77,7 @@ main :: proc() {
     test_dock_fullscreen_coexists()
     test_dock_unmanage_restores()
     test_dock_reserved_ensure_visible()
+    test_late_dock_promotion_model()
     test_ipc_frames()
     test_ipc_workspaces_payload()
     test_ipc_outputs_payload()
@@ -90,6 +93,64 @@ main :: proc() {
         fmt.eprintln("UNIT TESTS FAILED")
         os.exit(1)
     }
+}
+
+test_late_dock_promotion_model :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    provisional := add_tiled(m, 481)
+    fallback := add_tiled(m, 482)
+    c.Focus_Client(m, provisional)
+
+    c.Unmanage_Client(m, provisional)
+    provisional.FloatingRect = c.Rect{X = 1880, Y = 0, W = 40, H = 1080}
+    provisional.Strut = c.Insets{Right = 40}
+    c.Add_Dock_To_Output(m, c.Active_Output(m), provisional)
+
+    ok(provisional.Dock && provisional.Ws == nil, "late dock promotion removes workspace membership")
+    eq(m.ByXid[provisional.Xid], provisional, "late dock promotion re-registers the same client")
+    eq(len(ws.Cols), 1, "late dock promotion removes its provisional tile")
+    eq(m.Focused, fallback, "late dock promotion restores workspace fallback focus")
+    eq(c.Active_Output(m).Reserved.Right, i32(40), "late right dock promotion updates reservations")
+    ok(!c.Client_Needs_Work_Area_Clip(m, provisional), "promoted dock cannot retain preview clipping")
+}
+
+test_floating_reserved_right_edge :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    output := c.Active_Output(m)
+    output.Reserved.Right = 120
+    _ = add_tiled(m, 471)
+    _ = add_tiled(m, 472)
+    ok(c.Set_Workspace_Layout(m, .Floating), "enter floating mode with a right-side bar")
+    c.Arrange_All(m)
+    work := c.Output_Work_Area(m, output)
+    for fl in ws.Floaters {
+        ok(fl.LayoutFloating, "workspace floating client retains layout ownership")
+        ok(fl.FloatingRect.X + fl.FloatingRect.W <= work.X + work.W,
+            "floating mode leaves the configured right work-area gap")
+    }
+    fresh := add_tiled(m, 473)
+    ok(fresh.FloatingRect.X + fresh.FloatingRect.W <= work.X + work.W,
+        "new floating-mode window respects the right-side bar")
+}
+
+test_output_work_area :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    output := c.Active_Output(m)
+    eq(c.Output_Work_Area(m, output), c.Rect{X = 8, Y = 8, W = 1904, H = 1064},
+        "output work area starts at the configured outer gap")
+    output.Reserved = c.Insets{Left = 5, Right = 7, Top = 30, Bottom = 20}
+    eq(c.Output_Work_Area(m, output), c.Rect{X = 13, Y = 38, W = 1892, H = 1014},
+        "output work area excludes every reserved bar edge")
+    dock := add_dock(m, 469, c.Insets{Top = 30}, c.Rect{X = 0, Y = 0, W = 1920, H = 30})
+    ok(!c.Client_Needs_Work_Area_Clip(m, dock),
+        "dock windows never receive a scroller work-area clip")
 }
 
 test_vertical_scroller :: proc() {
@@ -110,6 +171,8 @@ test_vertical_scroller :: proc() {
         "vertical scroller gives the selected row the page")
     ok(b.Geom.Y + b.Geom.H > GEOM.H, "next vertical row is only a bottom peek")
     ok(d.Geom.X <= c.HIDE_X, "vertical scroller parks rows below its viewport")
+    ok(!c.Client_Needs_Work_Area_Clip(m, a), "selected vertical row needs no preview clip")
+    ok(c.Client_Needs_Work_Area_Clip(m, b), "vertical peek is clipped to the work area")
     eq(ws.ViewportY, i32(0), "vertical viewport starts at the top")
 
     first_previews := c.Scroll_Previews(m, c.Active_Output(m))
@@ -117,13 +180,6 @@ test_vertical_scroller :: proc() {
     if len(first_previews) == 1 {
         eq(first_previews[0].Side, c.Scroll_Preview_Side.Bottom, "first vertical preview points down")
         eq(first_previews[0].Client, b, "bottom preview belongs to the next row")
-        ok(c.Scroll_Preview_Allows_Passive_Reveal(first_previews[0]),
-            "bottom preview normally allows hover reveal")
-        output := c.Active_Output(m)
-        output.Reserved.Bottom = 32
-        ok(!c.Scroll_Preview_Allows_Passive_Reveal(first_previews[0]),
-            "bottom bar suppresses passive reveal while leaving the preview present")
-        output.Reserved.Bottom = 0
     }
     delete(first_previews)
 
@@ -137,11 +193,6 @@ test_vertical_scroller :: proc() {
     if len(last_previews) == 1 {
         eq(last_previews[0].Side, c.Scroll_Preview_Side.Top, "last vertical preview points up")
         eq(last_previews[0].Client, b, "top preview belongs to the previous row")
-        output := c.Active_Output(m)
-        output.Reserved.Top = 32
-        ok(!c.Scroll_Preview_Allows_Passive_Reveal(last_previews[0]),
-            "top bar suppresses passive reveal while leaving the preview clickable")
-        output.Reserved.Top = 0
     }
     delete(last_previews)
     ok(c.Scroll_Viewport(m, -1), "wheel action scrolls the vertical strip upward")
@@ -271,6 +322,7 @@ test_config :: proc() {
     eq(cfg.BorderWidth, 2, "default border")
     eq(cfg.CornerRadius, 0, "rounded corners disabled by default")
     ok(cfg.FocusFollowsMouse, "default focus-follows-mouse")
+    eq(cfg.PreviewHoverDelayMs, i32(250), "default preview hover delay")
     ok(cfg.Animations, "animations enabled by default")
     eq(cfg.AnimationDurationMs, i32(180), "default animation duration")
     eq(cfg.AnimationFps, i32(60), "default animation frame rate")
@@ -2023,6 +2075,21 @@ test_dock_geometry_and_struts :: proc() {
     eq(p3.WorkX, 8, "zero insets: WorkX = outer gap")
     eq(p3.WorkY, 8, "zero insets: WorkY = outer gap")
     eq(p3.WorkW, 1904, "zero insets: WorkW = plain work width")
+
+    // Panels can briefly publish coordinates just beyond their final edge
+    // while an X11 shell resolves anchors. Unlike ordinary floaters, docks
+    // must never retain the generic 40 px off-screen grab-handle geometry.
+    left := add_dock(m, 303, c.Insets { Left = 48 },
+        c.Rect { X = -40, Y = -12, W = 48, H = 1104 })
+    right := add_dock(m, 304, c.Insets { Right = 48 },
+        c.Rect { X = 1912, Y = -12, W = 48, H = 1104 })
+    c.Arrange_All(m)
+    eq(left.Geom, c.Rect { X = 0, Y = 0, W = 48, H = 1080 },
+        "left dock is fully contained instead of partially cropped")
+    eq(right.Geom, c.Rect { X = 1872, Y = 0, W = 48, H = 1080 },
+        "right dock is fully contained instead of partially cropped")
+    eq(left.FloatingRect, left.Geom, "left dock persists normalized geometry")
+    eq(right.FloatingRect, right.Geom, "right dock persists normalized geometry")
 }
 
 // Docks are output-level: they outlive workspace switches that park windows.

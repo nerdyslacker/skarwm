@@ -247,6 +247,10 @@ event_loop :: proc() {
         if timeout < 0 || (reminder_timeout >= 0 && reminder_timeout < timeout) {
             timeout = reminder_timeout
         }
+        preview_timeout := preview_hover_poll_timeout_ms()
+        if timeout < 0 || (preview_timeout >= 0 && preview_timeout < timeout) {
+            timeout = preview_timeout
+        }
         if posix.poll(raw_data(pfds), posix.nfds_t(len(pfds)), timeout) < 0 {
             delete(pfds) // EINTR or a signal: repoll
             continue
@@ -262,6 +266,7 @@ event_loop :: proc() {
                 rendering.Run_Due_Frame(&g_wm.rendering, g_wm.conn, g_wm.m)
                 ui.Hide_Due_Notice(&g_wm.ui)
                 reminder_run_due()
+                preview_hover_run_due()
             }
         }
 
@@ -297,6 +302,7 @@ event_loop :: proc() {
         rendering.Run_Due_Frame(&g_wm.rendering, g_wm.conn, g_wm.m)
         ui.Hide_Due_Notice(&g_wm.ui)
         reminder_run_due()
+        preview_hover_run_due()
     }
 }
 

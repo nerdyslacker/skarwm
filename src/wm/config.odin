@@ -138,7 +138,7 @@ Load_Scratch :: struct {
     // numeric / boolean / colour config overrides (defaults applied at build)
     gap, outer_gap, inner_gap, border, corner_radius: i32,
     ffm, animations: bool,
-    animation_duration_ms, animation_fps: i32,
+    animation_duration_ms, animation_fps, preview_hover_delay_ms: i32,
     animation_easing: c.Animation_Easing,
     focused, unfocused: u32,
     decoration: c.Decoration_Config,
@@ -151,7 +151,7 @@ Load_Scratch :: struct {
     bar_tag_foreground, bar_tag_background: u32,
     bar_block_foreground, bar_block_background: u32,
     gap_set, outer_set, inner_set, border_set, corner_radius_set, ffm_set: bool,
-    animations_set, animation_duration_set, animation_fps_set, animation_easing_set: bool,
+    animations_set, animation_duration_set, animation_fps_set, animation_easing_set, preview_hover_delay_set: bool,
     focused_set, unfocused_set: bool,
     decoration_enabled_set, decoration_titlebar_height_set: bool,
     decoration_border_width_set, decoration_resize_hit_width_set: bool,
@@ -560,6 +560,7 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.border_set  { r.cfg.BorderWidth = sc.border }
     if sc.corner_radius_set { r.cfg.CornerRadius = sc.corner_radius }
     if sc.ffm_set     { r.cfg.FocusFollowsMouse = sc.ffm }
+    if sc.preview_hover_delay_set { r.cfg.PreviewHoverDelayMs = sc.preview_hover_delay_ms }
     if sc.animations_set { r.cfg.Animations = sc.animations }
     if sc.animation_duration_set { r.cfg.AnimationDurationMs = sc.animation_duration_ms }
     if sc.animation_fps_set { r.cfg.AnimationFps = sc.animation_fps }
@@ -782,6 +783,15 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         v, ok := parse_bool_value(value)
         if !ok { append(errs, fmt.aprintf("focus_follows_mouse: expected true/false, got %q", value)); return false }
         sc.ffm = v; sc.ffm_set = true
+        return true
+
+    case "preview_hover_delay_ms":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 0 || n > 5000 {
+            append(errs, fmt.aprintf("preview_hover_delay_ms: expected 0..5000, got %q", value))
+            return false
+        }
+        sc.preview_hover_delay_ms = n; sc.preview_hover_delay_set = true
         return true
 
     case "animations":

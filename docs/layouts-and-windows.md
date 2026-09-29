@@ -32,6 +32,10 @@ stacked/tabbed column grouping intact when returning to Scrolling Tile.
 A window floated this way remains floating when the workspace enters and later
 leaves its all-window Floating mode.
 
+Workspace-wide Floating places and keeps its automatically floated windows
+inside the reserved work area, including gaps beside left/right bars. Manually
+positioned floating windows may still overlap panels intentionally.
+
 ## Columns
 
 New tiled windows become horizontal columns. One column fills the work area;

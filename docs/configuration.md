@@ -37,6 +37,7 @@ Without a file, built-in settings and bindings are used. Copy
 | `decoration_active_border : #89B4FA` | Explicit active frame colour. |
 | `decoration_inactive_border : #45475A` | Explicit inactive frame colour. |
 | `focus_follows_mouse : true` | Focus a window when the pointer enters it. |
+| `preview_hover_delay_ms : 250` | Delay before a stationary pointer reveals a scroll preview, `0..5000`. |
 | `animations : true` | Enable layout transitions. |
 | `animation_duration_ms : 180` | Transition duration, `0..5000`. |
 | `animation_fps : 60` | Animation target rate, `1..240`. |

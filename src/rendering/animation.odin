@@ -65,6 +65,7 @@ configure_client_geometry :: proc(
             x11.CW_X | x11.CW_Y | x11.CW_WIDTH | x11.CW_HEIGHT | x11.CW_BORDER_WIDTH,
             &frame_vals[0],
         )
+        shape_decoration_frame(state, conn, m, cl, frame, constrain_to_output)
     }
     vals := [5]u32 {
         u32(i16(client_geom.X)),

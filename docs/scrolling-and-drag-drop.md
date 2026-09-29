@@ -8,11 +8,14 @@ horizontal strip.
 - `Super`+wheel down reveals columns to the right.
 - `Super`+wheel up reveals columns to the left.
 - A narrow continuation of the real neighboring window remains visible at
-  each available edge. Hover it to reveal and focus that window.
-- Vertical-scroller previews use the same behavior at the top and bottom. If
-  that edge is reserved by a bar, passive hover is suppressed so the pointer
-  can reach the bar without changing focus; clicking the preview still reveals
-  it.
+  each available edge. Hold the pointer over it for `preview_hover_delay_ms`
+  to reveal and focus that window.
+- Vertical-scroller previews use the same behavior at the top and bottom. The
+  hover delay lets the pointer cross a preview on its way to a bar without
+  changing focus, while pausing on the preview reveals it intentionally.
+  Preview surfaces and native decoration frames are clipped to the usable work
+  area, so transparent or floating bar sections do not reveal the window
+  underneath.
 - Edge space is reserved with the normal inner gap, so previews do not overlap
   visible columns.
 - A maximized column remains full-width while scrolling and pushes its
