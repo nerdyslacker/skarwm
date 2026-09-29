@@ -31,6 +31,7 @@ package core
 
 HIDE_X :: -20000 // park off-screen windows here (kept within X int16 range)
 PAGE_COLS :: 2 // columns that fit on screen before the strip starts scrolling
+PAGE_ROWS :: 1 // focused row shown between top/bottom neighbor previews
 TAB_BAR_HEIGHT :: i32(24)
 SCROLL_PREVIEW_WIDTH :: i32(20)
 
@@ -160,6 +161,56 @@ Default_Column_Width :: proc(m: ^Manager, o: ^Output, ws: ^Workspace) -> i32 {
     return p.ColW
 }
 
+vertical_row_height :: proc(p: Layout_Params, ws: ^Workspace, index: int) -> i32 {
+    if ws == nil || index < 0 || index >= len(ws.Cols) { return 0 }
+    if column_has_maximized(ws.Cols[index]) { return p.WorkH }
+    count := i32(min(len(ws.Cols), PAGE_ROWS))
+    natural := (p.WorkH - p.Inner * (count - 1)) / count
+    natural = clamp(natural, i32(40), p.WorkH)
+    if ws.Cols[index].Height > 0 {
+        return clamp(ws.Cols[index].Height, i32(40), p.WorkH)
+    }
+    return natural
+}
+
+workspace_row_top :: proc(ws: ^Workspace, p: Layout_Params, idx: int) -> i32 {
+    y := i32(0)
+    if ws == nil { return y }
+    for i in 0 ..< min(idx, len(ws.Cols)) {
+        y += vertical_row_height(p, ws, i) + p.Inner
+    }
+    return y
+}
+
+workspace_vertical_total :: proc(ws: ^Workspace, p: Layout_Params) -> i32 {
+    if ws == nil || len(ws.Cols) == 0 { return 0 }
+    total := i32(0)
+    for _, i in ws.Cols {
+        total += vertical_row_height(p, ws, i)
+        if i + 1 < len(ws.Cols) { total += p.Inner }
+    }
+    return total
+}
+
+clamp_vertical_viewport :: proc(vp: i32, ws: ^Workspace, p: Layout_Params) -> i32 {
+    max_vp := workspace_vertical_total(ws, p) - p.WorkH
+    if max_vp < 0 { max_vp = 0 }
+    return clamp(vp, i32(0), max_vp)
+}
+
+ensure_workspace_row_visible :: proc(vp: i32, ws: ^Workspace, p: Layout_Params, idx: int) -> i32 {
+    if ws == nil || idx < 0 || idx >= len(ws.Cols) { return 0 }
+    top := workspace_row_top(ws, p, idx)
+    bottom := top + vertical_row_height(p, ws, idx)
+    next := vp
+    if top < next {
+        next = top
+    } else if bottom > next + p.WorkH {
+        next = bottom - p.WorkH
+    }
+    return clamp_vertical_viewport(next, ws, p)
+}
+
 workspace_col_left :: proc(ws: ^Workspace, p: Layout_Params, idx: int) -> i32 {
     x := i32(0)
     if ws == nil { return x }
@@ -198,12 +249,30 @@ ensure_workspace_col_visible :: proc(vp: i32, ws: ^Workspace, p: Layout_Params, 
     return clamp_workspace_viewport(next, ws, p)
 }
 
-Scroll_Preview_Side :: enum u8 { None, Left, Right }
+Scroll_Preview_Side :: enum u8 { None, Left, Right, Top, Bottom }
 
 Scroll_Preview :: struct {
     Side:   Scroll_Preview_Side,
     Client: ^Client,
     Geom:   Rect,
+}
+
+// Scroll_Preview_Allows_Passive_Reveal distinguishes intentional movement
+// into a content-edge preview from crossing that preview on the way to a dock.
+// A preview beside a reserved edge remains visible and clickable, but hover
+// alone must not reflow the workspace underneath the pointer before it reaches
+// the bar. This applies to all four orientations, including side panels.
+Scroll_Preview_Allows_Passive_Reveal :: proc(preview: Scroll_Preview) -> bool {
+    if preview.Client == nil || preview.Client.Out == nil { return true }
+    reserved := preview.Client.Out.Reserved
+    switch preview.Side {
+    case .Left:   return reserved.Left <= 0
+    case .Right:  return reserved.Right <= 0
+    case .Top:    return reserved.Top <= 0
+    case .Bottom: return reserved.Bottom <= 0
+    case .None:
+    }
+    return true
 }
 
 // scroll_preview_columns finds the nearest completely hidden column on each
@@ -224,6 +293,28 @@ scroll_preview_columns :: proc(ws: ^Workspace, p: Layout_Params) -> (left, right
             left = ci
         } else if x >= work_right && right < 0 {
             right = ci
+        }
+    }
+    return
+}
+
+// vertical_scroll_preview_rows is the vertical counterpart of
+// scroll_preview_columns. It selects the nearest completely hidden row above
+// and below the current one; Arrange exposes a thin edge of those real rows.
+vertical_scroll_preview_rows :: proc(ws: ^Workspace, p: Layout_Params) -> (top, bottom: int) {
+    top, bottom = -1, -1
+    if ws == nil || len(ws.Cols) == 0 || workspace_vertical_total(ws, p) <= p.WorkH { return }
+    if ws.Focus != nil && ws.Focus.Fullscreen { return }
+    for col in ws.Cols { if column_has_maximized(col) { return } }
+    work_top := p.WorkY
+    work_bottom := p.WorkY + p.WorkH
+    for _, ci in ws.Cols {
+        y := p.WorkY - ws.ViewportY + workspace_row_top(ws, p, ci)
+        h := vertical_row_height(p, ws, ci)
+        if y + h <= work_top {
+            top = ci
+        } else if y >= work_bottom && bottom < 0 {
+            bottom = ci
         }
     }
     return
@@ -281,6 +372,30 @@ Scroll_Previews :: proc(m: ^Manager, o: ^Output) -> [dynamic]Scroll_Preview {
     result := make([dynamic]Scroll_Preview, 0, 4)
     if m == nil || o == nil || o.Current == nil { return result }
     ws := o.Current
+    if ws.Layout == .Vertical_Scroller {
+        p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+        top, bottom := vertical_scroll_preview_rows(ws, p)
+        indices := [2]int{top, bottom}
+        for ci, edge in indices {
+            if ci < 0 { continue }
+            side := Scroll_Preview_Side.Top if edge == 0 else .Bottom
+            zone_y := p.WorkY
+            if edge == 1 { zone_y = p.WorkY + p.WorkH - SCROLL_PREVIEW_WIDTH }
+            zone_h := min(SCROLL_PREVIEW_WIDTH, vertical_row_height(p, ws, ci))
+            col := ws.Cols[ci]
+            for cl in col.Wins {
+                if cl.Geom.X <= HIDE_X { continue }
+                left := max(p.WorkX, cl.Geom.X - p.Border)
+                right := min(p.WorkX + p.WorkW, cl.Geom.X + cl.Geom.W + p.Border)
+                if right <= left { continue }
+                append(&result, Scroll_Preview{
+                    Side = side, Client = cl,
+                    Geom = Rect{X = left, Y = zone_y, W = right - left, H = zone_h},
+                })
+            }
+        }
+        return result
+    }
     if ws.Layout != .Scroller { return result }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
     partial_left, partial_right := custom_partial_columns(ws, p)
@@ -372,6 +487,20 @@ Scroll_Preview_At_Point :: proc(m: ^Manager, x, y: i32) -> (preview: Scroll_Prev
 Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) -> (Rect, bool) {
     if m == nil || o == nil || ws == nil || col_index < 0 || col_index >= len(ws.Cols) {
         return {}, false
+    }
+    if ws.Layout == .Vertical_Scroller {
+        p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+        top, bottom := vertical_scroll_preview_rows(ws, p)
+        if col_index == top || col_index == bottom || column_has_maximized(ws.Cols[col_index]) {
+            return {}, false
+        }
+        logical_y := p.WorkY - ws.ViewportY + workspace_row_top(ws, p, col_index)
+        row_h := vertical_row_height(p, ws, col_index)
+        if logical_y < p.WorkY || logical_y + row_h > p.WorkY + p.WorkH { return {}, false }
+        y := p.WorkY
+        if top >= 0 { y += min(SCROLL_PREVIEW_WIDTH, vertical_row_height(p, ws, top)) + p.Inner }
+        h := min(TAB_BAR_HEIGHT, max(i32(1), p.WorkH - (y - p.WorkY) - 1))
+        return Rect{X = p.WorkX, Y = y, W = p.WorkW, H = h}, true
     }
     if ws.Layout != .Scroller { return {}, false }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
@@ -512,6 +641,30 @@ drop_target_at_point :: proc(m: ^Manager, x, y: i32, dragged: ^Client) -> Drop_T
 
     target := Drop_Target{Zone = zone, Out = o, Ws = ws, Col = col, Target = closest, HitGeom = r}
     target.Geom = r
+    if ws.Layout == .Vertical_Scroller {
+        switch zone {
+        case .Left:
+            target.Kind = .Into_Column
+            target.Row_Index = row
+            target.Geom.W /= 2
+        case .Right:
+            target.Kind = .Into_Column
+            target.Row_Index = row + 1
+            target.Geom.W /= 2
+            target.Geom.X = r.X + r.W - target.Geom.W
+        case .Top:
+            target.Kind = .New_Column
+            target.Insert_Index = ci
+            target.Geom.H /= 2
+        case .Bottom:
+            target.Kind = .New_Column
+            target.Insert_Index = ci + 1
+            target.Geom.H /= 2
+            target.Geom.Y = r.Y + r.H - target.Geom.H
+        case .None:
+        }
+        return target
+    }
     switch zone {
     case .Left:
         target.Kind = .New_Column
@@ -619,6 +772,18 @@ Drop_Targets :: proc(m: ^Manager, dragged: ^Client = nil) -> [dynamic]Drop_Targe
             append(&targets, Drop_Target{Kind = .New_Column, Zone = .Top, Out = o, Ws = ws, Insert_Index = 0, Geom = top, HitGeom = top_hit})
             append(&targets, Drop_Target{Kind = .New_Column, Zone = .Bottom, Out = o, Ws = ws, Insert_Index = 0, Geom = bottom, HitGeom = bottom_hit})
         } else {
+            if ws.Layout == .Vertical_Scroller {
+                horizontal_col := drop_focus_column(ws, dragged)
+                top_col := drop_horizontal_column(ws, dragged, .Left)
+                bottom_col := drop_horizontal_column(ws, dragged, .Right)
+                top_index := drop_column_index(ws, top_col)
+                bottom_index := drop_column_index(ws, bottom_col)
+                append(&targets, Drop_Target{Kind = .Into_Column, Zone = .Left, Out = o, Ws = ws, Col = horizontal_col, Row_Index = 0, Geom = left, HitGeom = left_hit})
+                append(&targets, Drop_Target{Kind = .Into_Column, Zone = .Right, Out = o, Ws = ws, Col = horizontal_col, Row_Index = len(horizontal_col.Wins), Geom = right, HitGeom = right_hit})
+                append(&targets, Drop_Target{Kind = .New_Column, Zone = .Top, Out = o, Ws = ws, Col = top_col, Insert_Index = max(0, top_index), Geom = top, HitGeom = top_hit})
+                append(&targets, Drop_Target{Kind = .New_Column, Zone = .Bottom, Out = o, Ws = ws, Col = bottom_col, Insert_Index = max(0, bottom_index + 1), Geom = bottom, HitGeom = bottom_hit})
+                continue
+            }
             left_col := drop_horizontal_column(ws, dragged, .Left)
             right_col := drop_horizontal_column(ws, dragged, .Right)
             left_index := drop_column_index(ws, left_col)
@@ -778,6 +943,24 @@ Column_Drop_Target_At_Point :: proc(m: ^Manager, x, y: i32, member: ^Client) -> 
         }
         if representative == nil { continue }
         outer := client_outer_rect(representative, m.Cfg.BorderWidth)
+        if ws.Layout == .Vertical_Scroller {
+            r := Rect{X = p.WorkX, Y = outer.Y, W = p.WorkW, H = outer.H}
+            if rect_empty(r) || !drop_rect_contains(r, x, y) { continue }
+            zone := Drop_Zone.Top
+            insert_at := ci
+            drop_geom := r
+            drop_geom.H /= 2
+            if y >= r.Y + r.H / 2 {
+                zone = .Bottom
+                insert_at = ci + 1
+                drop_geom.Y = r.Y + r.H - drop_geom.H
+            }
+            return Drop_Target{
+                Kind = .New_Column, Zone = zone, Out = o, Ws = ws, Col = col,
+                Target = representative, Insert_Index = insert_at,
+                Geom = drop_geom, HitGeom = r,
+            }
+        }
         r := Rect{X = outer.X, Y = p.WorkY, W = outer.W, H = p.WorkH}
         if rect_empty(r) || !drop_rect_contains(r, x, y) { continue }
         zone := Drop_Zone.Left
@@ -925,7 +1108,7 @@ arrange_dwindle :: proc(ws: ^Workspace, clients: []^Client, p: Layout_Params) {
 
 // Returns true when a non-scrolling workspace mode handled tiled placement.
 arrange_workspace_mode :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect) -> bool {
-    if ws.Layout == .Scroller || ws.Layout == .Floating { return false }
+    if ws.Layout == .Scroller || ws.Layout == .Vertical_Scroller || ws.Layout == .Floating { return false }
     clients := workspace_tiled_clients(ws)
     defer delete(clients)
     if len(clients) == 0 { return true }
@@ -952,9 +1135,98 @@ arrange_workspace_mode :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect) -> 
         place_client_in_tile(ws, active,
             Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}, p.Border)
     case .Scroller:
+    case .Vertical_Scroller:
     case .Floating:
     }
     return true
+}
+
+// arrange_vertical_scroller is the axis-transposed counterpart of Scroller:
+// groups advance down a vertically scrollable strip and stacked group members
+// divide the row from left to right. The existing structural model is retained,
+// so switching between the two scrollers preserves ordering and tab groups.
+arrange_vertical_scroller :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect) {
+    if ws == nil || len(ws.Cols) == 0 || p.WorkW <= 0 || p.WorkH <= 0 { return }
+    ws.ViewportY = clamp_vertical_viewport(ws.ViewportY, ws, p)
+    hide := Rect{X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H}
+    preview_top, preview_bottom := vertical_scroll_preview_rows(ws, p)
+    top_reserve := i32(0)
+    bottom_reserve := i32(0)
+    if preview_top >= 0 {
+        top_reserve = min(SCROLL_PREVIEW_WIDTH, vertical_row_height(p, ws, preview_top)) + p.Inner
+    }
+    if preview_bottom >= 0 {
+        bottom_reserve = min(SCROLL_PREVIEW_WIDTH, vertical_row_height(p, ws, preview_bottom)) + p.Inner
+    }
+    for col, ci in ws.Cols {
+        nw := len(col.Wins)
+        if nw == 0 { continue }
+        row_h := vertical_row_height(p, ws, ci)
+        row_top := p.WorkY - ws.ViewportY + workspace_row_top(ws, p, ci)
+        is_preview := ci == preview_top || ci == preview_bottom
+        if ci == preview_top {
+            row_top = p.WorkY + min(SCROLL_PREVIEW_WIDTH, row_h) - row_h
+        } else if ci == preview_bottom {
+            row_top = p.WorkY + p.WorkH - min(SCROLL_PREVIEW_WIDTH, row_h)
+        } else if row_top >= p.WorkY && row_top + row_h <= p.WorkY + p.WorkH {
+            row_top = p.WorkY + top_reserve
+            row_h = max(i32(1), p.WorkH - top_reserve - bottom_reserve)
+        } else {
+            for cl in col.Wins { cl.Geom = hide; cl.Border = 0 }
+            continue
+        }
+        if column_has_maximized(col) {
+            tile := Rect{X = p.WorkX, Y = row_top, W = p.WorkW, H = row_h}
+            for cl in col.Wins {
+                if cl.Maximized { place_client_in_tile(ws, cl, tile, p.Border) }
+                else { cl.Geom = hide; cl.Border = 0 }
+            }
+            continue
+        }
+        if col.Layout == .Tabbed {
+            active := col.Focus
+            if active == nil || !column_member(col, active) {
+                active = col.Wins[0]
+                col.Focus = active
+            }
+            tab_h := i32(0)
+            if !is_preview { tab_h = min(TAB_BAR_HEIGHT, max(i32(0), row_h - 1)) }
+            tile := Rect{X = p.WorkX, Y = row_top + tab_h, W = p.WorkW, H = row_h - tab_h}
+            for cl in col.Wins {
+                if cl == active { place_client_in_tile(ws, cl, tile, p.Border) }
+                else { cl.Geom = hide; cl.Border = 0 }
+            }
+            continue
+        }
+
+        content := p.WorkW - p.Inner * i32(nw - 1)
+        if content < i32(nw) { content = i32(nw) }
+        total_weight := f64(0)
+        positive_weights := 0
+        for cl in col.Wins {
+            if cl.TileWeight > 0 { total_weight += cl.TileWeight; positive_weights += 1 }
+        }
+        default_weight := f64(1)
+        if positive_weights > 0 { default_weight = total_weight / f64(positive_weights) }
+        total_weight += default_weight * f64(nw - positive_weights)
+        widths := make([]i32, nw)
+        used := i32(0)
+        distributable := content - i32(nw)
+        for cl, i in col.Wins {
+            weight := cl.TileWeight
+            if weight <= 0 { weight = default_weight }
+            widths[i] = 1 + i32(f64(distributable) * weight / total_weight)
+            used += widths[i]
+        }
+        rem := content - used
+        for i := 0; rem > 0; i = (i + 1) % nw { widths[i] += 1; rem -= 1 }
+        x := p.WorkX
+        for cl, i in col.Wins {
+            place_client_in_tile(ws, cl, Rect{X = x, Y = row_top, W = widths[i], H = row_h}, p.Border)
+            x += widths[i] + p.Inner
+        }
+        delete(widths)
+    }
 }
 
 // arrange_workspace lays one workspace out into per-client rects.
@@ -983,8 +1255,12 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
     // Structural changes can shorten the strip while retaining its old
     // viewport. Pull the complete strip back against the nearest edge so a
     // hidden neighbor fills any newly exposed space without changing width.
-    ws.ViewportX = clamp_workspace_viewport(ws.ViewportX, ws, p)
-    expose_missing_custom_preview(ws, p)
+    if ws.Layout == .Vertical_Scroller {
+        ws.ViewportY = clamp_vertical_viewport(ws.ViewportY, ws, p)
+    } else {
+        ws.ViewportX = clamp_workspace_viewport(ws.ViewportX, ws, p)
+        expose_missing_custom_preview(ws, p)
+    }
 
     // 1) fullscreen cover
     if ws.Focus != nil && ws.Focus.Fullscreen && find_client_in_ws(ws, ws.Focus.Xid) != nil {
@@ -1005,7 +1281,9 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
 
     // 2) tiled clients. Whole-workspace modes bypass the scrolling strip.
     workspace_mode_arranged := arrange_workspace_mode(ws, p, geom)
-    if !workspace_mode_arranged && n_cols > 0 && p.ColW > 0 && p.WorkH > 0 {
+    vertical_arranged := ws.Layout == .Vertical_Scroller
+    if vertical_arranged { arrange_vertical_scroller(ws, p, geom) }
+    if !workspace_mode_arranged && !vertical_arranged && n_cols > 0 && p.ColW > 0 && p.WorkH > 0 {
         base_x := p.WorkX - ws.ViewportX
         hide := Rect { X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H }
         custom_widths := workspace_has_custom_widths(ws)

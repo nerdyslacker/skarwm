@@ -14,7 +14,7 @@ usage :: proc() {
     fmt.eprintln("queries: get-workspaces | get-windows | get-outputs | get-version")
     fmt.eprintln("events:  subscribe [workspace] [window] [output]")
     fmt.eprintln("actions: focus DIR | move DIR | workspace N|next|prev | move workspace N")
-    fmt.eprintln("         layout scrolling-tile|dwindle|monocle|floating|next")
+    fmt.eprintln("         layout scrolling-tile|vertical-scroller|dwindle|monocle|floating|next")
     fmt.eprintln("         layout tabbed|stacked|toggle | toggle-floating")
     fmt.eprintln("         switch-layout | toggle-tabbed | show-bindings")
     fmt.eprintln("         reminder add MINUTES MESSAGE")

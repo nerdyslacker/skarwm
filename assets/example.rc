@@ -124,7 +124,7 @@ autostart : "xsetroot -solid '#202020'"
 # Action tokens: focusleft/right/up/down resizeleft/right/up/down
 # moveleft/right/up/down ws_up ws_down
 # ws_next ws_prev togglefloating togglefullscreen layout_tabbed layout_stacked
-# toggle_tabbed layout_scrolling_tile layout_dwindle layout_monocle
+# toggle_tabbed layout_scrolling_tile layout_vertical_scroller layout_dwindle layout_monocle
 # layout_floating layout_next
 # show_bindings show_datetime show_battery
 # focus_output_next/prev move_to_output_next/prev
@@ -165,10 +165,10 @@ call : mod + Control + Shift + r : reminder_clear_all
 # only the focused column becomes a tab group. Move chosen windows into that
 # column with mod+Shift+h/l; mod+k/j selects tabs and mod+Shift+k/j reorders.
 # Toggling tabs off splits them back into separate horizontal columns.
-# `layout_next` cycles the whole workspace through Scrolling Tile,
-# Dwindle/Fibonacci, Monocle, and Floating. The selected workspace layout also
+# `layout_next` cycles the whole workspace through Scrolling Tile, Vertical
+# Scrolling Tile, Dwindle/Fibonacci, Monocle, and Floating. The selected workspace layout also
 # applies to windows opened later. Direct selectors are
-# `layout_scrolling_tile`, `layout_dwindle` (or `layout_fibonacci`),
+# `layout_scrolling_tile`, `layout_vertical_scroller`, `layout_dwindle` (or `layout_fibonacci`),
 # `layout_monocle`, and `layout_floating`. `togglefloating` changes only the
 # focused window; leaving workspace Floating preserves such manual floaters.
 call : mod + Shift + q : close_window

@@ -721,7 +721,10 @@ dispatch_action :: proc(b: ^input.Binding) {
         if m.Focused != nil && m.Focused.Floating {
             changed = c.Toggle_Floating(m)
         }
-        changed = c.Set_Workspace_Layout(m, .Scroller) || changed
+        ws := c.Current_WS(m)
+        if ws == nil || ws.Layout != .Vertical_Scroller {
+            changed = c.Set_Workspace_Layout(m, .Scroller) || changed
+        }
         changed = c.Set_Column_Layout(m, .Tabbed) || changed
         if changed {
             reflow()
@@ -732,7 +735,10 @@ dispatch_action :: proc(b: ^input.Binding) {
         if m.Focused != nil && m.Focused.Floating {
             changed = c.Toggle_Floating(m)
         }
-        changed = c.Set_Workspace_Layout(m, .Scroller) || changed
+        ws := c.Current_WS(m)
+        if ws == nil || ws.Layout != .Vertical_Scroller {
+            changed = c.Set_Workspace_Layout(m, .Scroller) || changed
+        }
         changed = c.Set_Column_Layout(m, .Stacked) || changed
         if changed {
             reflow()
@@ -743,10 +749,11 @@ dispatch_action :: proc(b: ^input.Binding) {
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
-    case .Layout_Scroller, .Layout_Dwindle, .Layout_Monocle, .Layout_Next:
+    case .Layout_Scroller, .Layout_Vertical_Scroller, .Layout_Dwindle, .Layout_Monocle, .Layout_Next:
         changed := false
         #partial switch b.action {
         case .Layout_Scroller: changed = c.Set_Workspace_Layout(m, .Scroller)
+        case .Layout_Vertical_Scroller: changed = c.Set_Workspace_Layout(m, .Vertical_Scroller)
         case .Layout_Dwindle:  changed = c.Set_Workspace_Layout(m, .Dwindle)
         case .Layout_Monocle:  changed = c.Set_Workspace_Layout(m, .Monocle)
         case .Layout_Next:     changed = c.Cycle_Workspace_Layout(m)
@@ -1074,6 +1081,15 @@ scroll_preview_hover :: proc(x, y: i32) -> bool {
         return false
     }
     if g_wm.mouse_client != nil { return true }
+    // Crossing a preview on the way to a strut-reserving bar is not an
+    // navigation gesture. Consume passive hover so focus-follows-mouse cannot
+    // select the preview client; an actual click still follows the ordinary
+    // client button path and reveals it intentionally.
+    if !c.Scroll_Preview_Allows_Passive_Reveal(preview) {
+        g_wm.preview_hover_locked = false
+        g_wm.preview_hover_target = 0
+        return true
+    }
     if g_wm.preview_hover_locked { return true }
 
     old := g_wm.m.Focused

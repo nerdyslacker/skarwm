@@ -87,15 +87,16 @@ runs once at startup and is not run again by configuration reloads.
 
 `workspace_layout : ID : LAYOUT` gives that workspace/tag a persistent default
 layout on every output. `tag_layout` is an alias. Supported names are
-`scrolling-tile`, `dwindle` (`fibonacci` is an alias), `monocle`, and
-`floating`. Matching workspaces are created and updated when the configuration
+`scrolling-tile`, `vertical-scrolling-tile`, `dwindle` (`fibonacci` is an
+alias), `monocle`, and `floating`. Matching workspaces are created and updated when the configuration
 loads or reloads, so windows opened later use the declared layout. A manual
 layout selection may override it until the next reload.
 
-Workspace-wide layout actions are `layout_scrolling_tile`, `layout_dwindle`
+Workspace-wide layout actions are `layout_scrolling_tile`,
+`layout_vertical_scroller`, `layout_dwindle`
 (`layout_fibonacci` is an alias), `layout_monocle`, `layout_floating`, and
-`layout_next`. The last one cycles Scrolling Tile → Dwindle/Fibonacci →
-Monocle → Floating and is bound to `Super+g` by the built-in defaults.
+`layout_next`. The last one cycles Scrolling Tile → Vertical Scrolling Tile →
+Dwindle/Fibonacci → Monocle → Floating and is bound to `Super+g` by the built-in defaults.
 `layout_scroller` remains a compatibility alias. `togglefloating` changes only
 the focused window.
 

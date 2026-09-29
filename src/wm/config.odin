@@ -453,6 +453,8 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
         base.action = .Layout_Scroller; return base, ""
     case "layout_scrolling_tile", "layout_scrolling-tile", "scrolling_tile", "scrolling-tile":
         base.action = .Layout_Scroller; return base, ""
+    case "layout_vertical_scroller", "layout_vertical_scrolling_tile", "vertical-scroller", "vertical-scrolling-tile":
+        base.action = .Layout_Vertical_Scroller; return base, ""
     case "layout_dwindle", "layout_fibonacci", "dwindle", "fibonacci":
         base.action = .Layout_Dwindle; return base, ""
     case "layout_monocle", "monocle":
@@ -1044,6 +1046,7 @@ parse_workspace_layout :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]
     layout: c.Workspace_Layout
     switch layout_text {
     case "scrolling-tile", "scrolling_tile", "scroller", "scroll": layout = .Scroller
+    case "vertical-scrolling-tile", "vertical_scrolling_tile", "vertical-scroller": layout = .Vertical_Scroller
     case "dwindle", "fibonacci": layout = .Dwindle
     case "monocle": layout = .Monocle
     case "floating", "float": layout = .Floating
