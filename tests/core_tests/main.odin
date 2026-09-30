@@ -109,6 +109,12 @@ test_physical_topology :: proc() {
         c.Physical_Output_State{StableId = "HDMI-1", Name = "HDMI-1", OutputId = 11,
          Connected = true, Enabled = false})
     ok(c.Topology_Valid(&old), "connected-but-disabled output is a valid physical topology member")
+    ok(c.Topology_Has_Pending_Enable(&old),
+       "connected-but-disabled output requests a bounded settle watch")
+    old.Outputs[1].Enabled = true
+    ok(!c.Topology_Has_Pending_Enable(&old),
+       "enabled output does not request a settle watch")
+    old.Outputs[1].Enabled = false
     reordered := c.Physical_Topology{RootGeometry = GEOM, PrimaryOutputId = 10}
     reordered.Outputs = make([dynamic]c.Physical_Output_State, 0, 2)
     defer delete(reordered.Outputs)

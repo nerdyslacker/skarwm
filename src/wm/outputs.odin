@@ -611,6 +611,8 @@ randr_scan :: proc(emit_event: bool) -> bool {
 RANDR_RESCAN_DELAY :: 75 * time.Millisecond
 RANDR_RETRY_DELAY :: 125 * time.Millisecond
 RANDR_MAX_RETRIES :: u8(4)
+RANDR_SETTLE_DELAY :: 250 * time.Millisecond
+RANDR_SETTLE_MAX_RETRIES :: u8(40)
 
 randr_now_ns :: proc() -> i64 {
     return i64(time.tick_diff({}, time.tick_now()))
@@ -639,10 +641,16 @@ randr_run_due :: proc() {
     randr_clear_virtual_monitors()
     ok := randr_scan(true)
     randr_sync_virtual_monitors()
-    retry := !ok && g_randr.retry_count < RANDR_MAX_RETRIES
+    pending_enable := ok && c.Topology_Has_Pending_Enable(&g_randr.topology)
+    retry_limit := RANDR_MAX_RETRIES
+    if pending_enable { retry_limit = RANDR_SETTLE_MAX_RETRIES }
+    retry := (!ok || pending_enable) && g_randr.retry_count < retry_limit
     if retry { g_randr.retry_count += 1 } else { g_randr.retry_count = 0 }
     delay := i64(RANDR_RESCAN_DELAY)
-    if retry { delay = i64(RANDR_RETRY_DELAY) }
+    if retry {
+        delay = i64(RANDR_RETRY_DELAY)
+        if pending_enable { delay = i64(RANDR_SETTLE_DELAY) }
+    }
     c.Topology_End_Refresh(&g_randr.refresh, randr_now_ns(), delay, retry)
 }
 

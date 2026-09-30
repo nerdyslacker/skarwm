@@ -93,6 +93,14 @@ Topology_Valid :: proc(topology: ^Physical_Topology) -> bool {
     return true
 }
 
+Topology_Has_Pending_Enable :: proc(topology: ^Physical_Topology) -> bool {
+    if topology == nil { return false }
+    for output in topology.Outputs {
+        if output.Connected && !output.Enabled { return true }
+    }
+    return false
+}
+
 Topology_Output_Equal :: proc(a, b: Physical_Output_State) -> bool {
     return a.OutputId == b.OutputId && a.CrtcId == b.CrtcId &&
         a.Connected == b.Connected && a.Enabled == b.Enabled && a.Geom == b.Geom &&
