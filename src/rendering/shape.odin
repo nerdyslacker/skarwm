@@ -142,7 +142,7 @@ shape_client :: proc(
     viewport := constrain_to_output && cl.Out != nil && !cl.Floating && !cl.Dock && !cl.Fullscreen
     if viewport {
         clip := cl.Out.Geom
-        if c.Client_Needs_Work_Area_Clip(m, cl) { clip = c.Output_Work_Area(m, cl.Out) }
+        if c.Client_Needs_Work_Area_Clip(m, cl) { clip = c.Output_Preview_Clip_Area(m, cl.Out) }
         clip_local := c.Rect{
             X = clip.X - geom.X,
             Y = clip.Y - geom.Y,
@@ -191,8 +191,8 @@ shape_client :: proc(
 }
 
 // Native decoration frames are separate override-redirect windows. Clip them
-// with the same work-area region as their client, otherwise a preview's frame
-// can still show through a transparent bar after the client itself is clipped.
+// with the same per-edge panel-safe region as their client, otherwise a
+// preview's frame can still show through a transparent bar.
 shape_decoration_frame :: proc(
     state: ^State,
     conn: ^x11.Connection,
@@ -206,7 +206,7 @@ shape_decoration_frame :: proc(
     viewport := constrain_to_output && cl.Out != nil && !cl.Floating && !cl.Dock && !cl.Fullscreen
     if viewport {
         clip := cl.Out.Geom
-        if c.Client_Needs_Work_Area_Clip(m, cl) { clip = c.Output_Work_Area(m, cl.Out) }
+        if c.Client_Needs_Work_Area_Clip(m, cl) { clip = c.Output_Preview_Clip_Area(m, cl.Out) }
         clip_local := c.Rect{X = clip.X-frame.X, Y = clip.Y-frame.Y, W = clip.W, H = clip.H}
         clipped := shape_intersection(bounding, clip_local)
         viewport = clipped != bounding

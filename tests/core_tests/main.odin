@@ -148,6 +148,20 @@ test_output_work_area :: proc() {
     output.Reserved = c.Insets{Left = 5, Right = 7, Top = 30, Bottom = 20}
     eq(c.Output_Work_Area(m, output), c.Rect{X = 13, Y = 38, W = 1892, H = 1014},
         "output work area excludes every reserved bar edge")
+    output.Reserved = c.Insets{Top = 30}
+    eq(c.Output_Preview_Clip_Area(m, output), c.Rect{X = 0, Y = 30, W = 1920, H = 1050},
+        "preview clip touches the bar and leaves unreserved edges uncropped")
+    _ = c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    edge_preview := add_tiled(m, 468)
+    edge_preview.Geom = c.Rect{X = 0, Y = 100, W = 200, H = 200}
+    edge_preview.Border = 0
+    ok(!c.Client_Needs_Work_Area_Clip(m, edge_preview),
+        "top bar does not crop a preview touching the unreserved left edge")
+    edge_preview.Geom.Y = 0
+    ok(c.Client_Needs_Work_Area_Clip(m, edge_preview),
+        "top bar still crops a preview crossing its own reserved edge")
+    c.Unmanage_Client(m, edge_preview)
     dock := add_dock(m, 469, c.Insets{Top = 30}, c.Rect{X = 0, Y = 0, W = 1920, H = 30})
     ok(!c.Client_Needs_Work_Area_Clip(m, dock),
         "dock windows never receive a scroller work-area clip")
