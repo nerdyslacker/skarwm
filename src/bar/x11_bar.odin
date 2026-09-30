@@ -83,6 +83,11 @@ monitor_atom_name :: proc(state: ^State, id: u32) -> string {
 
 destroy_windows :: proc(state: ^State) {
     if state.Conn != nil {
+        // Rendering uses Xlib while window lifetime uses a separate XCB
+        // connection. Drain queued XCopyArea requests before XCB destroys the
+        // destination windows, otherwise the server can process teardown first
+        // and terminate the bar with an asynchronous BadDrawable.
+        if state.Display != nil { XSync(state.Display, 0) }
         for window in state.Windows {
             if window.TextDraw != nil { XftDrawDestroy(window.TextDraw) }
             if window.Canvas != 0 && state.Display != nil {

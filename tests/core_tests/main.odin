@@ -63,6 +63,9 @@ main :: proc() {
     test_jump_to_matching_window()
     test_multi_output()
     test_virtual_screens()
+    test_physical_topology()
+    test_topology_refresh_scheduler()
+    test_topology_transaction_and_nearest_migration()
     test_multi_output_scrolling()
     test_layout_geometry()
     test_scrolling()
@@ -94,6 +97,129 @@ main :: proc() {
         fmt.eprintln("UNIT TESTS FAILED")
         os.exit(1)
     }
+}
+
+test_physical_topology :: proc() {
+    old := c.Physical_Topology{RootGeometry = GEOM, PrimaryOutputId = 10}
+    old.Outputs = make([dynamic]c.Physical_Output_State, 0, 2)
+    defer delete(old.Outputs)
+    append(&old.Outputs,
+        c.Physical_Output_State{StableId = "DP-1", Name = "DP-1", OutputId = 10, CrtcId = 20,
+         Connected = true, Enabled = true, Geom = GEOM, Primary = true},
+        c.Physical_Output_State{StableId = "HDMI-1", Name = "HDMI-1", OutputId = 11,
+         Connected = true, Enabled = false})
+    ok(c.Topology_Valid(&old), "connected-but-disabled output is a valid physical topology member")
+    reordered := c.Physical_Topology{RootGeometry = GEOM, PrimaryOutputId = 10}
+    reordered.Outputs = make([dynamic]c.Physical_Output_State, 0, 2)
+    defer delete(reordered.Outputs)
+    append(&reordered.Outputs,
+        c.Physical_Output_State{StableId = "HDMI-1", Name = "HDMI-1", OutputId = 11,
+         Connected = true, Enabled = false},
+        c.Physical_Output_State{StableId = "DP-1", Name = "DP-1", OutputId = 10, CrtcId = 20,
+         Connected = true, Enabled = true, Geom = GEOM, Primary = true})
+    ok(c.Topology_Equal(&old, &reordered), "enumeration order is not physical output identity")
+
+    next := reordered
+    next.RootGeometry = c.Rect{W = 3840, H = 1080}
+    next.Outputs[0].CrtcId = 21
+    next.Outputs[0].Enabled = true
+    next.Outputs[0].Geom = c.Rect{X = 1920, W = 1920, H = 1080}
+    next.Outputs[1].Primary = false
+    next.Outputs[0].Primary = true
+    next.PrimaryOutputId = 11
+    diff := c.Topology_Diff(&old, &next)
+    defer delete(diff)
+    eq(len(diff), 2, "enable plus primary change diff by stable connector identity")
+    ok(.Enabled in diff[0].Changes && .Geometry in diff[0].Changes && .Primary in diff[0].Changes,
+       "enabling an existing connector is not reported as remove/add")
+    ok(.Primary in diff[1].Changes, "old primary loses primary status")
+
+    invalid := c.Physical_Topology{RootGeometry = GEOM}
+    invalid.Outputs = make([dynamic]c.Physical_Output_State, 0, 2)
+    defer delete(invalid.Outputs)
+    append(&invalid.Outputs,
+        c.Physical_Output_State{StableId = "DP-1", Name = "DP-1", OutputId = 10},
+        c.Physical_Output_State{StableId = "DP-1", Name = "DP-1-copy", OutputId = 12})
+    ok(!c.Topology_Valid(&invalid), "duplicate stable connector identity rejects candidate")
+    negative := c.Physical_Topology{RootGeometry = GEOM}
+    negative.Outputs = make([dynamic]c.Physical_Output_State, 0, 1)
+    defer delete(negative.Outputs)
+    append(&negative.Outputs, c.Physical_Output_State{StableId = "DP-2", Name = "DP-2",
+        OutputId = 12, CrtcId = 22, Connected = true, Enabled = true,
+        Geom = c.Rect{X = -1920, W = 1920, H = 1080}})
+    ok(c.Topology_Valid(&negative), "negative monitor coordinates remain valid")
+
+    m := mk_man()
+    payload := c.ipc_topology_payload(m, &old, 7, 3, .Scheduled)
+    ok(strings.contains(string(payload), `"generation":0`) &&
+       strings.contains(string(payload), `"connected":true,"enabled":false`) &&
+       strings.contains(string(payload), `"scheduler":"scheduled"`) &&
+       strings.contains(string(payload), `"logical_outputs":[`),
+       "topology diagnostics include physical state and logical snapshot")
+    delete(payload)
+    c.Destroy_Manager(m)
+}
+
+test_topology_refresh_scheduler :: proc() {
+    state: c.Topology_Refresh_State
+    c.Topology_Schedule(&state, 100, 75)
+    eq(state.Phase, c.Topology_Refresh_Phase.Scheduled, "event schedules topology refresh")
+    ok(!c.Topology_Begin_Refresh(&state, 174), "refresh does not run before debounce deadline")
+    ok(c.Topology_Begin_Refresh(&state, 175), "refresh runs at debounce deadline")
+    c.Topology_Schedule(&state, 176, 75)
+    ok(state.Pending, "event during refresh records one pending refresh")
+    c.Topology_End_Refresh(&state, 200, 75, false)
+    ok(state.Phase == .Scheduled && state.Deadline == 275 && !state.Pending,
+       "pending event schedules exactly one follow-up transaction")
+    ok(c.Topology_Begin_Refresh(&state, 275), "pending refresh becomes due")
+    c.Topology_End_Refresh(&state, 280, 125, true)
+    ok(state.Phase == .Scheduled && state.Deadline == 405,
+       "invalid transient snapshot schedules a non-blocking retry")
+    ok(c.Topology_Begin_Refresh(&state, 405), "retry becomes due")
+    c.Topology_End_Refresh(&state, 410, 75, false)
+    eq(state.Phase, c.Topology_Refresh_Phase.Idle, "successful refresh returns scheduler to idle")
+}
+
+test_topology_transaction_and_nearest_migration :: proc() {
+    m := c.New_Manager()
+    defer c.Destroy_Manager(m)
+    initial := []c.Output_Spec{
+        {Name = "LEFT", Geom = c.Rect{W = 1000, H = 900}, Primary = true},
+        {Name = "CENTER", Geom = c.Rect{X = 1000, W = 1000, H = 900}},
+        {Name = "RIGHT", Geom = c.Rect{X = 3000, W = 1000, H = 900}},
+    }
+    ok(c.Reconcile_Outputs(m, initial), "three-screen topology commits")
+    right := m.Outputs[2]
+    c.Focus_Output(m, right)
+    tiled := add_tiled(m, 8801)
+    floating := c.New_Client(8802)
+    c.Add_Managed(m, c.Current_WS(m), floating, true)
+    floating.FloatingRect = c.Rect{X = 3850, Y = 780, W = 500, H = 300}
+
+    old_outputs := len(m.Outputs)
+    old_right_geom := right.Geom
+    duplicate := []c.Output_Spec{
+        {Name = "LEFT", Geom = c.Rect{W = 1000, H = 900}, Primary = true},
+        {Name = "LEFT", Geom = c.Rect{X = 1000, W = 1000, H = 900}},
+    }
+    ok(!c.Reconcile_Outputs(m, duplicate), "invalid duplicate candidate is rejected transactionally")
+    eq(len(m.Outputs), old_outputs, "rejected candidate preserves live screen collection")
+    eq(right.Geom, old_right_geom, "rejected candidate preserves live geometry")
+
+    survivors := []c.Output_Spec{
+        {Name = "LEFT", Geom = c.Rect{W = 1000, H = 900}, Primary = true},
+        {Name = "CENTER", Geom = c.Rect{X = 1000, W = 1000, H = 900}},
+    }
+    ok(c.Reconcile_Outputs(m, survivors), "removing the focused third screen commits")
+    center := c.Find_Output(m, "CENTER")
+    eq(tiled.Out, center, "client on removed screen migrates to nearest survivor")
+    eq(c.Active_Output(m), center, "focus follows removed screen state to nearest survivor")
+    work := c.Output_Work_Area(m, center)
+    ok(floating.Out == center && floating.FloatingRect.X >= work.X && floating.FloatingRect.Y >= work.Y &&
+       floating.FloatingRect.X + floating.FloatingRect.W <= work.X + work.W &&
+       floating.FloatingRect.Y + floating.FloatingRect.H <= work.Y + work.H,
+       "floating client is translated and clamped into survivor workarea (rect=%v work=%v)",
+       floating.FloatingRect, work)
 }
 
 test_late_dock_promotion_model :: proc() {
@@ -2701,6 +2827,9 @@ test_ipc_parse_command :: proc() {
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`move output previous`))
     ok(fine && cmd.action == .Move_To_Output_Prev, "move output previous parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`screen refresh`))
+    ok(fine && cmd.action == .Screen_Refresh, "manual topology refresh parsed")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`workspace`))
     ok(!fine, "bare workspace rejected")

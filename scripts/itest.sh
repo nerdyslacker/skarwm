@@ -40,6 +40,10 @@ export SKARWM_SOCKET="${TMPDIR:-/tmp}/skarwm-itest.sock"
 # back to its built-in defaults, no matter what config lives in the real $HOME.
 XDGC="${TMPDIR:-/tmp}/skarwm_itest_xdg"
 export XDG_CONFIG_HOME="$XDGC"
+# The resolver intentionally falls back to ~/.config when XDG_CONFIG_HOME has
+# no file. A deliberately absent explicit path stops that fallback and selects
+# built-in defaults; tests that pass `-c FILE` still take precedence.
+export SKARWM_CONFIG="$XDGC/no-config.rc"
 PICOM_PID=""
 
 say() { printf '%s\n' "$*"; }

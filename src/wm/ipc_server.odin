@@ -313,6 +313,12 @@ ipc_handle_frame :: proc(cl: ^Ipc_Client, f: c.Ipc_Frame) -> bool {
         ipc_send(cl, msg, pl)
         delete(pl)
 
+    case .Get_Topology:
+        pl := c.ipc_topology_payload(g_wm.m, &g_randr.topology,
+            g_randr.refresh_count, g_randr.transaction_count, g_randr.refresh.Phase)
+        ipc_send(cl, msg, pl)
+        delete(pl)
+
     case .Event_Workspace, .Event_Output, .Event_Window, .Event_Ui:
         // x11.Event frames are server→client traffic; a client that sends one
         // gets the same empty-body reply as any other unknown type.
@@ -432,6 +438,9 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
     case .Screen_Split_Ratio:
         b.action = .Screen_Split_Ratio
         b.arg = cmd.arg
+    case .Screen_Refresh:
+        randr_request_rescan()
+        return
     case .Close:             b.action = .Close
     case .Reload:            b.action = .Reload
     case .Quit:              b.action = .Quit

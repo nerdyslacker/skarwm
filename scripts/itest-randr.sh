@@ -75,6 +75,25 @@ if [[ $outputs == *'"name":"LEFT","active":true,"primary":true,"focused":true'* 
 else
   fail "primary monitor selection"
 fi
+topology=$(./build/skarwm-msg get-topology)
+if [[ $topology == *'"generation":'* &&
+      $topology == *'"name":"VNC-0"'*'"connected":true,"enabled":true'* &&
+      $topology == *'"logical_outputs":['* ]]; then
+  pass "reports committed physical and logical topology diagnostics"
+else
+  fail "committed topology diagnostics"
+fi
+if ./build/skarwm-msg screen refresh >/dev/null; then
+  sleep 0.2
+  topology=$(./build/skarwm-msg get-topology)
+  if [[ $topology == *'"scheduler":"idle"'* ]]; then
+    pass "manual refresh uses the non-blocking topology pipeline"
+  else
+    fail "manual topology refresh completion"
+  fi
+else
+  fail "manual topology refresh command"
+fi
 
 # Keep the primary/active output on LEFT but place the pointer on RIGHT. The
 # new client must follow the pointer rather than the previously active output.

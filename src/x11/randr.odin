@@ -40,11 +40,84 @@ Randr_Get_Monitors_Reply :: struct {
     pad1: [12]u8,
 }
 
+Randr_Get_Screen_Resources_Reply :: struct {
+    response_type: u8,
+    pad0: u8,
+    sequence: u16,
+    length: u32,
+    timestamp: u32,
+    config_timestamp: u32,
+    num_crtcs: u16,
+    num_outputs: u16,
+    num_modes: u16,
+    names_len: u16,
+    pad1: [8]u8,
+}
+
+Randr_Get_Output_Info_Reply :: struct {
+    response_type: u8,
+    status: u8,
+    sequence: u16,
+    length: u32,
+    timestamp: u32,
+    crtc: u32,
+    mm_width, mm_height: u32,
+    connection: u8,
+    subpixel_order: u8,
+    num_crtcs, num_modes, num_preferred, num_clones, name_len: u16,
+}
+
+Randr_Get_Crtc_Info_Reply :: struct {
+    response_type: u8,
+    status: u8,
+    sequence: u16,
+    length: u32,
+    timestamp: u32,
+    x, y: i16,
+    width, height: u16,
+    mode: u32,
+    rotation, rotations, num_outputs, num_possible_outputs: u16,
+}
+
+Randr_Get_Output_Primary_Reply :: struct {
+    response_type: u8,
+    pad0: u8,
+    sequence: u16,
+    length: u32,
+    output: u32,
+}
+
 Randr_Notify_Event :: struct {
     response_type: u8,
     sub_code: u8,
     sequence: u16,
     data: [28]u8,
+}
+
+Randr_Crtc_Change_Notify_Event :: struct {
+    response_type, sub_code: u8,
+    sequence: u16,
+    timestamp, window, crtc, mode: u32,
+    rotation: u16,
+    pad0: [2]u8,
+    x, y: i16,
+    width, height: u16,
+}
+
+Randr_Output_Change_Notify_Event :: struct {
+    response_type, sub_code: u8,
+    sequence: u16,
+    timestamp, config_timestamp, window, output, crtc, mode: u32,
+    rotation: u16,
+    connection, subpixel_order: u8,
+}
+
+Randr_Output_Property_Notify_Event :: struct {
+    response_type, sub_code: u8,
+    sequence: u16,
+    window, output, atom, timestamp: u32,
+    status: u8,
+    pad0: [11]u8,
 }
 
 Randr_Screen_Change_Notify_Event :: struct {
@@ -65,10 +138,23 @@ Randr_Screen_Change_Notify_Event :: struct {
 #assert(size_of(Randr_Monitor_Info) == 24)
 #assert(size_of(Randr_Monitor_Iterator) == 16)
 #assert(size_of(Randr_Get_Monitors_Reply) == 32)
+#assert(size_of(Randr_Get_Screen_Resources_Reply) == 32)
+#assert(size_of(Randr_Get_Output_Info_Reply) == 36)
+#assert(size_of(Randr_Get_Crtc_Info_Reply) == 32)
+#assert(size_of(Randr_Get_Output_Primary_Reply) == 12)
 #assert(size_of(Randr_Notify_Event) == 32)
+#assert(size_of(Randr_Crtc_Change_Notify_Event) == 32)
+#assert(size_of(Randr_Output_Change_Notify_Event) == 32)
+#assert(size_of(Randr_Output_Property_Notify_Event) == 32)
 #assert(size_of(Randr_Screen_Change_Notify_Event) == 32)
 
 RANDR_NOTIFY_RESOURCE_CHANGE :: u8(5)
+RANDR_NOTIFY_CRTC_CHANGE :: u8(0)
+RANDR_NOTIFY_OUTPUT_CHANGE :: u8(1)
+RANDR_NOTIFY_OUTPUT_PROPERTY :: u8(2)
+
+RANDR_CONNECTION_CONNECTED :: u8(0)
+RANDR_CONFIG_SUCCESS :: u8(0)
 
 RANDR_NOTIFY_MASK_SCREEN_CHANGE    :: u16(1 << 0)
 RANDR_NOTIFY_MASK_CRTC_CHANGE      :: u16(1 << 1)
@@ -91,4 +177,16 @@ foreign xcb_randr {
     xcb_randr_monitor_info_outputs_length :: proc(info: ^Randr_Monitor_Info) -> i32 ---
     xcb_randr_set_monitor_checked :: proc(c: ^Connection, window: u32, info: ^Randr_Monitor_Info) -> Cookie ---
     xcb_randr_delete_monitor_checked :: proc(c: ^Connection, window, name: u32) -> Cookie ---
+    xcb_randr_get_screen_resources_current :: proc(c: ^Connection, window: u32) -> Cookie ---
+    xcb_randr_get_screen_resources_current_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Randr_Get_Screen_Resources_Reply ---
+    xcb_randr_get_screen_resources_current_outputs :: proc(reply: ^Randr_Get_Screen_Resources_Reply) -> [^]u32 ---
+    xcb_randr_get_screen_resources_current_outputs_length :: proc(reply: ^Randr_Get_Screen_Resources_Reply) -> i32 ---
+    xcb_randr_get_output_info :: proc(c: ^Connection, output, config_timestamp: u32) -> Cookie ---
+    xcb_randr_get_output_info_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Randr_Get_Output_Info_Reply ---
+    xcb_randr_get_output_info_name :: proc(reply: ^Randr_Get_Output_Info_Reply) -> [^]u8 ---
+    xcb_randr_get_output_info_name_length :: proc(reply: ^Randr_Get_Output_Info_Reply) -> i32 ---
+    xcb_randr_get_crtc_info :: proc(c: ^Connection, crtc, config_timestamp: u32) -> Cookie ---
+    xcb_randr_get_crtc_info_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Randr_Get_Crtc_Info_Reply ---
+    xcb_randr_get_output_primary :: proc(c: ^Connection, window: u32) -> Cookie ---
+    xcb_randr_get_output_primary_reply :: proc(c: ^Connection, cookie: Cookie, e: ^^Error) -> ^Randr_Get_Output_Primary_Reply ---
 }
