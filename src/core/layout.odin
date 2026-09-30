@@ -1547,6 +1547,14 @@ Arrange_All :: proc(m: ^Manager) {
         // regardless of that output's selected workspace.
         for d in o.Docks {
             r := d.FloatingRect
+            // A non-reserving shell surface whose RandR output disappeared is
+            // deliberately parked until its owner destroys or reconfigures it.
+            // Do not clamp that transparent input window onto the survivor.
+            if r.X <= HIDE_X {
+                d.Geom = r
+                d.Border = 0
+                continue
+            }
             if rect_empty(r) {
                 r = Rect { X = o.Geom.X, Y = o.Geom.Y, W = o.Geom.W, H = 24 }
             }

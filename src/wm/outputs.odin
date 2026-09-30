@@ -10,6 +10,7 @@ import x11 "../x11"
 
 import "core:fmt"
 import "core:strings"
+import "core:time"
 
 Randr_State :: struct {
     available: bool,
@@ -17,6 +18,8 @@ Randr_State :: struct {
     physical: [dynamic]Randr_Physical_Monitor,
     published: [dynamic]u32,
     suppressed: [dynamic]u32,
+    rescan_pending: bool,
+    rescan_due: time.Tick,
 }
 
 Randr_Physical_Monitor :: struct {
@@ -373,13 +376,40 @@ randr_scan :: proc(emit_event: bool) {
         apply_workspace_layout_rules()
         // The target output or its workarea may have disappeared. Require a
         // fresh drag instead of leaving an indicator at stale root geometry.
-        if g_wm.mouse_client != nil { cancel_pointer_operation() }
+        cancel_pointer_operation()
         logger.Info("RandR: outputs changed; active monitors:", len(specs))
         if emit_event {
             reflow()
             for change in changes { ipc_broadcast_output_event(change.kind, change.output) }
         }
     }
+}
+
+RANDR_RESCAN_DELAY :: 75 * time.Millisecond
+
+randr_schedule_rescan :: proc() {
+    if !g_randr.available { return }
+    g_randr.rescan_pending = true
+    g_randr.rescan_due = time.tick_add(time.tick_now(), RANDR_RESCAN_DELAY)
+}
+
+randr_poll_timeout_ms :: proc() -> i32 {
+    if !g_randr.rescan_pending { return -1 }
+    remaining := time.tick_diff(time.tick_now(), g_randr.rescan_due)
+    if remaining <= 0 { return 0 }
+    ns := i64(remaining)
+    return i32(min(i64(max(i32)), (ns + i64(time.Millisecond) - 1) / i64(time.Millisecond)))
+}
+
+randr_run_due :: proc() {
+    if !g_randr.rescan_pending ||
+       time.tick_diff(g_randr.rescan_due, time.tick_now()) < 0 {
+        return
+    }
+    g_randr.rescan_pending = false
+    randr_clear_virtual_monitors()
+    randr_scan(true)
+    randr_sync_virtual_monitors()
 }
 
 randr_handle_event :: proc(event: ^x11.Event, response_type: u8) -> bool {
@@ -392,11 +422,13 @@ randr_handle_event :: proc(event: ^x11.Event, response_type: u8) -> bool {
         if notify.sub_code == x11.RANDR_NOTIFY_RESOURCE_CHANGE && len(g_randr.published) > 0 {
             return true
         }
+    } else {
+        screen := (^x11.Randr_Screen_Change_Notify_Event)(event)
+        if screen.root == g_wm.root && screen.width > 0 && screen.height > 0 {
+            g_wm.scr_w = i32(screen.width)
+            g_wm.scr_h = i32(screen.height)
+        }
     }
-    // Remove our monitor objects before asking RandR for physical monitors;
-    // the blocking GetMonitors reply in randr_scan orders this cleanup first.
-    randr_clear_virtual_monitors()
-    randr_scan(true)
-    randr_sync_virtual_monitors()
+    randr_schedule_rescan()
     return true
 }

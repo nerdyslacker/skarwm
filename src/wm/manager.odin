@@ -1672,7 +1672,7 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
 }
 
 cancel_pointer_operation :: proc() {
-    if g_wm.mouse_client != nil { x11.xcb_ungrab_pointer(g_wm.conn, x11.CURRENT_TIME) }
+    x11.xcb_ungrab_pointer(g_wm.conn, x11.CURRENT_TIME)
     if g_wm.mouse_tiled_drag || g_wm.mouse_decoration_drag { ui.Hide_Drop(&g_wm.ui) }
     g_wm.mouse_client = nil
     g_wm.mouse_resize = false
@@ -1812,17 +1812,15 @@ on_property_notify :: proc(ev: ^x11.Property_Notify_Event) {
 on_configure_notify :: proc(ev: ^x11.Configure_Notify_Event) {
     if ev.event != g_wm.root || ev.window != g_wm.root { return }
     next_w, next_h := i32(ev.width), i32(ev.height)
-    // RandR 1.5 SetMonitor/DeleteMonitor deliberately sends a root
-    // ConfigureNotify even though the root dimensions did not change. Ignore
-    // it: rediscovering at that point would mistake our projected logical
-    // monitors for newly attached physical outputs and create an event loop.
-    if next_w == g_wm.scr_w && next_h == g_wm.scr_h { return }
-    g_wm.scr_w, g_wm.scr_h = next_w, next_h
+    // RandR 1.5 SetMonitor/DeleteMonitor can send a root ConfigureNotify even
+    // when the framebuffer dimensions stay unchanged.  Treat it as a rescreen
+    // signal unless it came from our currently published split projection.
+    size_changed := next_w != g_wm.scr_w || next_h != g_wm.scr_h
+    if size_changed { g_wm.scr_w, g_wm.scr_h = next_w, next_h }
     if g_randr.available {
-        randr_clear_virtual_monitors()
-        randr_scan(true)
-        randr_sync_virtual_monitors()
+        if size_changed || len(g_randr.published) == 0 { randr_schedule_rescan() }
     } else {
+        if !size_changed { return }
         _ = c.Reconcile_Outputs(g_wm.m, []c.Output_Spec{{
             Name = "screen",
             Geom = c.Rect{X = 0, Y = 0, W = g_wm.scr_w, H = g_wm.scr_h},

@@ -591,6 +591,12 @@ migrate_output_state :: proc(m: ^Manager, src, dst: ^Output) {
     }
     for d in src.Docks {
         d.Out = dst
+        if d.Strut != (Insets{}) {
+            Remap_Dock_To_Output(d, dst)
+        } else {
+            d.FloatingRect.X = HIDE_X
+            d.Geom.X = HIDE_X
+        }
         append(&dst.Docks, d)
     }
     clear(&src.Docks)
@@ -688,8 +694,14 @@ Reconcile_Outputs :: proc(m: ^Manager, specs: []Output_Spec) -> bool {
     for p, i in old_physical {
         if used[i] { continue }
         for o in p.Screens {
-            if replacement_active == o { replacement_active = target }
+            removed_was_active := replacement_active == o
+            removed_current_id := 0
+            if removed_was_active && o.Current != nil { removed_current_id = o.Current.Id }
+            if removed_was_active { replacement_active = target }
             migrate_output_state(m, o, target)
+            if removed_was_active && removed_current_id > 0 {
+                target.Current = Ensure_WS_On_Output(target, removed_current_id)
+            }
             free_output(o)
         }
         clear(&p.Screens)
@@ -700,6 +712,7 @@ Reconcile_Outputs :: proc(m: ^Manager, specs: []Output_Spec) -> bool {
     m.PhysicalOutputs = next_physical
     delete(old_outputs)
     m.Outputs = logical_list_from_physical(m)
+    Update_Reserved(m)
     if replacement_active == nil || Output_Index(m, replacement_active) < 0 {
         replacement_active = target
     }

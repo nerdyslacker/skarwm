@@ -47,11 +47,26 @@ Randr_Notify_Event :: struct {
     data: [28]u8,
 }
 
+Randr_Screen_Change_Notify_Event :: struct {
+    response_type: u8,
+    rotation: u8,
+    sequence: u16,
+    timestamp: u32,
+    config_timestamp: u32,
+    root: u32,
+    request_window: u32,
+    size_id: u16,
+    subpixel_order: u16,
+    width, height: u16,
+    mwidth, mheight: u16,
+}
+
 #assert(size_of(Randr_Query_Version_Reply) == 32)
 #assert(size_of(Randr_Monitor_Info) == 24)
 #assert(size_of(Randr_Monitor_Iterator) == 16)
 #assert(size_of(Randr_Get_Monitors_Reply) == 32)
 #assert(size_of(Randr_Notify_Event) == 32)
+#assert(size_of(Randr_Screen_Change_Notify_Event) == 32)
 
 RANDR_NOTIFY_RESOURCE_CHANGE :: u8(5)
 

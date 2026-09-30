@@ -1501,6 +1501,8 @@ test_multi_output :: proc() {
     eq(floating.FloatingRect, c.Rect{X = 180, Y = 100, W = 400, H = 300},
        "floating client preserves screen-relative geometry")
     eq(floating.Ws.Focus, floating, "moved floating client is remembered on target")
+    stranded := add_tiled(m, 103)
+    shell_surface := add_dock(m, 104, c.Insets{}, c.Rect{X = 1920, Y = 0, W = 1280, H = 1024})
 
     reduced := []c.Output_Spec {
         {Name = "eDP-1", Geom = c.Rect{X = 0, Y = 0, W = 2560, H = 1440}, Primary = true},
@@ -1512,6 +1514,13 @@ test_multi_output :: proc() {
     eq(left.Out, m.Outputs[0], "existing primary client preserved")
     eq(right.Out, m.Outputs[0], "moved client preserved after disconnect")
     eq(floating.Out, m.Outputs[0], "floating client preserved after disconnect")
+    eq(m.Outputs[0].Current.Id, 1, "disconnected active output keeps its visible workspace")
+    c.Arrange_All(m)
+    ok(stranded.Geom.X >= 0 && stranded.Geom.X < m.Outputs[0].Geom.W,
+       "window from disconnected active output is visible on survivor")
+    eq(shell_surface.Out, m.Outputs[0], "shell surface ownership remains valid after disconnect")
+    ok(shell_surface.Geom.X <= c.HIDE_X,
+       "stale non-reserving shell surface cannot intercept survivor input")
 
     outputs := c.ipc_outputs_payload(m)
     defer delete(outputs)
