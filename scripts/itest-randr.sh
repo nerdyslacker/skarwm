@@ -44,6 +44,9 @@ if ! kill -0 "$VNC_PID" 2>/dev/null; then
 fi
 export DISPLAY=$DISP
 export SKARWM_SOCKET=$SOCK
+# Never inherit the interactive user's configuration: its autostarts (notably
+# a desktop shell) and terminal binding make this topology test nondeterministic.
+export SKARWM_CONFIG=/dev/null
 
 xrandr --setmonitor LEFT 640/170x800/210+0+0 VNC-0
 xrandr --setmonitor RIGHT 640/170x800/210+640+0 none
@@ -72,11 +75,30 @@ if [[ $outputs == *'"name":"LEFT","active":true,"primary":true,"focused":true'* 
 else
   fail "primary monitor selection"
 fi
+topology=$(./build/skarwm-msg get-topology)
+if [[ $topology == *'"generation":'* &&
+      $topology == *'"name":"VNC-0"'*'"connected":true,"enabled":true'* &&
+      $topology == *'"logical_outputs":['* ]]; then
+  pass "reports committed physical and logical topology diagnostics"
+else
+  fail "committed topology diagnostics"
+fi
+if ./build/skarwm-msg screen refresh >/dev/null; then
+  sleep 0.2
+  topology=$(./build/skarwm-msg get-topology)
+  if [[ $topology == *'"scheduler":"idle"'* ]]; then
+    pass "manual refresh uses the non-blocking topology pipeline"
+  else
+    fail "manual topology refresh completion"
+  fi
+else
+  fail "manual topology refresh command"
+fi
 
 # Keep the primary/active output on LEFT but place the pointer on RIGHT. The
 # new client must follow the pointer rather than the previously active output.
 xdotool mousemove 960 400 >/dev/null 2>&1
-xdotool key --clearmodifiers super+Return >/dev/null 2>&1
+xterm >/dev/null 2>&1 &
 wid=
 x=
 for _ in $(seq 1 45); do
@@ -237,6 +259,21 @@ else
   fail "built-in bar unsplit geometry"
 fi
 
+# Leave a real client on the screen that is about to disappear. The topology
+# transaction must reassociate and lay it out on the surviving main screen.
+xdotool mousemove 960 400 >/dev/null 2>&1
+xterm >/dev/null 2>&1 &
+migrate_wid=
+migrate_x=
+for _ in $(seq 1 45); do
+  migrate_wid=$(xdotool search --onlyvisible --class XTerm 2>/dev/null | tail -1)
+  if [ -n "$migrate_wid" ]; then
+    migrate_x=$(xwininfo -id "$migrate_wid" 2>/dev/null | awk '/Absolute upper-left X/{print $4}')
+    [ -n "$migrate_x" ] && [ "$migrate_x" -ge 640 ] && break
+  fi
+  sleep 0.2
+done
+
 ./build/skarwm-msg subscribe output >"${TMPDIR:-/tmp}/skarwm_randr_events.log" 2>&1 &
 SUB_PID=$!
 sleep 0.5
@@ -252,6 +289,54 @@ if [[ $outputs == *'"name":"LEFT"'* && $outputs != *'"name":"RIGHT"'* ]]; then
   pass "removes a disconnected monitor from the model"
 else
   fail "disconnected monitor reconciliation"
+fi
+if [ -n "$migrate_wid" ]; then
+  migrate_x=
+  for _ in $(seq 1 30); do
+    migrate_x=$(xwininfo -id "$migrate_wid" 2>/dev/null | awk '/Absolute upper-left X/{print $4}')
+    [ -n "$migrate_x" ] && [ "$migrate_x" -lt 640 ] && break
+    sleep 0.1
+  done
+fi
+if [ -n "$migrate_x" ] && [ "$migrate_x" -lt 640 ] &&
+   ./build/skarwm-msg get-windows | grep -q '"id":'"$migrate_wid"'.*"output":"LEFT"'; then
+  pass "migrates clients from a disconnected screen to the main screen"
+else
+  fail "client migration after screen disconnect"
+fi
+
+# The shell/bar must still receive pointer input after the output teardown.
+# Workspace 2 occupies the second slot near x=45 in the left bar.
+xdotool mousemove 45 10 click 1 >/dev/null 2>&1
+for _ in $(seq 1 30); do
+  outputs=$(./build/skarwm-msg get-outputs)
+  [[ $outputs == *'"name":"LEFT"'*'"current_workspace":"2"'* ]] && break
+  sleep 0.1
+done
+if [[ $outputs == *'"name":"LEFT"'*'"current_workspace":"2"'* ]]; then
+  pass "pointer remains responsive after hot-unplug"
+else
+  fail "pointer input after hot-unplug"
+fi
+
+# Add the monitor back without restarting the WM.  This exercises the same
+# resource/root-configure path as enabling a newly connected output inside an
+# existing framebuffer.
+xrandr --setmonitor RIGHT 640/170x800/210+640+0 none
+for _ in $(seq 1 30); do
+  outputs=$(./build/skarwm-msg get-outputs)
+  [[ $outputs == *'"name":"RIGHT"'* ]] && break
+  sleep 0.1
+done
+if grep -q '"change":"connected","output":"RIGHT"' "${TMPDIR:-/tmp}/skarwm_randr_events.log"; then
+  pass "emits an output event after hot-plug"
+else
+  fail "RandR hot-plug event"
+fi
+if [[ $outputs == *'"name":"LEFT"'* && $outputs == *'"name":"RIGHT"'* ]]; then
+  pass "recognizes a monitor added while running"
+else
+  fail "running monitor addition reconciliation"
 fi
 
 say "== RandR done: $PASS passed, $FAIL failed =="

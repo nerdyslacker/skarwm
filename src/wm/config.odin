@@ -40,7 +40,7 @@ import x11 "../x11"
 //     are accepted and ignored; an unknown setting logs one warning.
 //   - directives:
 //       bind       : <combo> : "<command>"
-//       call       : <combo> : <action> [integer argument]
+//       call       : <combo> : <action> [arguments]
 //       workspace  : <combo> : view <N>      (switch to N)
 //       workspace  : <combo> : tag <N>       (move focused window to N)
 //       rule       : <class|instance|title> : <pattern> : <effects…>
@@ -77,6 +77,7 @@ Raw_Bind :: struct {
     argk:   Raw_Bind_Arg,
     argi:   int, // integer arg (workspace ids)
     args:   string, // string arg (spawn command)
+    match_class, match_instance, match_title: string,
 }
 
 // Raw_Rule is a `rule :` line. Empty match field == wildcard. Only fields whose
@@ -204,6 +205,9 @@ scratch_destroy :: proc(sc: ^Load_Scratch) {
         if b.combo != "" { delete(b.combo) }
         if b.action != "" { delete(b.action) }
         if b.args != "" { delete(b.args) }
+        if b.match_class != "" { delete(b.match_class) }
+        if b.match_instance != "" { delete(b.match_instance) }
+        if b.match_title != "" { delete(b.match_title) }
     }
     delete(sc.binds)
     release_rules(&sc.rules)
@@ -223,6 +227,9 @@ release_bindings :: proc(b: ^[dynamic]input.Binding) {
     for &x in b {
         if x.cmd != "" { delete(x.cmd) }
         if x.combo != "" { delete(x.combo) }
+        if x.match_class != "" { delete(x.match_class) }
+        if x.match_instance != "" { delete(x.match_instance) }
+        if x.match_title != "" { delete(x.match_title) }
     }
     delete(b^)
     b^ = {}
@@ -336,6 +343,64 @@ split_ws :: proc(s: string) -> [dynamic]string {
     return out
 }
 
+// split_quoted_ws is the small selector tokenizer used by `call … focus`.
+// Double quotes keep spaces inside one value; the returned strings borrow s.
+split_quoted_ws :: proc(s: string) -> (out: [dynamic]string, err: string) {
+    out = make([dynamic]string, 0, 8)
+    i := 0
+    for i < len(s) {
+        for i < len(s) && (s[i] == ' ' || s[i] == '\t') { i += 1 }
+        if i >= len(s) { break }
+        if s[i] == '"' {
+            start := i + 1
+            i = start
+            for i < len(s) && s[i] != '"' { i += 1 }
+            if i >= len(s) {
+                delete(out)
+                return nil, strings.clone("unterminated quoted value")
+            }
+            append(&out, s[start:i])
+            i += 1
+            if i < len(s) && s[i] != ' ' && s[i] != '\t' {
+                delete(out)
+                return nil, strings.clone("expected whitespace after quoted value")
+            }
+        } else {
+            start := i
+            for i < len(s) && s[i] != ' ' && s[i] != '\t' { i += 1 }
+            append(&out, s[start:i])
+        }
+    }
+    return out, ""
+}
+
+parse_focus_bind :: proc(rb: ^Raw_Bind, args: string) -> string {
+    toks, err := split_quoted_ws(args)
+    if err != "" { return err }
+    defer delete(toks)
+    if len(toks) == 0 || len(toks) % 2 != 0 {
+        return strings.clone("expected field/value pairs (class, instance, or title)")
+    }
+    for i := 0; i < len(toks); i += 2 {
+        field, value := toks[i], toks[i + 1]
+        if value == "" { return fmt.aprintf("empty %s value", field) }
+        switch field {
+        case "class":
+            if rb.match_class != "" { return strings.clone("duplicate class criterion") }
+            rb.match_class = strings.clone(value)
+        case "instance":
+            if rb.match_instance != "" { return strings.clone("duplicate instance criterion") }
+            rb.match_instance = strings.clone(value)
+        case "title":
+            if rb.match_title != "" { return strings.clone("duplicate title criterion") }
+            rb.match_title = strings.clone(value)
+        case:
+            return fmt.aprintf("unknown field %q (want class|instance|title)", field)
+        }
+    }
+    return ""
+}
+
 // ----------------------------------------------------------------------------
 // Combo + action resolution
 // ----------------------------------------------------------------------------
@@ -395,6 +460,16 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
         }
         base.action = .Spawn
         base.cmd = strings.clone(rb.args)
+        return base, ""
+
+    case "focus", "focus_window":
+        if rb.match_class == "" && rb.match_instance == "" && rb.match_title == "" {
+            return {}, fmt.aprintf("bind(%q): focus requires class, instance, or title", rb.combo)
+        }
+        base.action = .Focus_Matching_Window
+        if rb.match_class != "" { base.match_class = strings.clone(rb.match_class) }
+        if rb.match_instance != "" { base.match_instance = strings.clone(rb.match_instance) }
+        if rb.match_title != "" { base.match_title = strings.clone(rb.match_title) }
         return base, ""
 
     case "focusleft":  base.action = .Focus_Left;  return base, ""
@@ -1152,6 +1227,23 @@ parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]st
             rb.args = strings.clone(cmd)
         case "call":
             act := quoted_trim(tail)
+            action_end := 0
+            for action_end < len(act) && act[action_end] != ' ' && act[action_end] != '\t' {
+                action_end += 1
+            }
+            action_name := act[:action_end]
+            action_args := strings.trim_space(act[action_end:])
+            if action_name == "focus" || action_name == "focus_window" {
+                rb.action = strings.clone(action_name)
+                if focus_err := parse_focus_bind(&rb, action_args); focus_err != "" {
+                    append(errs, fmt.aprintf("call(%q): focus: %s", combo, focus_err))
+                    delete(focus_err)
+                    free_bind(&rb)
+                    return false
+                }
+                append(&sc.binds, rb)
+                return true
+            }
             toks := split_ws(act)
             defer delete(toks)
             if len(toks) < 1 || len(toks) > 2 {
@@ -1274,6 +1366,9 @@ free_bind :: proc(rb: ^Raw_Bind) {
     if rb.combo != "" { delete(rb.combo) }
     if rb.action != "" { delete(rb.action) }
     if rb.args != "" { delete(rb.args) }
+    if rb.match_class != "" { delete(rb.match_class) }
+    if rb.match_instance != "" { delete(rb.match_instance) }
+    if rb.match_title != "" { delete(rb.match_title) }
     rb^ = {}
 }
 

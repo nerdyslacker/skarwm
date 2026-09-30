@@ -51,7 +51,9 @@ Wm :: struct {
     mouse_tabbed_drag: bool,
     mouse_column_drag: bool,
     mouse_decoration_drag: bool,
+    mouse_decoration_drag_started: bool,
     mouse_decoration_tile_drag: bool,
+    mouse_decoration_event_x: i16,
     tiled_resize: Tiled_Resize_State,
     mouse_root_x, mouse_root_y: i16,
     mouse_start: c.Rect,
@@ -77,6 +79,7 @@ Wm :: struct {
 g_wm: Wm
 
 TILED_DRAG_PREVIEW_SIZE :: i32(300)
+DECORATION_DRAG_THRESHOLD :: i32(6)
 
 // ---------------------------------------------------------------------------
 // atoms used by the WM core
@@ -730,6 +733,8 @@ dispatch_action :: proc(b: ^input.Binding) {
         if c.Focus_Dir(m, dir_of(b.action)) {
             reflow()
         }
+    case .Focus_Matching_Window:
+        focus_matching_window(b)
     case .Move_Left, .Move_Right, .Move_Up, .Move_Down:
         if c.Move_Dir(m, dir_of(b.action)) {
             reflow()
@@ -859,6 +864,25 @@ dispatch_action :: proc(b: ^input.Binding) {
     if b.action != .WS_Next && b.action != .WS_Prev && b.action != .WS_Goto {
         ipc_broadcast_focus_change(old_focus, m.Focused)
     }
+}
+
+focus_matching_window :: proc(b: ^input.Binding) -> bool {
+    if b == nil { return false }
+    m := g_wm.m
+    target := c.Next_Matching_Client(m, c.Client_Match{
+        Class = b.match_class,
+        Instance = b.match_instance,
+        Title = b.match_title,
+    })
+    if target == nil { return false }
+    old_output := c.Active_Output(m)
+    old_ws := c.Current_WS(m)
+    if !c.Jump_To_Client(m, target) { return false }
+    if target.Out != old_output { ipc_broadcast_output_event("focus", target.Out.Name) }
+    if target.Ws != old_ws { ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, target.Ws, old_ws) }
+    raise_focused()
+    reflow()
+    return true
 }
 
 screen_split_action :: proc(action: input.Action_Kind, arg: int) {
@@ -1288,39 +1312,54 @@ decoration_stash_client :: proc(cl: ^c.Client) {
 
 decoration_begin_drag :: proc(cl: ^c.Client, ev: ^x11.Button_Press_Event) {
     if cl == nil || cl.Fullscreen || !on_current_ws(cl) { return }
+    g_wm.mouse_client = cl
+    g_wm.mouse_decoration_drag = true
+    g_wm.mouse_decoration_drag_started = false
+    clean := ev.state & ~(g_wm.lock | g_wm.numlock)
+    g_wm.mouse_decoration_tile_drag = clean & x11.MOD_MASK_MOD1 != 0
+    g_wm.mouse_decoration_event_x = ev.event_x
+    g_wm.mouse_root_x = ev.root_x
+    g_wm.mouse_root_y = ev.root_y
+    g_wm.mouse_start = cl.FloatingRect
+}
+
+decoration_activate_drag :: proc(cl: ^c.Client, root_x, root_y: i32) {
+    if cl == nil || !g_wm.mouse_decoration_drag || g_wm.mouse_decoration_drag_started { return }
+    was_maximized := cl.Maximized
     if cl.Maximized {
         maximized_frame := c.Decoration_Layout_Frame_Rect(cl.Geom, g_wm.m.Cfg.BorderWidth)
         c.Set_Maximized(cl, false)
         reflow_immediate()
         if cl.Floating {
             r := cl.FloatingRect
-            anchor := clamp(i32(ev.event_x), i32(0), max(i32(1), maximized_frame.W))
-            r.X = i32(ev.root_x) - r.W*anchor/max(i32(1), maximized_frame.W)
-            r.Y = i32(ev.root_y) - g_wm.m.Cfg.Decoration.TitlebarHeight/2
+            anchor := clamp(i32(g_wm.mouse_decoration_event_x), i32(0), max(i32(1), maximized_frame.W))
+            r.X = root_x - r.W*anchor/max(i32(1), maximized_frame.W)
+            r.Y = root_y - g_wm.m.Cfg.Decoration.TitlebarHeight/2
             cl.FloatingRect = r
             reflow_immediate()
         }
         ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
     }
-    g_wm.mouse_client = cl
-    g_wm.mouse_decoration_drag = true
-    clean := ev.state & ~(g_wm.lock | g_wm.numlock)
-    g_wm.mouse_decoration_tile_drag = clean & x11.MOD_MASK_MOD1 != 0
-    g_wm.mouse_root_x = ev.root_x
-    g_wm.mouse_root_y = ev.root_y
+    g_wm.mouse_decoration_drag_started = true
+    if was_maximized && cl.Floating {
+        // The restored floating rect was anchored at this motion event, so it
+        // has already absorbed the distance travelled past the threshold.
+        g_wm.mouse_root_x = i16(root_x)
+        g_wm.mouse_root_y = i16(root_y)
+    }
     g_wm.mouse_start = cl.FloatingRect
     if cl.Floating {
         if g_wm.mouse_decoration_tile_drag {
-            ui.Update_Drop(&g_wm.ui, g_wm.m, cl, i32(ev.root_x), i32(ev.root_y))
+            ui.Update_Drop(&g_wm.ui, g_wm.m, cl, root_x, root_y)
         }
         return
     }
     g_wm.mouse_tiled_drag = true
     // The decoration renderer adds its own titlebar around this preview.
-    show_tiled_drag_preview(cl, i32(ev.root_x), i32(ev.root_y))
+    show_tiled_drag_preview(cl, root_x, root_y)
     raise_focused()
     if g_wm.mouse_decoration_tile_drag {
-        ui.Update_Drop(&g_wm.ui, g_wm.m, cl, i32(ev.root_x), i32(ev.root_y))
+        ui.Update_Drop(&g_wm.ui, g_wm.m, cl, root_x, root_y)
     }
 }
 
@@ -1505,6 +1544,12 @@ on_motion :: proc(ev: ^x11.Motion_Notify_Event) {
         scroll_preview_hover(i32(ev.root_x), i32(ev.root_y))
         return
     }
+    if g_wm.mouse_decoration_drag && !g_wm.mouse_decoration_drag_started {
+        dx := abs(i32(ev.root_x) - i32(g_wm.mouse_root_x))
+        dy := abs(i32(ev.root_y) - i32(g_wm.mouse_root_y))
+        if max(dx, dy) < DECORATION_DRAG_THRESHOLD { return }
+        decoration_activate_drag(cl, i32(ev.root_x), i32(ev.root_y))
+    }
     if g_wm.mouse_tiled_drag {
         if g_wm.mouse_column_drag {
             preview := show_tiled_drag_preview(
@@ -1656,7 +1701,8 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
         }
     } else if g_wm.mouse_tiled_drag {
         ui.Hide_Drop(&g_wm.ui)
-    } else if cl != nil && g_wm.mouse_decoration_drag && cl.Floating && !g_wm.mouse_resize {
+    } else if cl != nil && g_wm.mouse_decoration_drag &&
+              g_wm.mouse_decoration_drag_started && cl.Floating && !g_wm.mouse_resize {
         target := g_wm.ui.DropTarget
         ui.Hide_Drop(&g_wm.ui)
         if g_wm.mouse_decoration_tile_drag {
@@ -1672,7 +1718,7 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
 }
 
 cancel_pointer_operation :: proc() {
-    if g_wm.mouse_client != nil { x11.xcb_ungrab_pointer(g_wm.conn, x11.CURRENT_TIME) }
+    x11.xcb_ungrab_pointer(g_wm.conn, x11.CURRENT_TIME)
     if g_wm.mouse_tiled_drag || g_wm.mouse_decoration_drag { ui.Hide_Drop(&g_wm.ui) }
     g_wm.mouse_client = nil
     g_wm.mouse_resize = false
@@ -1681,7 +1727,9 @@ cancel_pointer_operation :: proc() {
     g_wm.mouse_tabbed_drag = false
     g_wm.mouse_column_drag = false
     g_wm.mouse_decoration_drag = false
+    g_wm.mouse_decoration_drag_started = false
     g_wm.mouse_decoration_tile_drag = false
+    g_wm.mouse_decoration_event_x = 0
     g_wm.mouse_preview = {}
     g_wm.tiled_resize = {}
 }
@@ -1812,17 +1860,15 @@ on_property_notify :: proc(ev: ^x11.Property_Notify_Event) {
 on_configure_notify :: proc(ev: ^x11.Configure_Notify_Event) {
     if ev.event != g_wm.root || ev.window != g_wm.root { return }
     next_w, next_h := i32(ev.width), i32(ev.height)
-    // RandR 1.5 SetMonitor/DeleteMonitor deliberately sends a root
-    // ConfigureNotify even though the root dimensions did not change. Ignore
-    // it: rediscovering at that point would mistake our projected logical
-    // monitors for newly attached physical outputs and create an event loop.
-    if next_w == g_wm.scr_w && next_h == g_wm.scr_h { return }
-    g_wm.scr_w, g_wm.scr_h = next_w, next_h
+    // RandR 1.5 SetMonitor/DeleteMonitor can send a root ConfigureNotify even
+    // when the framebuffer dimensions stay unchanged.  Treat it as a rescreen
+    // signal unless it came from our currently published split projection.
+    size_changed := next_w != g_wm.scr_w || next_h != g_wm.scr_h
+    if size_changed { g_wm.scr_w, g_wm.scr_h = next_w, next_h }
     if g_randr.available {
-        randr_clear_virtual_monitors()
-        randr_scan(true)
-        randr_sync_virtual_monitors()
+        if size_changed || len(g_randr.published) == 0 { randr_schedule_rescan() }
     } else {
+        if !size_changed { return }
         _ = c.Reconcile_Outputs(g_wm.m, []c.Output_Spec{{
             Name = "screen",
             Geom = c.Rect{X = 0, Y = 0, W = g_wm.scr_w, H = g_wm.scr_h},

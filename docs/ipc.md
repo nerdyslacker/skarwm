@@ -39,6 +39,7 @@ skarwm-msg screen split enable
 skarwm-msg screen split disable
 skarwm-msg screen split resize +50|-50
 skarwm-msg screen split ratio 0.10..0.90
+skarwm-msg screen refresh
 skarwm-msg close
 skarwm-msg reload
 skarwm-msg quit
@@ -70,6 +71,7 @@ When no window matches, the optional command after `--spawn` is launched.
 skarwm-msg get-workspaces
 skarwm-msg get-windows
 skarwm-msg get-outputs
+skarwm-msg get-topology
 skarwm-msg get-version
 ```
 
@@ -89,7 +91,11 @@ non-tiled clients use null/zero values. The `scratchpad` boolean identifies a
 hidden client, `scratchpad_register` is one session register or null, and
 `scratchpad_registers` contains every register pointing at that client. The
 singular field is retained for simple consumers. Type 101 reports protocol
-version information.
+version information. `get-topology` (extension type 102) reports the committed
+topology generation, scheduler/transaction diagnostics, every RandR connector
+(including connected-but-disabled connectors), and the current logical output
+snapshot. `screen refresh` schedules the same authoritative refresh used for
+RandR events.
 
 ## Events
 

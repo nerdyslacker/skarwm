@@ -46,6 +46,7 @@ main :: proc() {
     test_add_and_focus()
     test_focus_direction()
     test_move_dir()
+    test_single_floater_drop_target()
     test_pointer_column_move()
     test_pointer_tabbed_drop()
     test_pointer_tabbed_column_drop()
@@ -60,8 +61,12 @@ main :: proc() {
     test_vertical_scroller_drop_targets()
     test_output_work_area()
     test_floating_reserved_right_edge()
+    test_jump_to_matching_window()
     test_multi_output()
     test_virtual_screens()
+    test_physical_topology()
+    test_topology_refresh_scheduler()
+    test_topology_transaction_and_nearest_migration()
     test_multi_output_scrolling()
     test_layout_geometry()
     test_scrolling()
@@ -93,6 +98,135 @@ main :: proc() {
         fmt.eprintln("UNIT TESTS FAILED")
         os.exit(1)
     }
+}
+
+test_physical_topology :: proc() {
+    old := c.Physical_Topology{RootGeometry = GEOM, PrimaryOutputId = 10}
+    old.Outputs = make([dynamic]c.Physical_Output_State, 0, 2)
+    defer delete(old.Outputs)
+    append(&old.Outputs,
+        c.Physical_Output_State{StableId = "DP-1", Name = "DP-1", OutputId = 10, CrtcId = 20,
+         Connected = true, Enabled = true, Geom = GEOM, Primary = true},
+        c.Physical_Output_State{StableId = "HDMI-1", Name = "HDMI-1", OutputId = 11,
+         Connected = true, Enabled = false})
+    ok(c.Topology_Valid(&old), "connected-but-disabled output is a valid physical topology member")
+    ok(c.Topology_Has_Pending_Enable(&old),
+       "connected-but-disabled output requests a bounded settle watch")
+    old.Outputs[1].Enabled = true
+    ok(!c.Topology_Has_Pending_Enable(&old),
+       "enabled output does not request a settle watch")
+    old.Outputs[1].Enabled = false
+    reordered := c.Physical_Topology{RootGeometry = GEOM, PrimaryOutputId = 10}
+    reordered.Outputs = make([dynamic]c.Physical_Output_State, 0, 2)
+    defer delete(reordered.Outputs)
+    append(&reordered.Outputs,
+        c.Physical_Output_State{StableId = "HDMI-1", Name = "HDMI-1", OutputId = 11,
+         Connected = true, Enabled = false},
+        c.Physical_Output_State{StableId = "DP-1", Name = "DP-1", OutputId = 10, CrtcId = 20,
+         Connected = true, Enabled = true, Geom = GEOM, Primary = true})
+    ok(c.Topology_Equal(&old, &reordered), "enumeration order is not physical output identity")
+
+    next := reordered
+    next.RootGeometry = c.Rect{W = 3840, H = 1080}
+    next.Outputs[0].CrtcId = 21
+    next.Outputs[0].Enabled = true
+    next.Outputs[0].Geom = c.Rect{X = 1920, W = 1920, H = 1080}
+    next.Outputs[1].Primary = false
+    next.Outputs[0].Primary = true
+    next.PrimaryOutputId = 11
+    diff := c.Topology_Diff(&old, &next)
+    defer delete(diff)
+    eq(len(diff), 2, "enable plus primary change diff by stable connector identity")
+    ok(.Enabled in diff[0].Changes && .Geometry in diff[0].Changes && .Primary in diff[0].Changes,
+       "enabling an existing connector is not reported as remove/add")
+    ok(.Primary in diff[1].Changes, "old primary loses primary status")
+
+    invalid := c.Physical_Topology{RootGeometry = GEOM}
+    invalid.Outputs = make([dynamic]c.Physical_Output_State, 0, 2)
+    defer delete(invalid.Outputs)
+    append(&invalid.Outputs,
+        c.Physical_Output_State{StableId = "DP-1", Name = "DP-1", OutputId = 10},
+        c.Physical_Output_State{StableId = "DP-1", Name = "DP-1-copy", OutputId = 12})
+    ok(!c.Topology_Valid(&invalid), "duplicate stable connector identity rejects candidate")
+    negative := c.Physical_Topology{RootGeometry = GEOM}
+    negative.Outputs = make([dynamic]c.Physical_Output_State, 0, 1)
+    defer delete(negative.Outputs)
+    append(&negative.Outputs, c.Physical_Output_State{StableId = "DP-2", Name = "DP-2",
+        OutputId = 12, CrtcId = 22, Connected = true, Enabled = true,
+        Geom = c.Rect{X = -1920, W = 1920, H = 1080}})
+    ok(c.Topology_Valid(&negative), "negative monitor coordinates remain valid")
+
+    m := mk_man()
+    payload := c.ipc_topology_payload(m, &old, 7, 3, .Scheduled)
+    ok(strings.contains(string(payload), `"generation":0`) &&
+       strings.contains(string(payload), `"connected":true,"enabled":false`) &&
+       strings.contains(string(payload), `"scheduler":"scheduled"`) &&
+       strings.contains(string(payload), `"logical_outputs":[`),
+       "topology diagnostics include physical state and logical snapshot")
+    delete(payload)
+    c.Destroy_Manager(m)
+}
+
+test_topology_refresh_scheduler :: proc() {
+    state: c.Topology_Refresh_State
+    c.Topology_Schedule(&state, 100, 75)
+    eq(state.Phase, c.Topology_Refresh_Phase.Scheduled, "event schedules topology refresh")
+    ok(!c.Topology_Begin_Refresh(&state, 174), "refresh does not run before debounce deadline")
+    ok(c.Topology_Begin_Refresh(&state, 175), "refresh runs at debounce deadline")
+    c.Topology_Schedule(&state, 176, 75)
+    ok(state.Pending, "event during refresh records one pending refresh")
+    c.Topology_End_Refresh(&state, 200, 75, false)
+    ok(state.Phase == .Scheduled && state.Deadline == 275 && !state.Pending,
+       "pending event schedules exactly one follow-up transaction")
+    ok(c.Topology_Begin_Refresh(&state, 275), "pending refresh becomes due")
+    c.Topology_End_Refresh(&state, 280, 125, true)
+    ok(state.Phase == .Scheduled && state.Deadline == 405,
+       "invalid transient snapshot schedules a non-blocking retry")
+    ok(c.Topology_Begin_Refresh(&state, 405), "retry becomes due")
+    c.Topology_End_Refresh(&state, 410, 75, false)
+    eq(state.Phase, c.Topology_Refresh_Phase.Idle, "successful refresh returns scheduler to idle")
+}
+
+test_topology_transaction_and_nearest_migration :: proc() {
+    m := c.New_Manager()
+    defer c.Destroy_Manager(m)
+    initial := []c.Output_Spec{
+        {Name = "LEFT", Geom = c.Rect{W = 1000, H = 900}, Primary = true},
+        {Name = "CENTER", Geom = c.Rect{X = 1000, W = 1000, H = 900}},
+        {Name = "RIGHT", Geom = c.Rect{X = 3000, W = 1000, H = 900}},
+    }
+    ok(c.Reconcile_Outputs(m, initial), "three-screen topology commits")
+    right := m.Outputs[2]
+    c.Focus_Output(m, right)
+    tiled := add_tiled(m, 8801)
+    floating := c.New_Client(8802)
+    c.Add_Managed(m, c.Current_WS(m), floating, true)
+    floating.FloatingRect = c.Rect{X = 3850, Y = 780, W = 500, H = 300}
+
+    old_outputs := len(m.Outputs)
+    old_right_geom := right.Geom
+    duplicate := []c.Output_Spec{
+        {Name = "LEFT", Geom = c.Rect{W = 1000, H = 900}, Primary = true},
+        {Name = "LEFT", Geom = c.Rect{X = 1000, W = 1000, H = 900}},
+    }
+    ok(!c.Reconcile_Outputs(m, duplicate), "invalid duplicate candidate is rejected transactionally")
+    eq(len(m.Outputs), old_outputs, "rejected candidate preserves live screen collection")
+    eq(right.Geom, old_right_geom, "rejected candidate preserves live geometry")
+
+    survivors := []c.Output_Spec{
+        {Name = "LEFT", Geom = c.Rect{W = 1000, H = 900}, Primary = true},
+        {Name = "CENTER", Geom = c.Rect{X = 1000, W = 1000, H = 900}},
+    }
+    ok(c.Reconcile_Outputs(m, survivors), "removing the focused third screen commits")
+    center := c.Find_Output(m, "CENTER")
+    eq(tiled.Out, center, "client on removed screen migrates to nearest survivor")
+    eq(c.Active_Output(m), center, "focus follows removed screen state to nearest survivor")
+    work := c.Output_Work_Area(m, center)
+    ok(floating.Out == center && floating.FloatingRect.X >= work.X && floating.FloatingRect.Y >= work.Y &&
+       floating.FloatingRect.X + floating.FloatingRect.W <= work.X + work.W &&
+       floating.FloatingRect.Y + floating.FloatingRect.H <= work.Y + work.H,
+       "floating client is translated and clamped into survivor workarea (rect=%v work=%v)",
+       floating.FloatingRect, work)
 }
 
 test_late_dock_promotion_model :: proc() {
@@ -148,6 +282,20 @@ test_output_work_area :: proc() {
     output.Reserved = c.Insets{Left = 5, Right = 7, Top = 30, Bottom = 20}
     eq(c.Output_Work_Area(m, output), c.Rect{X = 13, Y = 38, W = 1892, H = 1014},
         "output work area excludes every reserved bar edge")
+    output.Reserved = c.Insets{Top = 30}
+    eq(c.Output_Preview_Clip_Area(m, output), c.Rect{X = 0, Y = 30, W = 1920, H = 1050},
+        "preview clip touches the bar and leaves unreserved edges uncropped")
+    _ = c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    edge_preview := add_tiled(m, 468)
+    edge_preview.Geom = c.Rect{X = 0, Y = 100, W = 200, H = 200}
+    edge_preview.Border = 0
+    ok(!c.Client_Needs_Work_Area_Clip(m, edge_preview),
+        "top bar does not crop a preview touching the unreserved left edge")
+    edge_preview.Geom.Y = 0
+    ok(c.Client_Needs_Work_Area_Clip(m, edge_preview),
+        "top bar still crops a preview crossing its own reserved edge")
+    c.Unmanage_Client(m, edge_preview)
     dock := add_dock(m, 469, c.Insets{Top = 30}, c.Rect{X = 0, Y = 0, W = 1920, H = 30})
     ok(!c.Client_Needs_Work_Area_Clip(m, dock),
         "dock windows never receive a scroller work-area clip")
@@ -990,6 +1138,35 @@ test_pointer_column_move :: proc() {
     eq(c.Active_Output(m), right, "focus follows cross-output floating drag")
 }
 
+test_single_floater_drop_target :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    floater := c.New_Client(305)
+    c.Add_Managed(m, ws, floater, true)
+    c.Arrange_All(m)
+
+    out := c.Active_Output(m)
+    target := c.Drop_Target_At_Point(
+        m, out.Geom.X + 10, out.Geom.Y + out.Geom.H / 2, floater,
+    )
+    eq(target.Kind, c.Drop_Kind.New_Column,
+        "lone floater exposes a first-column drop target")
+    eq(target.Zone, c.Drop_Zone.Left,
+        "lone floater edge target keeps its direction")
+    eq(target.Out, out, "lone floater can target its current output")
+    eq(target.Ws, ws, "lone floater can target its current workspace")
+
+    c.Set_Floating(m, floater, false)
+    ok(c.Move_Client_To_Drop(m, floater, target),
+        "lone floater applies its first-column drop target")
+    ok(!floater.Floating, "lone floater becomes tiled after the drop")
+    eq(len(ws.Cols), 1, "lone floater creates one tiled column")
+    eq(ws.Cols[0].Wins[0], floater,
+        "first tiled column contains the former floater")
+}
+
 test_pointer_tabbed_drop :: proc() {
     m := mk_man()
     defer c.Destroy_Manager(m)
@@ -1463,6 +1640,47 @@ test_workspace_layouts :: proc() {
         "leaving global floating preserves independently floated window")
 }
 
+test_jump_to_matching_window :: proc() {
+    m := c.New_Manager()
+    defer c.Destroy_Manager(m)
+    c.Reconcile_Outputs(m, []c.Output_Spec{
+        {Name = "eDP-1", Geom = c.Rect{X = 0, Y = 0, W = 1920, H = 1080}, Primary = true},
+        {Name = "HDMI-1", Geom = c.Rect{X = 1920, Y = 0, W = 1280, H = 1024}},
+    })
+    first := add_tiled(m, 490)
+    first.Class = strings.clone("URxvt")
+    first.Title = strings.clone("VIM notes")
+    c.Switch_WS_Id(m, 2)
+    second := add_tiled(m, 491)
+    second.Class = strings.clone("URxvt")
+    second.Title = strings.clone("VIM project")
+    decoy := add_tiled(m, 492)
+    decoy.Class = strings.clone("URxvt")
+    decoy.Title = strings.clone("shell")
+    c.Focus_Client(m, decoy)
+
+    match := c.Client_Match{Class = "URxvt", Title = "VIM"}
+    eq(c.Next_Matching_Client(m, match), first,
+       "window criteria combine class and title and wrap management order")
+    ok(c.Jump_To_Client(m, first), "matching-window jump succeeds")
+    eq(c.Current_WS(m), first.Ws, "jump reveals the target workspace")
+    eq(m.Focused, first, "jump focuses the target client")
+    eq(c.Next_Matching_Client(m, match), second,
+       "repeated matching-window jump cycles to the next match")
+    ok(c.Jump_To_Client(m, second), "second match can be revealed")
+    eq(c.Current_WS(m).Id, 2, "second jump switches back to its workspace")
+
+    ok(c.Focus_Output_Rel(m, 1), "matching fixture reaches second output")
+    remote := add_tiled(m, 493)
+    remote.Class = strings.clone("Mail")
+    remote.Title = strings.clone("Inbox")
+    ok(c.Jump_To_Client(m, first), "jump crosses back to the target output")
+    eq(c.Active_Output(m), first.Out, "jump selects the target output")
+    remote.Stashed = true
+    ok(!c.Client_Matches(remote, c.Client_Match{Class = "Mail"}),
+       "hidden scratchpads are excluded from matching jumps")
+}
+
 test_multi_output :: proc() {
     m := c.New_Manager()
     defer c.Destroy_Manager(m)
@@ -1501,6 +1719,8 @@ test_multi_output :: proc() {
     eq(floating.FloatingRect, c.Rect{X = 180, Y = 100, W = 400, H = 300},
        "floating client preserves screen-relative geometry")
     eq(floating.Ws.Focus, floating, "moved floating client is remembered on target")
+    stranded := add_tiled(m, 103)
+    shell_surface := add_dock(m, 104, c.Insets{}, c.Rect{X = 1920, Y = 0, W = 1280, H = 1024})
 
     reduced := []c.Output_Spec {
         {Name = "eDP-1", Geom = c.Rect{X = 0, Y = 0, W = 2560, H = 1440}, Primary = true},
@@ -1512,6 +1732,13 @@ test_multi_output :: proc() {
     eq(left.Out, m.Outputs[0], "existing primary client preserved")
     eq(right.Out, m.Outputs[0], "moved client preserved after disconnect")
     eq(floating.Out, m.Outputs[0], "floating client preserved after disconnect")
+    eq(m.Outputs[0].Current.Id, 1, "disconnected active output keeps its visible workspace")
+    c.Arrange_All(m)
+    ok(stranded.Geom.X >= 0 && stranded.Geom.X < m.Outputs[0].Geom.W,
+       "window from disconnected active output is visible on survivor")
+    eq(shell_surface.Out, m.Outputs[0], "shell surface ownership remains valid after disconnect")
+    ok(shell_surface.Geom.X <= c.HIDE_X,
+       "stale non-reserving shell surface cannot intercept survivor input")
 
     outputs := c.ipc_outputs_payload(m)
     defer delete(outputs)
@@ -2636,6 +2863,9 @@ test_ipc_parse_command :: proc() {
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`move output previous`))
     ok(fine && cmd.action == .Move_To_Output_Prev, "move output previous parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`screen refresh`))
+    ok(fine && cmd.action == .Screen_Refresh, "manual topology refresh parsed")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`workspace`))
     ok(!fine, "bare workspace rejected")

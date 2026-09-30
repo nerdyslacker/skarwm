@@ -69,6 +69,22 @@ Output_Work_Area :: proc(m: ^Manager, o: ^Output) -> Rect {
     return Rect{X = p.WorkX, Y = p.WorkY, W = max(i32(0), p.WorkW), H = max(i32(0), p.WorkH)}
 }
 
+// Output_Preview_Clip_Area clips a translated scroller preview only on edges
+// occupied by a bar.  Unreserved edges retain the full physical output bounds,
+// so a top bar cannot accidentally crop left/right/bottom previews (and vice
+// versa). On a reserved edge, clip exactly at the panel's inner boundary so
+// the preview touches the bar without showing through it or leaving a gap.
+Output_Preview_Clip_Area :: proc(m: ^Manager, o: ^Output) -> Rect {
+    if m == nil || o == nil { return {} }
+    left, top := o.Geom.X, o.Geom.Y
+    right, bottom := o.Geom.X + o.Geom.W, o.Geom.Y + o.Geom.H
+    if o.Reserved.Left > 0 { left += o.Reserved.Left }
+    if o.Reserved.Right > 0 { right -= o.Reserved.Right }
+    if o.Reserved.Top > 0 { top += o.Reserved.Top }
+    if o.Reserved.Bottom > 0 { bottom -= o.Reserved.Bottom }
+    return Rect{X = left, Y = top, W = max(i32(0), right-left), H = max(i32(0), bottom-top)}
+}
+
 // Resolve_Page_Width returns the uniform tile width for a workspace holding
 // `n_cols` columns. Fewer than PAGE_COLS columns expand to exactly fill the
 // work width; with PAGE_COLS or more each column is a page width chosen so that
@@ -562,15 +578,15 @@ client_outer_rect :: proc(cl: ^Client, border_width: i32) -> Rect {
 }
 
 // Client_Needs_Work_Area_Clip identifies translated scroller previews (and
-// parked scroller clients) whose authoritative outer rectangle crosses a
-// reserved work-area edge. Ordinary tiled clients retain the older physical-
-// output mask, avoiding any startup interaction with panels being adopted.
+// parked scroller clients) whose authoritative outer rectangle crosses the
+// per-edge panel-safe preview area. Ordinary tiled clients retain the older
+// physical-output mask, avoiding startup interaction with adopted panels.
 Client_Needs_Work_Area_Clip :: proc(m: ^Manager, cl: ^Client) -> bool {
     if m == nil || cl == nil || cl.Ws == nil || cl.Out == nil || cl.Floating || cl.Dock {
         return false
     }
     if cl.Ws.Layout != .Scroller && cl.Ws.Layout != .Vertical_Scroller { return false }
-    work := Output_Work_Area(m, cl.Out)
+    work := Output_Preview_Clip_Area(m, cl.Out)
     outer := client_outer_rect(cl, cl.Border)
     return outer.X < work.X || outer.Y < work.Y ||
         outer.X + outer.W > work.X + work.W || outer.Y + outer.H > work.Y + work.H
@@ -611,8 +627,10 @@ drop_target_at_point :: proc(m: ^Manager, x, y: i32, dragged: ^Client) -> Drop_T
 
     if closest == nil {
         // Preserve cross-output drops onto an empty workspace. Dropping the
-        // only client back onto its own empty target is intentionally a no-op.
-        if dragged == nil || dragged.Out == o { return {} }
+        // only tiled client back onto its own empty target is a no-op, but a
+        // lone floater still needs a first-column target so Alt+title drag can
+        // tile it on its current output.
+        if dragged == nil || (dragged.Out == o && !dragged.Floating) { return {} }
         p := compute_params(m.Cfg, o.Geom, 0, o.Reserved)
         r := Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}
         if rect_empty(r) { return {} }
@@ -1547,6 +1565,14 @@ Arrange_All :: proc(m: ^Manager) {
         // regardless of that output's selected workspace.
         for d in o.Docks {
             r := d.FloatingRect
+            // A non-reserving shell surface whose RandR output disappeared is
+            // deliberately parked until its owner destroys or reconfigures it.
+            // Do not clamp that transparent input window onto the survivor.
+            if r.X <= HIDE_X {
+                d.Geom = r
+                d.Border = 0
+                continue
+            }
             if rect_empty(r) {
                 r = Rect { X = o.Geom.X, Y = o.Geom.Y, W = o.Geom.W, H = 24 }
             }

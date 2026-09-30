@@ -563,9 +563,11 @@ translate_floating_rect :: proc(r: Rect, from, to: Rect) -> Rect {
     moved := r
     moved.X = to.X + r.X - from.X
     moved.Y = to.Y + r.Y - from.Y
-    if moved.W > to.W { moved.W = to.W }
-    if moved.H > to.H { moved.H = to.H }
-    return clamp_float_rect(moved, to)
+    moved.W = clamp(moved.W, i32(1), max(i32(1), to.W))
+    moved.H = clamp(moved.H, i32(1), max(i32(1), to.H))
+    moved.X = clamp(moved.X, to.X, to.X + to.W - moved.W)
+    moved.Y = clamp(moved.Y, to.Y, to.Y + to.H - moved.H)
+    return moved
 }
 
 migrate_output_state :: proc(m: ^Manager, src, dst: ^Output) {
@@ -581,7 +583,9 @@ migrate_output_state :: proc(m: ^Manager, src, dst: ^Output) {
         }
         clear(&ws.Cols)
         for cl in ws.Floaters {
-            cl.FloatingRect = translate_floating_rect(cl.FloatingRect, src.Geom, dst.Geom)
+            destination := Output_Work_Area(m, dst)
+            if destination.W <= 0 || destination.H <= 0 { destination = dst.Geom }
+            cl.FloatingRect = translate_floating_rect(cl.FloatingRect, src.Geom, destination)
             cl.Ws = target
             cl.Out = dst
             append(&target.Floaters, cl)
@@ -591,6 +595,12 @@ migrate_output_state :: proc(m: ^Manager, src, dst: ^Output) {
     }
     for d in src.Docks {
         d.Out = dst
+        if d.Strut != (Insets{}) {
+            Remap_Dock_To_Output(d, dst)
+        } else {
+            d.FloatingRect.X = HIDE_X
+            d.Geom.X = HIDE_X
+        }
         append(&dst.Docks, d)
     }
     clear(&src.Docks)
@@ -622,6 +632,12 @@ reset_active_output :: proc(m: ^Manager, wanted: ^Output) {
 // as the ordered list of logical WM screens.
 Reconcile_Outputs :: proc(m: ^Manager, specs: []Output_Spec) -> bool {
     if m == nil || len(specs) == 0 { return false }
+    // Reject the complete candidate before mutating any live object. Negative
+    // coordinates and overlaps/mirrors are valid RandR arrangements.
+    for spec, i in specs {
+        if spec.Name == "" || spec.Geom.W <= 0 || spec.Geom.H <= 0 { return false }
+        for prior in specs[:i] { if prior.Name == spec.Name { return false } }
+    }
     old_physical := m.PhysicalOutputs
     old_outputs := m.Outputs
     old_active := Active_Output(m)
@@ -685,11 +701,43 @@ Reconcile_Outputs :: proc(m: ^Manager, specs: []Output_Spec) -> bool {
         }
     }
 
+    nearest_survivor :: proc(removed: ^Output, physical: []^Physical_Output, fallback: ^Output) -> ^Output {
+        if removed == nil { return fallback }
+        cx, cy := removed.Geom.X + removed.Geom.W / 2, removed.Geom.Y + removed.Geom.H / 2
+        best := fallback
+        best_distance := i64(0x7fff_ffff_ffff_ffff)
+        for p in physical {
+            for screen in p.Screens {
+                dx, dy: i64
+                if cx < screen.Geom.X { dx = i64(screen.Geom.X - cx) }
+                if cx >= screen.Geom.X + screen.Geom.W { dx = i64(cx - (screen.Geom.X + screen.Geom.W - 1)) }
+                if cy < screen.Geom.Y { dy = i64(screen.Geom.Y - cy) }
+                if cy >= screen.Geom.Y + screen.Geom.H { dy = i64(cy - (screen.Geom.Y + screen.Geom.H - 1)) }
+                distance := dx * dx + dy * dy
+                if distance < best_distance { best, best_distance = screen, distance }
+            }
+        }
+        return best
+    }
+
     for p, i in old_physical {
         if used[i] { continue }
         for o in p.Screens {
-            if replacement_active == o { replacement_active = target }
-            migrate_output_state(m, o, target)
+            destination := nearest_survivor(o, next_physical[:], target)
+            // Setup_Output installs a synthetic full-root "screen" before
+            // RandR initialization. It has no user state whose geometric
+            // affinity should override the real primary monitor.
+            if len(old_physical) == 1 && p.Name == "screen" && len(m.Clients) == 0 {
+                destination = target
+            }
+            removed_was_active := replacement_active == o
+            removed_current_id := 0
+            if removed_was_active && o.Current != nil { removed_current_id = o.Current.Id }
+            if removed_was_active { replacement_active = destination }
+            migrate_output_state(m, o, destination)
+            if removed_was_active && removed_current_id > 0 {
+                destination.Current = Ensure_WS_On_Output(destination, removed_current_id)
+            }
             free_output(o)
         }
         clear(&p.Screens)
@@ -700,6 +748,7 @@ Reconcile_Outputs :: proc(m: ^Manager, specs: []Output_Spec) -> bool {
     m.PhysicalOutputs = next_physical
     delete(old_outputs)
     m.Outputs = logical_list_from_physical(m)
+    Update_Reserved(m)
     if replacement_active == nil || Output_Index(m, replacement_active) < 0 {
         replacement_active = target
     }

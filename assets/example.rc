@@ -136,6 +136,7 @@ autostart : "xsetroot -solid '#202020'"
 # layout_floating layout_next
 # show_bindings show_datetime show_battery
 # focus_output_next/prev move_to_output_next/prev
+# focus class <text> [instance <text>] [title <text>]
 # screen_split_toggle/enable/disable screen_split_grow/shrink/ratio
 # reminder_new reminder_show_all reminder_clear_all
 # scratchpad_toggle N scratchpad_toggle_float N scratchpad_remove N
@@ -218,6 +219,11 @@ call : mod + comma         : focus_output_prev
 call : mod + period        : focus_output_next
 call : mod + Shift + comma : move_to_output_prev
 call : mod + Shift + period : move_to_output_next
+
+# Jump to a matching window on any workspace/output. Multiple criteria are
+# ANDed; quote values containing spaces. Repeated presses cycle through matches.
+# call : mod + a : focus class URxvt title VIM
+# call : mod + m : focus title "Music Player"
 
 # Virtual-screen controls for an ultrawide monitor. F5/F8 move the shared
 # boundary by 15px; F6 returns to one logical screen; F7 enables the default

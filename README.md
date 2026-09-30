@@ -188,6 +188,25 @@ Tabbed mode affects only the focused column. Move windows into it with
 The fully commented [assets/example.rc](assets/example.rc) documents settings,
 bindings, workspace rules, window rules, and autostart commands.
 
+### Jumping to matching windows
+
+A `focus` call jumps to a managed window matching one or more metadata fields,
+switching to its output and workspace. Criteria are case-sensitive substring
+matches, use AND semantics when combined, and repeated presses cycle through
+the matches in stable management order:
+
+```text
+# Jump between URxvt windows whose title contains VIM.
+call : mod + a : focus class URxvt title VIM
+
+# Quotes preserve spaces in a criterion value.
+call : mod + m : focus title "Music Player"
+call : mod + i : focus instance thunderbird
+```
+
+Supported fields are `class`, `instance`, and `title`. Dock windows and hidden
+scratchpads are excluded.
+
 ### Scratchpads
 
 skarwm has native, session-only scratchpad registers. Hidden windows remain

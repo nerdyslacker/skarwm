@@ -28,6 +28,7 @@ Action_Kind :: enum u8 {
     Move_To_Output_Next, Move_To_Output_Prev,
     Screen_Split_Toggle, Screen_Split_Enable, Screen_Split_Disable,
     Screen_Split_Grow, Screen_Split_Shrink, Screen_Split_Ratio,
+    Focus_Matching_Window,
 }
 
 Binding :: struct {
@@ -39,4 +40,5 @@ Binding :: struct {
     arg:     int,
     cmd:     string,
     combo:   string,
+    match_class, match_instance, match_title: string,
 }

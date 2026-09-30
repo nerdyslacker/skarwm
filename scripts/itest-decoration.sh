@@ -76,6 +76,16 @@ else
   fail "geometry client=$client_geom frame=$frame_geom"
 fi
 
+# A title click focuses the client but must not be interpreted as an undock.
+xdotool mousemove 640 20 click 1 >/dev/null 2>&1
+sleep 0.2
+windows=$(./build/skarwm-msg get-windows 2>/dev/null)
+if [[ $windows == *'"id":'"$client"*'"floating":false'* ]]; then
+  pass "title click keeps a tiled client tiled"
+else
+  fail "title click unexpectedly floated the client"
+fi
+
 # Maximize button: compact 20px targets at the frame's right edge.
 xdotool mousemove 1240 20 click 1 >/dev/null 2>&1
 sleep 0.2
@@ -145,6 +155,18 @@ sleep 0.2
 windows=$(./build/skarwm-msg get-windows 2>/dev/null)
 client_floating=$(printf '%s\n' "$windows" | sed -nE 's/.*"id":'"$client"'[^}]*"floating":(true|false).*/\1/p')
 if [ "$client_floating" = "true" ]; then pass "ordinary floating drag near edge does not tile"; else fail "ordinary floating edge drag"; fi
+
+# With no tiled neighbor, Alt+title drag still exposes the output edge as a
+# first-column target and tiles the lone floating window on release.
+read -r solo_x solo_y solo_w solo_h < <(xwininfo -id "$frame" 2>/dev/null | awk '/Absolute upper-left X:/{x=$4}/Absolute upper-left Y:/{y=$4}/Width:/{w=$2}/Height:/{h=$2}END{print x,y,w,h}')
+xdotool windowactivate --sync "$client" >/dev/null 2>&1
+xdotool mousemove $((solo_x+120)) $((solo_y+12)) keydown Alt_L mousedown 1 mousemove 20 400 mouseup 1 keyup Alt_L >/dev/null 2>&1
+sleep 0.2
+windows=$(./build/skarwm-msg get-windows 2>/dev/null)
+client_floating=$(printf '%s\n' "$windows" | sed -nE 's/.*"id":'"$client"'[^}]*"floating":(true|false).*/\1/p')
+if [ "$client_floating" = "false" ]; then pass "lone floater Alt title drag creates a tiled column"; else fail "lone floater Alt title drag"; fi
+./build/skarwm-msg toggle-floating >/dev/null 2>&1
+sleep 0.2
 
 # Alt+title drag uses the same destination-window tiling logic as Super-drag.
 xterm -title TileTarget >/dev/null 2>&1 &

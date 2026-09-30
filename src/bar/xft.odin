@@ -63,6 +63,7 @@ foreign xlib {
         source_x, source_y: c.int, width, height: c.uint, destination_x, destination_y: c.int,
     ) -> c.int ---
     XFlush :: proc(display: ^X_Display) -> c.int ---
+    XSync :: proc(display: ^X_Display, discard: c.int) -> c.int ---
 }
 
 @(default_calling_convention = "c")

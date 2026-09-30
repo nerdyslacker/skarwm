@@ -34,6 +34,7 @@ Ipc_Type :: enum u32 {
     // clients safely ignore them while skarwm-msg can expose richer state.
     Get_Windows     = 100,
     Get_Version     = 101,
+    Get_Topology    = 102,
     // events (WM → client): the event bit is set in the type field
     Event_Workspace = 0x80000000,
     Event_Output    = 0x80000001,
@@ -73,6 +74,7 @@ Ipc_Action :: enum {
     Move_To_Output_Next, Move_To_Output_Prev,
     Screen_Split_Toggle, Screen_Split_Enable, Screen_Split_Disable,
     Screen_Split_Resize, Screen_Split_Ratio,
+    Screen_Refresh,
     Close, Reload, Quit,
 }
 
@@ -433,6 +435,58 @@ ipc_outputs_payload :: proc(m: ^Manager) -> []byte {
     return sb_bytes(&sb)
 }
 
+ipc_topology_payload :: proc(
+    m: ^Manager, topology: ^Physical_Topology, refreshes, transactions: u64, phase: Topology_Refresh_Phase,
+) -> []byte {
+    sb := strings.builder_make()
+    defer strings.builder_destroy(&sb)
+    strings.write_string(&sb, `{"generation":`)
+    strings.write_u64(&sb, topology.Generation)
+    strings.write_string(&sb, `,"refreshes":`)
+    strings.write_u64(&sb, refreshes)
+    strings.write_string(&sb, `,"transactions":`)
+    strings.write_u64(&sb, transactions)
+    strings.write_string(&sb, `,"scheduler":`)
+    switch phase {
+    case .Idle: ipc_json_string(&sb, "idle")
+    case .Scheduled: ipc_json_string(&sb, "scheduled")
+    case .Refreshing: ipc_json_string(&sb, "refreshing")
+    }
+    strings.write_string(&sb, `,"root":{"x":`)
+    json_int(&sb, topology.RootGeometry.X)
+    strings.write_string(&sb, `,"y":`); json_int(&sb, topology.RootGeometry.Y)
+    strings.write_string(&sb, `,"width":`); json_int(&sb, topology.RootGeometry.W)
+    strings.write_string(&sb, `,"height":`); json_int(&sb, topology.RootGeometry.H)
+    strings.write_string(&sb, `},"primary_output_id":`)
+    strings.write_u64(&sb, u64(topology.PrimaryOutputId))
+    strings.write_string(&sb, `,"physical_outputs":[`)
+    for output, i in topology.Outputs {
+        if i > 0 { strings.write_string(&sb, ",") }
+        strings.write_string(&sb, `{"stable_id":`); ipc_json_string(&sb, output.StableId)
+        strings.write_string(&sb, `,"name":`); ipc_json_string(&sb, output.Name)
+        strings.write_string(&sb, `,"output_id":`); strings.write_u64(&sb, u64(output.OutputId))
+        strings.write_string(&sb, `,"crtc_id":`); strings.write_u64(&sb, u64(output.CrtcId))
+        strings.write_string(&sb, `,"connected":`); json_bool(&sb, output.Connected)
+        strings.write_string(&sb, `,"enabled":`); json_bool(&sb, output.Enabled)
+        strings.write_string(&sb, `,"primary":`); json_bool(&sb, output.Primary)
+        strings.write_string(&sb, `,"rotation":`); strings.write_u64(&sb, u64(output.Rotation))
+        strings.write_string(&sb, `,"mm_width":`); strings.write_u64(&sb, u64(output.MmWidth))
+        strings.write_string(&sb, `,"mm_height":`); strings.write_u64(&sb, u64(output.MmHeight))
+        strings.write_string(&sb, `,"rect":{"x":`); json_int(&sb, output.Geom.X)
+        strings.write_string(&sb, `,"y":`); json_int(&sb, output.Geom.Y)
+        strings.write_string(&sb, `,"width":`); json_int(&sb, output.Geom.W)
+        strings.write_string(&sb, `,"height":`); json_int(&sb, output.Geom.H)
+        strings.write_string(&sb, "}}")
+    }
+    strings.write_string(&sb, `],"logical_outputs":[`)
+    for output, i in m.Outputs {
+        if i > 0 { strings.write_string(&sb, ",") }
+        ipc_output_entry(&sb, m, output)
+    }
+    strings.write_string(&sb, "]}")
+    return sb_bytes(&sb)
+}
+
 ipc_output_event_payload :: proc(change, output: string) -> []byte {
     sb := strings.builder_make()
     defer strings.builder_destroy(&sb)
@@ -696,6 +750,10 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
             if tokens[2] == "next" { return Ipc_Command{action = .Move_To_Output_Next}, "", true }
             if tokens[2] == "prev" || tokens[2] == "previous" { return Ipc_Command{action = .Move_To_Output_Prev}, "", true }
         }
+    }
+
+    if len(tokens) == 2 && tokens[0] == "screen" && tokens[1] == "refresh" {
+        return Ipc_Command{action = .Screen_Refresh}, "", true
     }
 
     if len(tokens) == 3 && tokens[0] == "screen" && tokens[1] == "split" {

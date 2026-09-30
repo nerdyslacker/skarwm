@@ -252,6 +252,10 @@ event_loop :: proc() {
         if timeout < 0 || (preview_timeout >= 0 && preview_timeout < timeout) {
             timeout = preview_timeout
         }
+        randr_timeout := randr_poll_timeout_ms()
+        if timeout < 0 || (randr_timeout >= 0 && randr_timeout < timeout) {
+            timeout = randr_timeout
+        }
         if posix.poll(raw_data(pfds), posix.nfds_t(len(pfds)), timeout) < 0 {
             delete(pfds) // EINTR or a signal: repoll
             continue
@@ -304,6 +308,7 @@ event_loop :: proc() {
         ui.Hide_Due_Notice(&g_wm.ui)
         reminder_run_due()
         preview_hover_run_due()
+        randr_run_due()
     }
 }
 
