@@ -730,6 +730,8 @@ dispatch_action :: proc(b: ^input.Binding) {
         if c.Focus_Dir(m, dir_of(b.action)) {
             reflow()
         }
+    case .Focus_Matching_Window:
+        focus_matching_window(b)
     case .Move_Left, .Move_Right, .Move_Up, .Move_Down:
         if c.Move_Dir(m, dir_of(b.action)) {
             reflow()
@@ -859,6 +861,25 @@ dispatch_action :: proc(b: ^input.Binding) {
     if b.action != .WS_Next && b.action != .WS_Prev && b.action != .WS_Goto {
         ipc_broadcast_focus_change(old_focus, m.Focused)
     }
+}
+
+focus_matching_window :: proc(b: ^input.Binding) -> bool {
+    if b == nil { return false }
+    m := g_wm.m
+    target := c.Next_Matching_Client(m, c.Client_Match{
+        Class = b.match_class,
+        Instance = b.match_instance,
+        Title = b.match_title,
+    })
+    if target == nil { return false }
+    old_output := c.Active_Output(m)
+    old_ws := c.Current_WS(m)
+    if !c.Jump_To_Client(m, target) { return false }
+    if target.Out != old_output { ipc_broadcast_output_event("focus", target.Out.Name) }
+    if target.Ws != old_ws { ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, target.Ws, old_ws) }
+    raise_focused()
+    reflow()
+    return true
 }
 
 screen_split_action :: proc(action: input.Action_Kind, arg: int) {

@@ -1,5 +1,7 @@
 package core
 
+import "core:strings"
+
 // Workspace / column / window operations — pure model behaviour. Callers apply
 // the results to X afterwards (Arrange_All + push rects + set input focus).
 
@@ -76,6 +78,49 @@ Switch_WS_Rel :: proc(m: ^Manager, dir: int) -> bool {
 // ----------------------------------------------------------------------------
 // Focus
 // ----------------------------------------------------------------------------
+
+Client_Match :: struct {
+    Class, Instance, Title: string,
+}
+
+Client_Matches :: proc(cl: ^Client, match: Client_Match) -> bool {
+    if cl == nil || cl.Dock || cl.Stashed || cl.Ws == nil || cl.Out == nil { return false }
+    if match.Class != "" && !strings.contains(cl.Class, match.Class) { return false }
+    if match.Instance != "" && !strings.contains(cl.Instance, match.Instance) { return false }
+    if match.Title != "" && !strings.contains(cl.Title, match.Title) { return false }
+    return match.Class != "" || match.Instance != "" || match.Title != ""
+}
+
+// Next_Matching_Client cycles in stable management order. If the focused
+// client is one of the matches, the search starts after it and wraps; otherwise
+// the first match is returned.
+Next_Matching_Client :: proc(m: ^Manager, match: Client_Match) -> ^Client {
+    if m == nil || len(m.Clients) == 0 { return nil }
+    start := 0
+    if Client_Matches(m.Focused, match) {
+        for cl, i in m.Clients {
+            if cl == m.Focused { start = i + 1; break }
+        }
+    }
+    for offset in 0 ..< len(m.Clients) {
+        cl := m.Clients[(start + offset) % len(m.Clients)]
+        if Client_Matches(cl, match) { return cl }
+    }
+    return nil
+}
+
+// Jump_To_Client reveals a managed client on its owning output/workspace and
+// focuses it. Docks and hidden scratchpads deliberately cannot be jumped to.
+Jump_To_Client :: proc(m: ^Manager, cl: ^Client) -> bool {
+    if m == nil || cl == nil || cl.Dock || cl.Stashed || cl.Ws == nil || cl.Out == nil {
+        return false
+    }
+    if Output_Index(m, cl.Out) < 0 { return false }
+    _ = Focus_Output(m, cl.Out)
+    cl.Out.Current = cl.Ws
+    Focus_Client(m, cl)
+    return m.Focused == cl
+}
 
 // Focus_Client points the workspace's focus (and, when the workspace is
 // current, the manager/global focus) at cl. Focusing a different window exits

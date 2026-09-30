@@ -24,6 +24,7 @@ Binding_Description :: proc(b: ^input.Binding) -> string {
     case .Focus_Right:         return fmt.aprintf("focus right")
     case .Focus_Up:            return fmt.aprintf("focus up")
     case .Focus_Down:          return fmt.aprintf("focus down")
+    case .Focus_Matching_Window: return fmt.aprintf("focus matching window")
     case .Move_Left:           return fmt.aprintf("move window left")
     case .Move_Right:          return fmt.aprintf("move window right")
     case .Move_Up:             return fmt.aprintf("move window up")

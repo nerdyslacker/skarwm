@@ -567,6 +567,7 @@ call : mod + f     : togglefullscreen
 call : mod + space : togglefloating
 call : mod + h : focusleft
 call : mod + l : focusright
+call : mod + a : focus class XTerm title "VIM Target"
 workspace : mod + 1 : view 1
 workspace : mod + 2 : view 2
 RC
@@ -607,6 +608,7 @@ call : mod + f     : togglefullscreen
 call : mod + space : togglefloating
 call : mod + h : focusleft
 call : mod + l : focusright
+call : mod + a : focus class XTerm title "VIM Target"
 workspace : mod + 1 : view 1
 workspace : mod + 2 : view 2
 RC
@@ -629,6 +631,21 @@ if [ -n "$pid_after" ] && [ "$pid_after" = "$pid_before" ] \
   pass "rc config: malformed reload keeps previous config and stays alive"
 else
   fail "rc config keep-previous-on-error (before=$pid_before after=$pid_after)"
+fi
+
+# A metadata focus binding reveals its target across workspaces and focuses it.
+xdotool set_window --name "VIM Target" "$rcwin" >/dev/null 2>&1
+key super+2
+key super+Return
+focus_decoy=$(first_tiled_id)
+[ "$focus_decoy" = "$rcwin" ] && focus_decoy=$(xtops | awk -v old="$rcwin" '$1 != old { print $1; exit }')
+[ -n "$focus_decoy" ] && xdotool set_window --name "Other XTerm" "$focus_decoy" >/dev/null 2>&1
+key super+a
+if wait_geom "$rcwin" "1232x752+24+24" \
+   && [ "$(xdotool getactivewindow 2>/dev/null)" -eq "$((rcwin))" ]; then
+  pass "rc focus criteria reveal and focus a matching window"
+else
+  fail "rc focus criteria window jump"
 fi
 
 # ------------------------------------------------------------------------------

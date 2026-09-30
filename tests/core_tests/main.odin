@@ -60,6 +60,7 @@ main :: proc() {
     test_vertical_scroller_drop_targets()
     test_output_work_area()
     test_floating_reserved_right_edge()
+    test_jump_to_matching_window()
     test_multi_output()
     test_virtual_screens()
     test_multi_output_scrolling()
@@ -1475,6 +1476,47 @@ test_workspace_layouts :: proc() {
     ok(c.Set_Workspace_Layout(m, .Scroller), "workspace leaves floating mode")
     ok(manual.Floating && !manual.LayoutFloating,
         "leaving global floating preserves independently floated window")
+}
+
+test_jump_to_matching_window :: proc() {
+    m := c.New_Manager()
+    defer c.Destroy_Manager(m)
+    c.Reconcile_Outputs(m, []c.Output_Spec{
+        {Name = "eDP-1", Geom = c.Rect{X = 0, Y = 0, W = 1920, H = 1080}, Primary = true},
+        {Name = "HDMI-1", Geom = c.Rect{X = 1920, Y = 0, W = 1280, H = 1024}},
+    })
+    first := add_tiled(m, 490)
+    first.Class = strings.clone("URxvt")
+    first.Title = strings.clone("VIM notes")
+    c.Switch_WS_Id(m, 2)
+    second := add_tiled(m, 491)
+    second.Class = strings.clone("URxvt")
+    second.Title = strings.clone("VIM project")
+    decoy := add_tiled(m, 492)
+    decoy.Class = strings.clone("URxvt")
+    decoy.Title = strings.clone("shell")
+    c.Focus_Client(m, decoy)
+
+    match := c.Client_Match{Class = "URxvt", Title = "VIM"}
+    eq(c.Next_Matching_Client(m, match), first,
+       "window criteria combine class and title and wrap management order")
+    ok(c.Jump_To_Client(m, first), "matching-window jump succeeds")
+    eq(c.Current_WS(m), first.Ws, "jump reveals the target workspace")
+    eq(m.Focused, first, "jump focuses the target client")
+    eq(c.Next_Matching_Client(m, match), second,
+       "repeated matching-window jump cycles to the next match")
+    ok(c.Jump_To_Client(m, second), "second match can be revealed")
+    eq(c.Current_WS(m).Id, 2, "second jump switches back to its workspace")
+
+    ok(c.Focus_Output_Rel(m, 1), "matching fixture reaches second output")
+    remote := add_tiled(m, 493)
+    remote.Class = strings.clone("Mail")
+    remote.Title = strings.clone("Inbox")
+    ok(c.Jump_To_Client(m, first), "jump crosses back to the target output")
+    eq(c.Active_Output(m), first.Out, "jump selects the target output")
+    remote.Stashed = true
+    ok(!c.Client_Matches(remote, c.Client_Match{Class = "Mail"}),
+       "hidden scratchpads are excluded from matching jumps")
 }
 
 test_multi_output :: proc() {
