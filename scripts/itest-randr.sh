@@ -259,6 +259,21 @@ else
   fail "built-in bar unsplit geometry"
 fi
 
+# Leave a real client on the screen that is about to disappear. The topology
+# transaction must reassociate and lay it out on the surviving main screen.
+xdotool mousemove 960 400 >/dev/null 2>&1
+xterm >/dev/null 2>&1 &
+migrate_wid=
+migrate_x=
+for _ in $(seq 1 45); do
+  migrate_wid=$(xdotool search --onlyvisible --class XTerm 2>/dev/null | tail -1)
+  if [ -n "$migrate_wid" ]; then
+    migrate_x=$(xwininfo -id "$migrate_wid" 2>/dev/null | awk '/Absolute upper-left X/{print $4}')
+    [ -n "$migrate_x" ] && [ "$migrate_x" -ge 640 ] && break
+  fi
+  sleep 0.2
+done
+
 ./build/skarwm-msg subscribe output >"${TMPDIR:-/tmp}/skarwm_randr_events.log" 2>&1 &
 SUB_PID=$!
 sleep 0.5
@@ -274,6 +289,20 @@ if [[ $outputs == *'"name":"LEFT"'* && $outputs != *'"name":"RIGHT"'* ]]; then
   pass "removes a disconnected monitor from the model"
 else
   fail "disconnected monitor reconciliation"
+fi
+if [ -n "$migrate_wid" ]; then
+  migrate_x=
+  for _ in $(seq 1 30); do
+    migrate_x=$(xwininfo -id "$migrate_wid" 2>/dev/null | awk '/Absolute upper-left X/{print $4}')
+    [ -n "$migrate_x" ] && [ "$migrate_x" -lt 640 ] && break
+    sleep 0.1
+  done
+fi
+if [ -n "$migrate_x" ] && [ "$migrate_x" -lt 640 ] &&
+   ./build/skarwm-msg get-windows | grep -q '"id":'"$migrate_wid"'.*"output":"LEFT"'; then
+  pass "migrates clients from a disconnected screen to the main screen"
+else
+  fail "client migration after screen disconnect"
 fi
 
 # The shell/bar must still receive pointer input after the output teardown.

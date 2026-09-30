@@ -322,6 +322,12 @@ randr_specs_valid :: proc(specs: []c.Output_Spec) -> bool {
     return true
 }
 
+randr_connector_by_id :: proc(topology: ^c.Physical_Topology, id: u32) -> ^c.Physical_Output_State {
+    if topology == nil || id == 0 { return nil }
+    for &output in topology.Outputs { if output.OutputId == id { return &output } }
+    return nil
+}
+
 // Build a complete temporary snapshot.  No live WM or RandR publication state
 // is changed here; any failed/inconsistent reply rejects the whole candidate.
 randr_query_candidate :: proc() -> (candidate: Randr_Candidate, ok: bool) {
@@ -407,8 +413,10 @@ randr_query_candidate :: proc() -> (candidate: Randr_Candidate, ok: bool) {
     if monitor_error != nil { x11.free_libc(monitor_error) }
     if monitors_reply == nil { randr_free_candidate(&candidate); return {}, false }
     defer x11.free_libc(monitors_reply)
-    candidate.specs = make([dynamic]c.Output_Spec, 0, int(monitors_reply.n_monitors) + 1)
-    candidate.monitors = make([dynamic]Randr_Physical_Monitor, 0, int(monitors_reply.n_monitors))
+    candidate.specs = make([dynamic]c.Output_Spec, 0, int(monitors_reply.n_monitors) + enabled_count + 1)
+    candidate.monitors = make([dynamic]Randr_Physical_Monitor, 0, int(monitors_reply.n_monitors) + enabled_count)
+    covered_outputs := make([dynamic]u32, 0, enabled_count)
+    defer delete(covered_outputs)
     it := x11.xcb_randr_get_monitors_monitors_iterator(monitors_reply)
     index := 0
     for it.rem > 0 && it.data != nil {
@@ -421,6 +429,23 @@ randr_query_candidate :: proc() -> (candidate: Randr_Candidate, ok: bool) {
         count := int(x11.xcb_randr_monitor_info_outputs_length(mi))
         source := x11.xcb_randr_monitor_info_outputs(mi)
         if count > 0 && source != nil { append(&monitor_outputs, ..source[:count]) }
+        has_enabled_output := false
+        for output_id in monitor_outputs {
+            connector := randr_connector_by_id(&candidate.topology, output_id)
+            if connector != nil && connector.Enabled {
+                has_enabled_output = true
+                if !contains_atom(covered_outputs[:], output_id) { append(&covered_outputs, output_id) }
+            }
+        }
+        // GetMonitors can briefly retain an object after its CRTC/output was
+        // disabled. It is not a usable WM screen. Output-less explicit monitor
+        // objects remain valid (skarwm virtual screens and xrandr --setmonitor).
+        if len(monitor_outputs) > 0 && !has_enabled_output {
+            delete(name)
+            delete(monitor_outputs)
+            x11.xcb_randr_monitor_info_next(&it)
+            continue
+        }
         monitor_primary := mi.primary != 0 || (primary != 0 && contains_atom(monitor_outputs[:], primary))
         append(&candidate.specs, c.Output_Spec{Name = name, Geom = geom, Primary = monitor_primary})
         append(&candidate.monitors, Randr_Physical_Monitor{
@@ -430,11 +455,37 @@ randr_query_candidate :: proc() -> (candidate: Randr_Candidate, ok: bool) {
         index += 1
         x11.xcb_randr_monitor_info_next(&it)
     }
-    // An enabled connector must be represented by the active monitor query.
-    // If it is not, the server was sampled between related RandR updates.
-    if len(candidate.specs) == 0 && enabled_count > 0 {
-        randr_free_candidate(&candidate)
-        return {}, false
+    // Some drivers update output/CRTC resources without promptly adding the
+    // corresponding RandR 1.5 monitor object. Fill that gap from the
+    // authoritative connector geometry so hot-plug does not require a login.
+    for connector in candidate.topology.Outputs {
+        if !connector.Enabled || contains_atom(covered_outputs[:], connector.OutputId) { continue }
+        matched := -1
+        for spec, i in candidate.specs {
+            if spec.Geom == connector.Geom { matched = i; break }
+        }
+        if matched >= 0 {
+            metadata := &candidate.monitors[matched]
+            if !contains_atom(metadata.outputs[:], connector.OutputId) {
+                append(&metadata.outputs, connector.OutputId)
+            }
+            metadata.primary = metadata.primary || connector.Primary
+            candidate.specs[matched].Primary = candidate.specs[matched].Primary || connector.Primary
+            append(&covered_outputs, connector.OutputId)
+            continue
+        }
+        outputs := make([dynamic]u32, 0, 1)
+        append(&outputs, connector.OutputId)
+        append(&candidate.specs, c.Output_Spec{
+            Name = strings.clone(connector.Name), Geom = connector.Geom, Primary = connector.Primary,
+        })
+        append(&candidate.monitors, Randr_Physical_Monitor{
+            name = strings.clone(connector.Name), primary = connector.Primary, automatic = true,
+            geom = connector.Geom, width_mm = connector.MmWidth, height_mm = connector.MmHeight,
+            outputs = outputs,
+        })
+        append(&covered_outputs, connector.OutputId)
+        logger.Debug("RandR: active connector missing from monitor objects; synthesized", connector.Name)
     }
     if len(candidate.specs) == 0 {
         append(&candidate.specs, c.Output_Spec{Name = strings.clone("screen"),
