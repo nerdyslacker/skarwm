@@ -17,6 +17,14 @@ tiling and restored to their original pre-layout geometry. Dock surfaces are
 kept fully inside their physical output; the partial off-screen allowance used
 for manually moved floating windows is never applied to panels.
 
+`_NET_WM_WINDOW_TYPE_DIALOG`, `_NET_WM_STATE_MODAL`, and ICCCM
+`WM_TRANSIENT_FOR` windows are floated automatically and centered over their
+managed parent, or over the output work area when no concrete parent is
+available. Their requested size is preserved within the usable work area. This
+behavior also applies when a toolkit publishes the hint shortly after mapping,
+which keeps polkit authentication agents and file choosers from GTK, KDE, Xfce,
+and other XDG Desktop Portal backends stable without backend-specific rules.
+
 Focus follows the pointer by default:
 
 ```rc

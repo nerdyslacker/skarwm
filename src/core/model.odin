@@ -89,6 +89,12 @@ Client :: struct {
     // has Ws == nil and lives in Output.Docks: never tiled, never focused, and
     // never hidden on a workspace switch. Active fullscreen clients cover it.
     Dock: bool,
+    // Dialog windows are automatically floated. TransientFor is the ICCCM
+    // WM_TRANSIENT_FOR owner XID (possibly the root window when no concrete
+    // application parent is available).
+    Dialog: bool,
+    Modal: bool,
+    TransientFor: u32,
     // Stashed scratchpads remain managed by X but are detached from every
     // workspace and parked off-screen until summoned.
     Stashed: bool,

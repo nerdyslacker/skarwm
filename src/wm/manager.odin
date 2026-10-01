@@ -209,6 +209,10 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     read_client_meta(cl)
     read_client_urgency(cl)
     read_size_hints(cl)
+    cl.TransientFor = read_transient_for(cl.Xid)
+    cl.Modal = has_atom_property(cl.Xid, "_NET_WM_STATE", "_NET_WM_STATE_MODAL")
+    cl.Dialog = cl.TransientFor != 0 || read_dialog_type(cl) || cl.Modal
+    transient_parent := m.ByXid[cl.TransientFor]
 
     // select events on the client so we see title changes, strut updates and
     // pointer hovers. (Child unmap/destroy/configure is already reported by the
@@ -236,21 +240,25 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     // skarwm's centered default instead of the application's arbitrary hint.
     cl.FloatingRect = {}
 
-    // A MapRequest has no coordinates of its own. Its caller queries the root
-    // pointer and supplies the output so normal clients open where the pointer
-    // is. Docks retain their geometry-based placement path above.
+    target_output := requested_output
+    if transient_parent != nil && transient_parent.Out != nil {
+        target_output = transient_parent.Out
+    }
     old_ws := c.Current_WS(m)
-    if requested_output != nil && c.Focus_Output(m, requested_output) {
-        ipc_broadcast_output_event("focus", requested_output.Name)
-        ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, requested_output.Current, old_ws)
+    if target_output != nil && c.Focus_Output(m, target_output) {
+        ipc_broadcast_output_event("focus", target_output.Name)
+        ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, target_output.Current, old_ws)
     }
 
     ws := c.Current_WS(m)
+    if transient_parent != nil && transient_parent.Ws != nil {
+        ws = transient_parent.Ws
+    }
     if ws == nil {
         ws = c.Ensure_WS(m, 1)
         c.Activate_WS(m, ws)
     }
-    floating := float_override
+    floating := float_override || cl.Dialog
     cl.Decorated = decoration_for_client(cl)
     if tgt, fl, hit := rule_for_client(cl); hit {
         if tgt != nil { ws = tgt }
@@ -258,6 +266,9 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
     }
     c.Add_Managed(m, ws, cl, floating, tab_target)
     ui.Ensure_Decoration(&g_wm.ui, m, cl)
+    if cl.Dialog && cl.Floating {
+        cl.FloatingRect = initial_dialog_rect(cl, transient_parent)
+    }
     adopt_pre_wm_state(cl) // inherit fullscreen/maximize set before mapping
     ewmh_client_managed(cl) // _NET_CLIENT_LIST + _NET_WM_DESKTOP
     reflow()
@@ -294,16 +305,67 @@ promote_client_to_dock :: proc(cl: ^c.Client) {
 // read_window_type reports whether the client's _NET_WM_WINDOW_TYPE atom list
 // names DOCK (a dock/panel window).
 read_window_type :: proc(cl: ^c.Client) -> bool {
+    return has_window_type(cl, atom("_NET_WM_WINDOW_TYPE_DOCK"))
+}
+
+read_dialog_type :: proc(cl: ^c.Client) -> bool {
+    return has_window_type(cl, atom("_NET_WM_WINDOW_TYPE_DIALOG"))
+}
+
+has_window_type :: proc(cl: ^c.Client, wanted: u32) -> bool {
     data, ok := x11.get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_WINDOW_TYPE"), atom("ATOM"))
     if !ok { return false }
     defer delete(data)
     if len(data) % 4 != 0 { return false }
-    dock := atom("_NET_WM_WINDOW_TYPE_DOCK")
     vals := ([^]u32)(raw_data(data))[:len(data) / 4]
     for v in vals {
-        if v == dock { return true }
+        if v == wanted { return true }
     }
     return false
+}
+
+has_atom_property :: proc(xid: u32, property_name, wanted_name: string) -> bool {
+    data, ok := x11.get_prop(g_wm.conn, xid, atom(property_name), atom("ATOM"))
+    if !ok { return false }
+    defer delete(data)
+    if len(data) % 4 != 0 { return false }
+    wanted := atom(wanted_name)
+    vals := ([^]u32)(raw_data(data))[:len(data) / 4]
+    for v in vals {
+        if v == wanted { return true }
+    }
+    return false
+}
+
+read_transient_for :: proc(xid: u32) -> u32 {
+    data, ok := x11.get_prop(g_wm.conn, xid, atom("WM_TRANSIENT_FOR"), atom("WINDOW"))
+    if !ok { return 0 }
+    defer delete(data)
+    if len(data) < size_of(u32) { return 0 }
+    return (^u32)(raw_data(data))^
+}
+
+initial_dialog_rect :: proc(cl, parent: ^c.Client) -> c.Rect {
+    if cl == nil { return {} }
+    if cl.Out == nil { return cl.FloatingRect }
+    bounds := c.Output_Work_Area(g_wm.m, cl.Out)
+    requested := cl.InitialRect
+    if c.rect_empty(requested) { requested = cl.FloatingRect }
+    if cl.Decorated && cl.DecorationFrame != 0 {
+        requested = c.Decoration_Frame_Rect(requested, g_wm.m.Cfg.Decoration)
+    }
+    requested = constrain_floating_rect(cl, requested)
+    parent_rect := c.Rect{}
+    if parent != nil && parent.Ws == cl.Ws { parent_rect = parent.Geom }
+    return c.Centered_Float_Rect(requested, bounds, parent_rect)
+}
+
+promote_client_to_dialog :: proc(cl: ^c.Client) {
+    if cl == nil || cl.Dock { return }
+    parent := g_wm.m.ByXid[cl.TransientFor]
+    if !cl.Floating { c.Set_Floating(g_wm.m, cl, true) }
+    cl.FloatingRect = initial_dialog_rect(cl, parent)
+    reflow()
 }
 
 // read_struts converts EWMH root-edge distances into local insets for the
@@ -1810,7 +1872,36 @@ on_property_notify :: proc(ev: ^x11.Property_Notify_Event) {
     cl := g_wm.m.ByXid[ev.window]
     if cl == nil { return }
     if ev.atom == atom("_NET_WM_WINDOW_TYPE") {
-        if !cl.Dock && read_window_type(cl) { promote_client_to_dock(cl) }
+        if !cl.Dock && read_window_type(cl) {
+            promote_client_to_dock(cl)
+        } else if !cl.Dialog && read_dialog_type(cl) {
+            cl.Dialog = true
+            promote_client_to_dialog(cl)
+        }
+        return
+    }
+    if ev.atom == atom("WM_TRANSIENT_FOR") {
+        parent := read_transient_for(cl.Xid)
+        if parent != cl.TransientFor {
+            cl.TransientFor = parent
+            if parent != 0 && !cl.Dialog {
+                cl.Dialog = true
+                promote_client_to_dialog(cl)
+            }
+        }
+        return
+    }
+    if ev.atom == atom("_NET_WM_STATE") {
+        modal := has_atom_property(cl.Xid, "_NET_WM_STATE", "_NET_WM_STATE_MODAL")
+        if modal != cl.Modal {
+            cl.Modal = modal
+            if modal && !cl.Dialog {
+                cl.Dialog = true
+                promote_client_to_dialog(cl)
+            } else {
+                reflow()
+            }
+        }
         return
     }
     if ev.atom == atom("_NET_WM_NAME") || ev.atom == atom("WM_NAME") {

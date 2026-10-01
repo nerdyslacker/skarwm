@@ -53,6 +53,7 @@ main :: proc() {
     test_relative_column_drop()
     test_unmanage()
     test_floating()
+    test_dialog_placement()
     test_fullscreen()
     test_maximize()
     test_tabbed_layout()
@@ -1366,6 +1367,29 @@ test_floating :: proc() {
     c.Focus_Client(m, b)
     ok(!c.Move_Dir(m, .Left), "floating windows ignore Move_Dir")
     ok(!c.Focus_Dir(m, .Left), "floating windows ignore Focus_Dir")
+}
+
+test_dialog_placement :: proc() {
+    bounds := c.Rect{X = 10, Y = 30, W = 1000, H = 700}
+
+    centered := c.Centered_Float_Rect(
+        c.Rect{W = 400, H = 300}, bounds, c.Rect{},
+    )
+    eq(centered, c.Rect{X = 310, Y = 230, W = 400, H = 300},
+       "parentless dialog centers in output work area")
+
+    over_parent := c.Centered_Float_Rect(
+        c.Rect{W = 300, H = 200}, bounds,
+        c.Rect{X = 500, Y = 200, W = 500, H = 400},
+    )
+    eq(over_parent, c.Rect{X = 600, Y = 300, W = 300, H = 200},
+       "transient dialog centers over its parent")
+
+    clamped := c.Centered_Float_Rect(
+        c.Rect{W = 1400, H = 900}, bounds,
+        c.Rect{X = 900, Y = 650, W = 200, H = 100},
+    )
+    eq(clamped, bounds, "oversized dialog is clamped to usable output")
 }
 
 test_fullscreen :: proc() {

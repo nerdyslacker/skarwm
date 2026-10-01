@@ -21,6 +21,10 @@ and nonblocking Unix-socket IPC.
 > **Note:** skarwm was developed with AI assistance as a project for learning
 > Odin. It is a hobby project and my daily driver.
 
+<div align="center">
+<img src="assets/screenshot.png"/>
+</div>
+
 ## Dependencies
 
 Required to build:
