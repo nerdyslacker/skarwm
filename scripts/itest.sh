@@ -113,6 +113,10 @@ all_windows_are_tabs_n() {
   [ "$(printf '%s' "$state" | grep -o '"id":' | wc -l)" -eq "$1" ] &&
     [ "$(printf '%s' "$state" | grep -o "\"tab_count\":$1" | wc -l)" -eq "$1" ]
 }
+window_is_floating() {
+  ./build/skarwm-msg get-windows 2>/dev/null \
+    | grep -q "\"id\":$1,[^}]*\"floating\":true"
+}
 
 die_display() {
   say "FATAL: Xvnc or WM failed to start"
@@ -997,6 +1001,54 @@ fi
 exec 9>&-
 kill "$dock_pid" 2>/dev/null
 rm -rf "$DOCK_DIR"
+
+# ------------------------------------------------------------------------------
+# ---- portal/dialog compatibility ---------------------------------------------
+say "== portal dialogs =="
+DIALOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/skarwm-dialog.XXXXXX")
+python3 scripts/xtransient.py --id-file "$DIALOG_DIR/id" --parent "$xt" \
+  >"$DIALOG_DIR/log" 2>&1 &
+dialog_pid=$!
+for _ in $(seq 1 30); do [ -s "$DIALOG_DIR/id" ] && break; sleep 0.1; done
+dialog_hex=$(cat "$DIALOG_DIR/id" 2>/dev/null || true)
+dialog_id=$((dialog_hex))
+if [ -n "$dialog_hex" ] && wait_for window_is_floating "$dialog_id"; then
+  pass "ICCCM transient file chooser is managed as floating"
+else
+  fail "ICCCM transient file chooser was tiled ($(cat "$DIALOG_DIR/log" 2>/dev/null))"
+fi
+kill "$dialog_pid" 2>/dev/null || true
+wait "$dialog_pid" 2>/dev/null || true
+
+python3 scripts/xtransient.py --id-file "$DIALOG_DIR/dialog-id" --dialog-type \
+  >"$DIALOG_DIR/dialog-log" 2>&1 &
+dialog_pid=$!
+for _ in $(seq 1 30); do [ -s "$DIALOG_DIR/dialog-id" ] && break; sleep 0.1; done
+dialog_hex=$(cat "$DIALOG_DIR/dialog-id" 2>/dev/null || true)
+dialog_id=$((dialog_hex))
+if [ -n "$dialog_hex" ] && wait_for window_is_floating "$dialog_id"; then
+  pass "EWMH file chooser dialog is managed as floating"
+else
+  fail "EWMH file chooser dialog was tiled ($(cat "$DIALOG_DIR/dialog-log" 2>/dev/null))"
+fi
+kill "$dialog_pid" 2>/dev/null || true
+wait "$dialog_pid" 2>/dev/null || true
+
+python3 scripts/xtransient.py --id-file "$DIALOG_DIR/modal-id" --modal \
+  >"$DIALOG_DIR/modal-log" 2>&1 &
+dialog_pid=$!
+for _ in $(seq 1 30); do [ -s "$DIALOG_DIR/modal-id" ] && break; sleep 0.1; done
+dialog_hex=$(cat "$DIALOG_DIR/modal-id" 2>/dev/null || true)
+dialog_id=$((dialog_hex))
+if [ -n "$dialog_hex" ] && wait_for window_is_floating "$dialog_id" \
+   && xprop -id "$dialog_hex" _NET_WM_STATE 2>/dev/null | grep -q _NET_WM_STATE_MODAL; then
+  pass "modal polkit-style dialog floats and retains its EWMH state"
+else
+  fail "modal polkit-style dialog was not preserved ($(cat "$DIALOG_DIR/modal-log" 2>/dev/null))"
+fi
+kill "$dialog_pid" 2>/dev/null || true
+wait "$dialog_pid" 2>/dev/null || true
+rm -rf "$DIALOG_DIR"
 
 # ------------------------------------------------------------------------------
 # ---- 14. IPC command/query/event round trip ---------------------------------

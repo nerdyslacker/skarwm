@@ -1490,6 +1490,23 @@ default_float_rect :: proc(p: Layout_Params, geom: Rect) -> Rect {
     }
 }
 
+Centered_Float_Rect :: proc(requested, bounds, parent: Rect) -> Rect {
+    if rect_empty(bounds) { return requested }
+    result := requested
+    if result.W <= 0 { result.W = max(i32(1), bounds.W * 3 / 5) }
+    if result.H <= 0 { result.H = max(i32(1), bounds.H * 3 / 5) }
+    result.W = clamp(result.W, i32(1), max(i32(1), bounds.W))
+    result.H = clamp(result.H, i32(1), max(i32(1), bounds.H))
+
+    target := parent
+    if rect_empty(target) { target = bounds }
+    result.X = target.X + (target.W - result.W) / 2
+    result.Y = target.Y + (target.H - result.H) / 2
+    result.X = clamp(result.X, bounds.X, bounds.X + bounds.W - result.W)
+    result.Y = clamp(result.Y, bounds.Y, bounds.Y + bounds.H - result.H)
+    return result
+}
+
 // clamp_float_rect_to_work_area keeps workspace-layout-owned floating windows
 // fully inside the reserved-and-gapped work area. Manually positioned floaters
 // continue to use clamp_float_rect and may intentionally overlap panels.
