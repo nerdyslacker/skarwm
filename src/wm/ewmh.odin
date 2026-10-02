@@ -19,13 +19,13 @@ import x11 "../x11"
 //
 //   Client properties (written by the WM):
 //     _NET_WM_DESKTOP             owning workspace, 0-based
-//     _NET_WM_STATE               MODAL, FULLSCREEN and/or MAXIMIZED_{VERT,HORZ}
+//     _NET_WM_STATE               MODAL, FULLSCREEN, ABOVE and/or MAXIMIZED_{VERT,HORZ}
 //     WM_STATE                    Normal once mapped, Withdrawn on unmanage
 //
 //   Client messages accepted (sent to the root, EWMH convention; the target
 //   window travels in the message's window field):
 //     _NET_ACTIVE_WINDOW          focus request from pagers/launchers/tools
-//     _NET_WM_STATE               fullscreen/maximize add/remove/toggle
+//     _NET_WM_STATE               fullscreen/maximize/above add/remove/toggle
 //     _NET_CURRENT_DESKTOP        workspace switch from pagers/wmctrl
 //     _NET_CLOSE_WINDOW           polite close request
 //
@@ -56,7 +56,7 @@ Ewmh_State :: struct {
     last_desktop: i32, // current desktop index advertised (-1 = unset)
     last_count:   i32, // _NET_NUMBER_OF_DESKTOPS advertised (-1 = unset)
     win_desktop: map[u32]u32, // xid -> last _NET_WM_DESKTOP written
-    win_state:    map[u32]u8, // xid -> modal/fullscreen/maximized state bits last written
+    win_state:    map[u32]u8, // xid -> modal/fullscreen/maximized/above bits last written
     win_mapped:   map[u32]bool, // xid -> WM_STATE Normal has been written
     workarea:   []u32, // last _NET_WORKAREA written (nil = never)
 }
@@ -122,6 +122,7 @@ ewmh_init :: proc() {
         atom("_NET_WM_STATE_FULLSCREEN"),
         atom("_NET_WM_STATE_MAXIMIZED_VERT"),
         atom("_NET_WM_STATE_MAXIMIZED_HORZ"),
+        atom("_NET_WM_STATE_ABOVE"),
         atom("_NET_WM_WINDOW_TYPE"),
         atom("_NET_WM_WINDOW_TYPE_DOCK"),
         atom("_NET_WM_WINDOW_TYPE_DIALOG"),
@@ -261,8 +262,8 @@ ewmh_push_client :: proc(cl: ^c.Client) {
     x11.set_prop32(g_wm.conn, cl.Xid, atom("_NET_WM_DESKTOP"), atom("CARDINAL"), []u32{idx})
 }
 
-// ewmh_push_state mirrors modal, fullscreen and maximize into one composited
-// _NET_WM_STATE property. Both maximize atoms are always published together.
+// ewmh_push_state mirrors modal, fullscreen, maximize and always-on-top into
+// one composited _NET_WM_STATE property. Both maximize atoms are paired.
 ewmh_push_state :: proc(cl: ^c.Client) {
     st := &g_wm.ewmh
     if cl == nil { return }
@@ -270,9 +271,10 @@ ewmh_push_state :: proc(cl: ^c.Client) {
     if cl.Fullscreen { bits |= 1 }
     if cl.Maximized { bits |= 2 }
     if cl.Modal { bits |= 4 }
+    if cl.AlwaysOnTop { bits |= 8 }
     if cached, ok := st.win_state[cl.Xid]; ok && cached == bits { return }
     st.win_state[cl.Xid] = bits
-    states: [4]u32
+    states: [5]u32
     n := 0
     if cl.Modal {
         states[n] = atom("_NET_WM_STATE_MODAL")
@@ -286,6 +288,10 @@ ewmh_push_state :: proc(cl: ^c.Client) {
         states[n] = atom("_NET_WM_STATE_MAXIMIZED_VERT")
         states[n + 1] = atom("_NET_WM_STATE_MAXIMIZED_HORZ")
         n += 2
+    }
+    if cl.AlwaysOnTop {
+        states[n] = atom("_NET_WM_STATE_ABOVE")
+        n += 1
     }
     x11.set_prop32(g_wm.conn, cl.Xid, atom("_NET_WM_STATE"), atom("ATOM"), states[:n])
 }
@@ -475,7 +481,7 @@ dock_accepts_input :: proc(xid: u32) -> bool {
     return values[0] & input_hint != 0 && values[1] != 0
 }
 
-// ewmh_state_request applies modal, fullscreen and paired maximize requests.
+// ewmh_state_request applies modal, fullscreen, paired maximize and above requests.
 // Maximize may be requested for an inactive workspace; fullscreen retains
 // skarwm's visible-focused-window invariant.
 ewmh_state_request :: proc(ev: ^x11.Client_Message_Event) {
@@ -490,10 +496,12 @@ ewmh_state_request :: proc(ev: ^x11.Client_Message_Event) {
     modal := atom("_NET_WM_STATE_MODAL")
     max_v := atom("_NET_WM_STATE_MAXIMIZED_VERT")
     max_h := atom("_NET_WM_STATE_MAXIMIZED_HORZ")
+    above := atom("_NET_WM_STATE_ABOVE")
     requests_fs := prop1 == fs || prop2 == fs
     requests_modal := prop1 == modal || prop2 == modal
     requests_max := prop1 == max_v || prop2 == max_v || prop1 == max_h || prop2 == max_h
-    if !requests_fs && !requests_max && !requests_modal { return }
+    requests_above := prop1 == above || prop2 == above
+    if !requests_fs && !requests_max && !requests_modal && !requests_above { return }
 
     changed := false
     old_focus := m.Focused
@@ -513,6 +521,16 @@ ewmh_state_request :: proc(ev: ^x11.Client_Message_Event) {
     if requests_max {
         want_max := action == 1 || (action == 2 && !cl.Maximized)
         changed = c.Set_Maximized(cl, want_max) || changed
+    }
+    if requests_above {
+        want_above := action == 1 || (action == 2 && !cl.AlwaysOnTop)
+        // The above layer is intentionally a floating-window feature. A
+        // remove request still clears stale state defensively.
+        if want_above && !cl.Floating { want_above = false }
+        if want_above != cl.AlwaysOnTop {
+            cl.AlwaysOnTop = want_above
+            changed = true
+        }
     }
     if requests_fs && cl.Out != nil && cl.Ws == cl.Out.Current {
         want_fs := action == 1 || (action == 2 && !cl.Fullscreen)
@@ -576,19 +594,22 @@ adopt_pre_wm_state :: proc(cl: ^c.Client) {
     modal := atom("_NET_WM_STATE_MODAL")
     max_v := atom("_NET_WM_STATE_MAXIMIZED_VERT")
     max_h := atom("_NET_WM_STATE_MAXIMIZED_HORZ")
+    above := atom("_NET_WM_STATE_ABOVE")
     data, ok := x11.get_prop(g_wm.conn, cl.Xid, atom("_NET_WM_STATE"), atom("ATOM"))
     if !ok { return }
     defer delete(data)
     if len(data) % 4 != 0 { return }
     vals := ([^]u32)(raw_data(data))[:len(data) / 4]
-    has_fs, has_modal, has_v, has_h := false, false, false, false
+    has_fs, has_modal, has_v, has_h, has_above := false, false, false, false, false
     for v in vals {
         if v == fs { has_fs = true }
         if v == modal { has_modal = true }
         if v == max_v { has_v = true }
         if v == max_h { has_h = true }
+        if v == above { has_above = true }
     }
     if has_v && has_h { c.Set_Maximized(cl, true) }
     cl.Modal = has_modal
     cl.Fullscreen = has_fs
+    cl.AlwaysOnTop = has_above && cl.Floating
 }

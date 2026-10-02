@@ -9,6 +9,7 @@ Action_Kind :: enum u8 {
     Move_Left, Move_Right, Move_Up, Move_Down,
     Resize_Left, Resize_Right, Resize_Up, Resize_Down,
     Toggle_Floating,
+    Toggle_Always_On_Top,
     Toggle_Fullscreen,
     Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
     Layout_Scroller, Layout_Vertical_Scroller, Layout_Dwindle, Layout_Monocle, Layout_Next,

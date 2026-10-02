@@ -61,7 +61,7 @@ Ipc_Action :: enum {
     Workspace, Workspace_On_Output, Workspace_Next, Workspace_Prev,
     Focus_Window,
     Move_To_Workspace, Move_To_Workspace_Next, Move_To_Workspace_Prev,
-    Toggle_Floating, Toggle_Fullscreen,
+    Toggle_Floating, Toggle_Always_On_Top, Toggle_Fullscreen,
     Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
     Layout_Scroller, Layout_Vertical_Scroller, Layout_Dwindle, Layout_Monocle, Layout_Next,
     Set_Gaps, Set_Decorations,
@@ -519,6 +519,8 @@ ipc_window_entry :: proc(sb: ^strings.Builder, m: ^Manager, cl: ^Client) {
     json_bool(sb, m.Focused == cl)
     strings.write_string(sb, `,"floating":`)
     json_bool(sb, cl.Floating)
+    strings.write_string(sb, `,"always_on_top":`)
+    json_bool(sb, cl.AlwaysOnTop)
     strings.write_string(sb, `,"fullscreen":`)
     json_bool(sb, cl.Fullscreen)
     strings.write_string(sb, `,"scratchpad":`)
@@ -816,6 +818,7 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
         case "quit":              action = .Quit
         case "close":             action = .Close
         case "toggle-floating":   action = .Toggle_Floating
+        case "toggle-always-on-top": action = .Toggle_Always_On_Top
         case "toggle-fullscreen": action = .Toggle_Fullscreen
         case "toggle-tabbed":     action = .Layout_Toggle
         case "switch-layout":     action = .Layout_Next

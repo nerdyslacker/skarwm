@@ -1059,12 +1059,13 @@ inset_rect :: proc(tile: Rect, border: i32) -> Rect {
 }
 
 // Every client reserves the configured border inset, so changing focus never
-// resizes its application surface. Only the workspace focus draws the actual
-// X border; for other clients the reserved ring simply remains empty.
+// resizes its application surface. The workspace focus and always-on-top
+// floaters draw the actual X border; for other clients the reserved ring is
+// empty.
 place_client_in_tile :: proc(ws: ^Workspace, cl: ^Client, tile: Rect, border: i32) {
     if cl == nil { return }
     cl.Border = 0
-    if ws != nil && ws.Focus == cl { cl.Border = border }
+    if ws != nil && (ws.Focus == cl || cl.AlwaysOnTop) { cl.Border = border }
     cl.Geom = inset_rect(tile, border)
 }
 

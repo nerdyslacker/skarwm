@@ -72,12 +72,17 @@ window at a time with a WM-owned tab bar.
 | Input | Action |
 |---|---|
 | `Super+Space` | Toggle the focused window between tiled and floating. |
+| `Super+Shift+Space` | Toggle always-on-top for the focused floating window. |
 | Middle-click | Maximize/restore inside the usable work area. |
 | `Super+f` | Fullscreen/restore across the entire output, above bars. |
 | `Super+Shift+q` | Ask the focused client to close. |
 
 Maximize preserves tiled/floating membership and respects panel struts.
 Fullscreen is borderless and temporarily hides the other workspace windows.
+Always-on-top floaters remain above ordinary tiled and floating windows, but
+below panels and fullscreen clients. They use the decoration accent colour for
+their border and show a small pin at the titlebar's top-left. The border remains
+visible when titlebars are disabled. Returning one to tiling clears the state.
 
 ## Resizing
 

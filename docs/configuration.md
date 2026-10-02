@@ -78,8 +78,33 @@ autostart : "xsetroot -solid '#202020'"
 bar_block : workspaces : left
 bar_block : systray : right
 bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
+bar_block : network : right : 󰤨
+bar_block : bluetooth : right : 󰂯
+bar_block : audio : right : 󰕾
 virtual_screen : DP-1 : split : 75 : -30
 rule : class : Firefox : workspace 3 floating decorate false
+```
+
+Append `foreground : background` to workspace, audio, or systray blocks. Put
+the same pair immediately before the final command for script and button
+blocks. Either value may be `_` to inherit the global block colour. The audio
+block toggles mute on middle click and changes the default sink volume by five
+percent when scrolled. Network shows its active non-loopback interface name,
+or `󰤭 off` when disconnected; middle click toggles the Wi-Fi radio.
+Bluetooth shows its configured icon while connected and `󰂲` while
+disconnected, followed by `on` or `off`. Muted audio uses the `󰝟` icon and
+displays `muted`. Bluetooth middle click toggles adapter power. Network and
+Bluetooth open `nm-connection-editor` or `blueman-manager` on left click.
+
+Audio, Network, and Bluetooth blocks accept an optional final quoted shell
+command for left click. Put it after the label, or after the optional colour
+pair. It overrides the Network/Bluetooth default application; Audio otherwise
+has no left-click action:
+
+```rc
+bar_block : audio : right : 󰕾 : "pavucontrol"
+bar_block : network : right : 󰤨 : _ : _ : "rofi -show network"
+bar_block : bluetooth : right : 󰂯 : "blueman-manager"
 ```
 
 `bind` launches a shell command. `call` invokes a WM action. `workspace view`
@@ -99,7 +124,10 @@ Workspace-wide layout actions are `layout_scrolling_tile`,
 `layout_next`. The last one cycles Scrolling Tile → Vertical Scrolling Tile →
 Dwindle/Fibonacci → Monocle → Floating and is bound to `Super+g` by the built-in defaults.
 `layout_scroller` remains a compatibility alias. `togglefloating` changes only
-the focused window.
+the focused window. `togglealwaysontop` toggles the above layer for a focused
+floating window and has no effect on tiled windows. Returning the window to
+tiling clears the state. Always-on-top borders and titlebar pins use
+`decoration_accent`, which defaults to blue.
 
 `virtual_screen` declares a horizontal logical split for a named physical
 RandR output. The split is a percentage from 10 through 90; the optional final
@@ -121,7 +149,10 @@ call : mod + F8 : screen_split_grow 15
 
 `bar_block` directives define the built-in bar's blocks in declaration order.
 Workspace and `systray` blocks take an alignment. Button blocks take an
-alignment, display label, and left-click shell command. Script blocks additionally
+alignment, display label, and left-click shell command. Audio, network, and
+Bluetooth blocks take an alignment and label, provide built-in actions, and
+optionally take a final left-click shell command.
+Script blocks additionally
 take a name, interval in seconds, timeout in seconds, and a shell command. See
 [Built-in bar](bar.md) for limits, failure handling, and security details.
 

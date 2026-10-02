@@ -1118,6 +1118,7 @@ Set_Floating :: proc(m: ^Manager, cl: ^Client, on: bool) {
     } else if !on && cl.Floating {
         remove_floater(ws, cl)
         cl.Floating = false
+        cl.AlwaysOnTop = false
         attach_new_window(m, ws, cl)
     }
 }
@@ -1130,6 +1131,16 @@ Toggle_Floating :: proc(m: ^Manager) -> bool {
     cl.Fullscreen = false
     Set_Floating(m, cl, !cl.Floating)
     return true
+}
+
+// Toggle_Always_On_Top changes the focused floating client's stacking layer.
+// Tiled windows cannot enter this layer; returning a floater to tiling clears
+// the state in Set_Floating.
+Toggle_Always_On_Top :: proc(m: ^Manager) -> (on: bool, changed: bool) {
+    ws := Current_WS(m)
+    if ws == nil || ws.Focus == nil || !ws.Focus.Floating { return false, false }
+    ws.Focus.AlwaysOnTop = !ws.Focus.AlwaysOnTop
+    return ws.Focus.AlwaysOnTop, true
 }
 
 // Toggle_Fullscreen flips the focused window's fullscreen state and returns the

@@ -2,6 +2,8 @@ package main
 
 // Script-backed bar blocks.
 
+import process "../process"
+
 import "core:c"
 import "core:fmt"
 import "core:strings"
@@ -14,6 +16,8 @@ SCRIPT_VISIBLE_MAX :: 220
 Script_Block_Data :: struct {
     Name: string,
     Command: [1024]byte,
+    ClickCommand: [1024]byte,
+    ClickCommandLen: int,
     Text: string,
     Interval, Timeout: time.Duration,
     NextRun, Started: time.Tick,
@@ -24,8 +28,24 @@ Script_Block_Data :: struct {
     Eof, TimedOut: bool,
 }
 
+script_set_click_command :: proc(block: ^Block, command: string) {
+    data := script_data(block)
+    if data == nil || len(command) >= len(data.ClickCommand) { return }
+    copy(data.ClickCommand[:len(command)], transmute([]u8)command)
+    data.ClickCommand[len(command)] = 0
+    data.ClickCommandLen = len(command)
+}
+
+script_click_command :: proc(block: ^Block) -> string {
+    data := script_data(block)
+    if data == nil || data.ClickCommandLen == 0 { return "" }
+    return string(data.ClickCommand[:data.ClickCommandLen])
+}
+
 script_data :: proc(block: ^Block) -> ^Script_Block_Data {
-    if block == nil || block.Kind != .Script || block.Data == nil { return nil }
+    if block == nil || block.Data == nil { return nil }
+    if block.Kind != .Script && block.Kind != .Audio &&
+       block.Kind != .Bluetooth && block.Kind != .Network { return nil }
     return (^Script_Block_Data)(block.Data)
 }
 
@@ -34,6 +54,8 @@ append_script_block :: proc(
     alignment: Block_Alignment,
     name, command: string,
     interval_ms, timeout_ms: i32,
+    foreground: u32 = 0, background: u32 = 0,
+    foreground_set: bool = false, background_set: bool = false,
 ) {
     if command == "" || len(command) >= 1024 { return }
     data := new(Script_Block_Data)
@@ -55,35 +77,143 @@ append_script_block :: proc(
             Destroy = script_destroy,
         },
         Data = data,
+        Foreground = foreground, Background = background,
+        ForegroundSet = foreground_set, BackgroundSet = background_set,
     })
 }
 
-script_label :: proc(data: ^Script_Block_Data) -> string {
+BLUETOOTH_OFF_ICON :: "󰂲"
+AUDIO_OFF_ICON :: "󰝟"
+NETWORK_OFF_ICON :: "󰤭"
+
+script_label :: proc(block: ^Block) -> string {
+    data := script_data(block)
     if data == nil { return fmt.aprintf("") }
+    if block.Kind == .Bluetooth {
+        if data.Text == "connected" { return fmt.aprintf("%s on", data.Name) }
+        return fmt.aprintf("%s off", BLUETOOTH_OFF_ICON)
+    }
+    if block.Kind == .Network && (data.Text == "offline" || data.Text == "unavailable") {
+        return fmt.aprintf("%s off", NETWORK_OFF_ICON)
+    }
+    if block.Kind == .Audio && data.Text == "muted" {
+        return fmt.aprintf("%s muted", AUDIO_OFF_ICON)
+    }
     if data.Name == "" || data.Name == "_" { return fmt.aprintf("%s", data.Text) }
     return fmt.aprintf("%s %s", data.Name, data.Text)
 }
 
 script_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32 {
     _ = window
-    label := script_label(script_data(block))
+    label := script_label(block)
     defer delete(label)
     visible := label[:min(len(label), SCRIPT_VISIBLE_MAX)]
     return text_width(state, visible) + 16
 }
 
 script_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, block_index: int) {
-    _ = block_index
-    label := script_label(script_data(block))
+    label := script_label(block)
     defer delete(label)
     visible := label[:min(len(label), SCRIPT_VISIBLE_MAX)]
     width := text_width(state, visible) + 16
     wrapper_y := min(i32(3), max(i32(0), window.Geom.H / 4))
     fill_rect(
         state, X_Drawable(window.Canvas), x, wrapper_y, width, window.Geom.H - wrapper_y * 2,
-        state.Config.BlockBackground,
+        block_background(block, state),
     )
-    draw_text(state, window, x + 8, visible, state.Config.BlockForeground)
+    draw_text(state, window, x + 8, visible, block_foreground(block, state))
+    if block.Ops.Click != nil {
+        append(&window.Hits, Hitbox{
+            X = x, Y = 0, W = width, H = window.Geom.H,
+            BlockIndex = block_index,
+        })
+    }
+}
+
+AUDIO_READ_COMMAND :: `if command -v wpctl >/dev/null 2>&1; then wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{if ($0 ~ /\[MUTED\]/) printf "muted"; else printf "%d%%", $2 * 100}'; elif pactl get-sink-mute @DEFAULT_SINK@ | grep -q 'yes'; then printf 'muted'; else pactl get-sink-volume @DEFAULT_SINK@ | grep -o '[0-9]*%' | head -1; fi`
+AUDIO_UP_COMMAND :: `if command -v wpctl >/dev/null 2>&1; then wpctl set-volume -l 1.5 @DEFAULT_AUDIO_SINK@ 5%+; else pactl set-sink-volume @DEFAULT_SINK@ +5%; fi`
+AUDIO_DOWN_COMMAND :: `if command -v wpctl >/dev/null 2>&1; then wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-; else pactl set-sink-volume @DEFAULT_SINK@ -5%; fi`
+AUDIO_TOGGLE_COMMAND :: `if command -v wpctl >/dev/null 2>&1; then wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle; else pactl set-sink-mute @DEFAULT_SINK@ toggle; fi`
+
+append_audio_block :: proc(
+    state: ^State, alignment: Block_Alignment, label: string,
+    foreground: u32 = 0, background: u32 = 0,
+    foreground_set: bool = false, background_set: bool = false,
+    click_command: string = "",
+) {
+    before := len(state.Blocks)
+    append_script_block(state, alignment, label, AUDIO_READ_COMMAND, 1000, 1000,
+        foreground, background, foreground_set, background_set)
+    if len(state.Blocks) == before { return }
+    block := &state.Blocks[len(state.Blocks) - 1]
+    block.Kind = .Audio
+    block.Ops.Click = audio_click
+    script_set_click_command(block, click_command)
+}
+
+audio_click :: proc(block: ^Block, state: ^State, window: ^Bar_Window, payload: int, button: u8) {
+    _ = state
+    _ = window
+    _ = payload
+    command := ""
+    if button == 1 { command = script_click_command(block) }
+    if button == 2 { command = AUDIO_TOGGLE_COMMAND }
+    if button == 4 { command = AUDIO_UP_COMMAND }
+    if button == 5 { command = AUDIO_DOWN_COMMAND }
+    if command == "" { return }
+    process.Spawn(command)
+    if data := script_data(block); data != nil {
+        data.NextRun = time.tick_add(time.tick_now(), 150 * time.Millisecond)
+    }
+}
+
+NETWORK_READ_COMMAND :: `if command -v nmcli >/dev/null 2>&1; then LC_ALL=C nmcli -t -f DEVICE,STATE device status | awk -F: '$2 == "connected" && $1 != "lo" {print $1; found=1; exit} END {if (!found) print "offline"}'; else printf 'unavailable'; fi`
+NETWORK_CLICK_COMMAND :: `command -v nm-connection-editor >/dev/null 2>&1 && exec nm-connection-editor`
+NETWORK_TOGGLE_COMMAND :: `if command -v nmcli >/dev/null 2>&1; then if [ "$(nmcli radio wifi)" = "enabled" ]; then nmcli radio wifi off; else nmcli radio wifi on; fi; fi`
+BLUETOOTH_READ_COMMAND :: `if command -v bluetoothctl >/dev/null 2>&1 && bluetoothctl devices Connected 2>/dev/null | grep -q .; then printf 'connected'; else printf 'disconnected'; fi`
+BLUETOOTH_CLICK_COMMAND :: `command -v blueman-manager >/dev/null 2>&1 && exec blueman-manager`
+BLUETOOTH_TOGGLE_COMMAND :: `if command -v bluetoothctl >/dev/null 2>&1; then if bluetoothctl show 2>/dev/null | grep -q 'Powered: yes'; then bluetoothctl power off; else bluetoothctl power on; fi; fi`
+
+append_status_block :: proc(
+    state: ^State, kind: Block_Kind, alignment: Block_Alignment, label: string,
+    foreground: u32 = 0, background: u32 = 0,
+    foreground_set: bool = false, background_set: bool = false,
+    click_command: string = "",
+) {
+    if kind != .Bluetooth && kind != .Network { return }
+    read_command := kind == .Bluetooth ? BLUETOOTH_READ_COMMAND : NETWORK_READ_COMMAND
+    before := len(state.Blocks)
+    append_script_block(state, alignment, label, read_command, 3000, 2000,
+        foreground, background, foreground_set, background_set)
+    if len(state.Blocks) == before { return }
+    block := &state.Blocks[len(state.Blocks) - 1]
+    block.Kind = kind
+    block.Ops.Click = status_click
+    script_set_click_command(block, click_command)
+}
+
+status_click :: proc(block: ^Block, state: ^State, window: ^Bar_Window, payload: int, button: u8) {
+    _ = state
+    _ = window
+    _ = payload
+    command := ""
+    if button == 1 {
+        command = script_click_command(block)
+        if command == "" {
+            if block.Kind == .Bluetooth { command = BLUETOOTH_CLICK_COMMAND }
+            if block.Kind == .Network { command = NETWORK_CLICK_COMMAND }
+        }
+    } else if button == 2 {
+        if block.Kind == .Bluetooth { command = BLUETOOTH_TOGGLE_COMMAND }
+        if block.Kind == .Network { command = NETWORK_TOGGLE_COMMAND }
+    }
+    if command == "" { return }
+    process.Spawn(command)
+    if button == 2 {
+        if data := script_data(block); data != nil {
+            data.NextRun = time.tick_add(time.tick_now(), 150 * time.Millisecond)
+        }
+    }
 }
 
 script_stop :: proc(data: ^Script_Block_Data) {

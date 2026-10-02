@@ -578,6 +578,13 @@ call : mod + l : focusright
 call : mod + a : focus class XTerm title "VIM Target"
 workspace : mod + 1 : view 1
 workspace : mod + 2 : view 2
+bar_block : workspaces : left : #101010 : #e0e0e0
+bar_block : script : center : clock : 1 : 1 : _ : #202020 : "date '+%H:%M'"
+bar_block : network : right : network : #ffffff : #282828 : "printf 'network:click'"
+bar_block : bluetooth : right : bluetooth : #ffffff : #292929 : "printf 'bluetooth:click'"
+bar_block : audio : right : volume : #ffffff : #303030 : "printf 'audio:click'"
+bar_block : systray : right : _ : #404040
+bar_block : button : right : menu : #ffffff : #505050 : "printf 'menu:open'"
 RC
 
 pkill -x skarwm; pkill -x xterm; sleep 0.7

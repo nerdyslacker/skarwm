@@ -359,6 +359,7 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
     case .Move_To_Workspace_Next: b.action = .Move_To_WS_Next
     case .Move_To_Workspace_Prev: b.action = .Move_To_WS_Prev
     case .Toggle_Floating:   b.action = .Toggle_Floating
+    case .Toggle_Always_On_Top: b.action = .Toggle_Always_On_Top
     case .Toggle_Fullscreen: b.action = .Toggle_Fullscreen
     case .Layout_Floating:   b.action = .Layout_Floating
     case .Layout_Tabbed:     b.action = .Layout_Tabbed

@@ -71,6 +71,7 @@ Client :: struct {
     // tiled structure. It lets a later workspace layout restore those clients
     // without disturbing windows the user floated individually.
     LayoutFloating: bool,
+    AlwaysOnTop: bool, // floating-only layer above ordinary clients
     Fullscreen: bool, // covers the whole output while its workspace is current
     // Maximized is a work-area layout override, distinct from fullscreen and
     // from structural tiled/floating membership.  The restore snapshot lets

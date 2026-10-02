@@ -81,10 +81,17 @@ bar_tag_foreground : #0E0D0C
 bar_tag_background : #917E6B
 bar_block_foreground : #0E0D0C
 bar_block_background : #C5B088
-# Repeated directives define block order. Script fields are:
-# alignment : name : interval seconds : timeout seconds : shell command.
-# Button fields are: alignment : label : shell command. Buttons run their
-# command on left click. Examples:
+# Repeated directives define block order. Add `foreground : background` before
+# a script/button command (or after a workspace/systray/status block) to color
+# that block individually; use `_` for either color to inherit the global.
+# Audio blocks display the default sink, toggle mute on middle click, and change
+# volume by 5% on mouse wheel. An optional final command handles left click for
+# audio/network/bluetooth; without it Network and Bluetooth open their native
+# settings applications. Network shows its active interface or 󰤭 off;
+# Bluetooth shows on/off beside its icon and swaps the icon for 󰂲 when off.
+# Middle click toggles their radios. Muted audio uses 󰝟. The command follows
+# optional per-block colours, when present.
+# Buttons run their command on left click. Examples:
 # bar_block : button : left : 󰀻 : "rofi -show drun"
 bar_block : workspaces : left
 # Use _ as the name to render only the command output. Other names render as
@@ -93,7 +100,9 @@ bar_block : script : center : 󰃭 : 1 : 1 : "date '+%a, %b %d - %H:%M:%S'"
 bar_block : script : right : 󰍛 : 2 : 1 : "free -b | awk '/Mem:/ {print int($3/107374182.4)/10 "/" int($2/107374182.4)/10 "GB"}'"
 bar_block : script : right :  : 2 : 3 : "grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print int(usage+0.5) "%"}'"
 bar_block : script : right : 󰋊 : 30 : 1 : "df -P / | awk 'NR==2 {print $5}'"
-bar_block : script : right : 󰕾 : 1 : 1 : "pactl get-sink-volume @DEFAULT_SINK@ | grep -o '[0-9]*%' | head -1"
+bar_block : bluetooth : right : 󰂯
+bar_block : network : right : 󰤨 : _ : _
+bar_block : audio : right : 󰕾 : "pavucontrol"
 bar_block : script : right : 󰁹 : 10 : 1 : "cat /sys/class/power_supply/BAT0/capacity; printf '%%'"
 bar_block : systray : right
 # bar_block : button : right :  : "maim -s ~/Pictures/Screenshot_$(date +%Y-%m-%d_%H-%M-%S).png"
@@ -131,7 +140,7 @@ autostart : "xsetroot -solid '#202020'"
 # ---- key actions (call) ---------------------------------------------------------
 # Action tokens: focusleft/right/up/down resizeleft/right/up/down
 # moveleft/right/up/down ws_up ws_down
-# ws_next ws_prev togglefloating togglefullscreen layout_tabbed layout_stacked
+# ws_next ws_prev togglefloating togglealwaysontop togglefullscreen layout_tabbed layout_stacked
 # toggle_tabbed layout_scrolling_tile layout_vertical_scroller layout_dwindle layout_monocle
 # layout_floating layout_next
 # show_bindings show_datetime show_battery
@@ -161,6 +170,8 @@ call : mod + Shift + k : moveup
 call : mod + Shift + l : moveright
 
 call : mod + space : togglefloating
+# Always-on-top floaters use decoration_accent for their border and titlebar pin.
+call : mod + Shift + space : togglealwaysontop
 call : mod + f     : togglefullscreen
 call : mod + t     : toggle_tabbed
 call : mod + g     : layout_next

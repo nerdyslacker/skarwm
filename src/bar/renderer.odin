@@ -122,6 +122,27 @@ draw_text :: proc(
     )
 }
 
+// Center by rendered ink bounds rather than only advance width and baseline.
+// Icon fonts often have asymmetric bearings that otherwise look off-center.
+draw_text_centered :: proc(
+    state: ^State, window: ^Bar_Window, x, y, width, height: i32,
+    label: string, foreground: u32, bold: bool = false,
+) {
+    font := text_font(state, bold)
+    if window.TextDraw == nil || font == nil || label == "" { return }
+    extents: X_Glyph_Info
+    XftTextExtentsUtf8(
+        state.Display, font, ([^]u8)(raw_data(label)), i32(len(label)), &extents,
+    )
+    draw_x := x + (width - i32(extents.width)) / 2 - i32(extents.x)
+    draw_y := y + (height - i32(extents.height)) / 2 + i32(extents.y)
+    colour := xft_colour(foreground)
+    XftDrawStringUtf8(
+        window.TextDraw, &colour, font, draw_x, draw_y,
+        ([^]u8)(raw_data(label)), i32(len(label)),
+    )
+}
+
 alignment_width :: proc(state: ^State, window: ^Bar_Window, alignment: Block_Alignment) -> i32 {
     result := i32(0)
     count := 0

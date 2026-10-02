@@ -7,7 +7,7 @@ import "core:strconv"
 import "core:strings"
 
 Block_Alignment :: enum u8 { Left, Center, Right }
-Block_Kind :: enum u8 { Workspaces, Script, Systray, Button }
+Block_Kind :: enum u8 { Workspaces, Script, Systray, Button, Audio, Bluetooth, Network }
 
 Block_Measure_Proc :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32
 Block_Draw_Proc :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, block_index: int)
@@ -27,6 +27,8 @@ Block :: struct {
     Alignment: Block_Alignment,
     Ops: Block_Ops,
     Data: rawptr,
+    Foreground, Background: u32,
+    ForegroundSet, BackgroundSet: bool,
 }
 
 Hitbox :: struct {
@@ -41,7 +43,21 @@ blocks_init :: proc(state: ^State) {
     append_workspace_block(state, .Left)
 }
 
-append_workspace_block :: proc(state: ^State, alignment: Block_Alignment) {
+block_foreground :: proc(block: ^Block, state: ^State) -> u32 {
+    if block != nil && block.ForegroundSet { return block.Foreground }
+    return state.Config.BlockForeground
+}
+
+block_background :: proc(block: ^Block, state: ^State) -> u32 {
+    if block != nil && block.BackgroundSet { return block.Background }
+    return state.Config.BlockBackground
+}
+
+append_workspace_block :: proc(
+    state: ^State, alignment: Block_Alignment,
+    foreground: u32 = 0, background: u32 = 0,
+    foreground_set: bool = false, background_set: bool = false,
+) {
     append(&state.Blocks, Block{
         Name = "workspaces",
         Kind = .Workspaces,
@@ -51,6 +67,8 @@ append_workspace_block :: proc(state: ^State, alignment: Block_Alignment) {
             Draw = workspace_draw,
             Click = workspace_click,
         },
+        Foreground = foreground, Background = background,
+        ForegroundSet = foreground_set, BackgroundSet = background_set,
     })
 }
 
@@ -93,24 +111,53 @@ free_block_fields :: proc(fields: ^[dynamic]string) {
     delete(fields^)
 }
 
+parse_managed_colours :: proc(fields: []string, start: int) -> (
+    foreground, background: u32, foreground_set, background_set, ok: bool,
+) {
+    if start < 0 || start + 3 >= len(fields) { return }
+    foreground_flag, fg_flag_ok := strconv.parse_i64(fields[start], 10)
+    foreground_value, fg_ok := strconv.parse_i64(fields[start + 1], 10)
+    background_flag, bg_flag_ok := strconv.parse_i64(fields[start + 2], 10)
+    background_value, bg_ok := strconv.parse_i64(fields[start + 3], 10)
+    if !fg_flag_ok || !fg_ok || !bg_flag_ok || !bg_ok ||
+       (foreground_flag != 0 && foreground_flag != 1) ||
+       (background_flag != 0 && background_flag != 1) ||
+       foreground_value < 0 || foreground_value > 0xffffff ||
+       background_value < 0 || background_value > 0xffffff {
+        return
+    }
+    return u32(foreground_value), u32(background_value),
+        foreground_flag == 1, background_flag == 1, true
+}
+
 blocks_read_managed :: proc(state: ^State) -> bool {
     payload, ok := x11.get_text(state.Conn, state.Root, atom(state, BAR_BLOCKS_ATOM))
     if !ok { return false }
     defer delete(payload)
     lines := strings.split(payload, "\n")
     defer delete(lines)
-    if len(lines) == 0 || lines[0] != "version=1" { return false }
+    if len(lines) == 0 || (lines[0] != "version=1" && lines[0] != "version=2") { return false }
+    version_two := lines[0] == "version=2"
 
     parsed_any := false
     for line in lines[1:] {
         if line == "" { continue }
         fields := split_block_fields(line)
-        if len(fields) == 2 && fields[0] == "workspaces" {
+        if !version_two && len(fields) == 2 && fields[0] == "workspaces" {
             if alignment, valid := parse_block_alignment(fields[1]); valid {
                 append_workspace_block(state, alignment)
                 parsed_any = true
             }
-        } else if len(fields) == 6 && fields[0] == "script" {
+        } else if version_two && len(fields) == 6 && fields[0] == "workspaces" {
+            alignment, alignment_ok := parse_block_alignment(fields[1])
+            foreground, background, foreground_set, background_set, colours_ok :=
+                parse_managed_colours(fields[:], 2)
+            if alignment_ok && colours_ok {
+                append_workspace_block(state, alignment, foreground, background,
+                    foreground_set, background_set)
+                parsed_any = true
+            }
+        } else if !version_two && len(fields) == 6 && fields[0] == "script" {
             alignment, alignment_ok := parse_block_alignment(fields[1])
             interval, interval_ok := strconv.parse_i64(fields[2], 10)
             timeout, timeout_ok := strconv.parse_i64(fields[3], 10)
@@ -123,16 +170,69 @@ blocks_read_managed :: proc(state: ^State) -> bool {
                 )
                 parsed_any = true
             }
-        } else if len(fields) == 2 && fields[0] == "systray" {
+        } else if version_two && len(fields) == 10 && fields[0] == "script" {
+            alignment, alignment_ok := parse_block_alignment(fields[1])
+            interval, interval_ok := strconv.parse_i64(fields[2], 10)
+            timeout, timeout_ok := strconv.parse_i64(fields[3], 10)
+            foreground, background, foreground_set, background_set, colours_ok :=
+                parse_managed_colours(fields[:], 4)
+            if alignment_ok && interval_ok && timeout_ok && colours_ok &&
+               interval >= 1000 && interval <= 86400000 &&
+               timeout >= 1000 && timeout <= 60000 && len(fields[9]) < 1024 {
+                append_script_block(state, alignment, fields[8], fields[9],
+                    i32(interval), i32(timeout), foreground, background,
+                    foreground_set, background_set)
+                parsed_any = true
+            }
+        } else if !version_two && len(fields) == 2 && fields[0] == "systray" {
             if alignment, valid := parse_block_alignment(fields[1]); valid {
                 append_systray_block(state, alignment)
                 parsed_any = true
             }
-        } else if len(fields) == 4 && fields[0] == "button" {
+        } else if version_two && len(fields) == 6 && fields[0] == "systray" {
+            alignment, alignment_ok := parse_block_alignment(fields[1])
+            foreground, background, foreground_set, background_set, colours_ok :=
+                parse_managed_colours(fields[:], 2)
+            if alignment_ok && colours_ok {
+                append_systray_block(state, alignment, foreground, background,
+                    foreground_set, background_set)
+                parsed_any = true
+            }
+        } else if !version_two && len(fields) == 4 && fields[0] == "button" {
             if alignment, valid := parse_block_alignment(fields[1]); valid &&
                fields[2] != "" && fields[3] != "" &&
                len(fields[2]) <= 64 && len(fields[3]) < 1024 {
                 append_button_block(state, alignment, fields[2], fields[3])
+                parsed_any = true
+            }
+        } else if version_two && len(fields) == 8 && fields[0] == "button" {
+            alignment, alignment_ok := parse_block_alignment(fields[1])
+            foreground, background, foreground_set, background_set, colours_ok :=
+                parse_managed_colours(fields[:], 2)
+            if alignment_ok && colours_ok && fields[6] != "" && fields[7] != "" &&
+               len(fields[6]) <= 64 && len(fields[7]) < 1024 {
+                append_button_block(state, alignment, fields[6], fields[7],
+                    foreground, background, foreground_set, background_set)
+                parsed_any = true
+            }
+        } else if version_two && (len(fields) == 7 || len(fields) == 8) &&
+                  (fields[0] == "audio" || fields[0] == "bluetooth" || fields[0] == "network") {
+            alignment, alignment_ok := parse_block_alignment(fields[1])
+            foreground, background, foreground_set, background_set, colours_ok :=
+                parse_managed_colours(fields[:], 2)
+            click_command := ""
+            if len(fields) == 8 { click_command = fields[7] }
+            if alignment_ok && colours_ok && fields[6] != "" && len(fields[6]) <= 64 &&
+               len(click_command) < 1024 {
+                if fields[0] == "audio" {
+                    append_audio_block(state, alignment, fields[6], foreground, background,
+                        foreground_set, background_set, click_command)
+                } else {
+                    kind := Block_Kind.Bluetooth
+                    if fields[0] == "network" { kind = .Network }
+                    append_status_block(state, kind, alignment, fields[6], foreground, background,
+                        foreground_set, background_set, click_command)
+                }
                 parsed_any = true
             }
         }
@@ -195,28 +295,29 @@ workspace_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> 
 }
 
 workspace_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, start_x: i32, block_index: int) {
-    _ = block
     x := start_x
+    base_background := block_background(block, state)
+    base_foreground := block_foreground(block, state)
     for id := 1; id <= int(state.Config.WorkspaceCount); id += 1 {
         ws := workspace_for_slot(state, window, id)
         label := workspace_label(id, ws)
         occupied := ws != nil && ws.Occupied
         width := workspace_width(state, label, occupied)
-        background := state.Config.WorkspaceBackground
-        foreground := state.Config.WorkspaceForeground
+        background := block.BackgroundSet ? base_background : state.Config.WorkspaceBackground
+        foreground := block.ForegroundSet ? base_foreground : state.Config.WorkspaceForeground
         if ws != nil && ws.Active {
-            background = state.Config.Foreground
-            foreground = state.Config.Background
+            background = block.ForegroundSet ? base_foreground : state.Config.Foreground
+            foreground = block.BackgroundSet ? base_background : state.Config.Background
         } else if ws != nil && ws.Urgent {
-            background = state.Config.BlockBackground
-            foreground = state.Config.BlockForeground
+            background = base_background
+            foreground = base_foreground
         } else if window.HoverWorkspace == id {
             background = blend_colour(
-                state.Config.WorkspaceBackground, state.Config.Foreground, 35,
+                background, block.ForegroundSet ? base_foreground : state.Config.Foreground, 35,
             )
         } else if !occupied {
             foreground = blend_colour(
-                state.Config.WorkspaceForeground, state.Config.WorkspaceBackground, 55,
+                foreground, background, 55,
             )
         }
         fill_rect(state, X_Drawable(window.Canvas), x, 0, width, window.Geom.H, background)

@@ -1338,8 +1338,13 @@ test_floating :: proc() {
     b := add_tiled(m, 101) // cols [a] [b]
 
     c.Focus_Client(m, a)
+    _, top_changed := c.Toggle_Always_On_Top(m)
+    ok(!top_changed && !a.AlwaysOnTop, "tiled client cannot become always on top")
     ok(c.Toggle_Floating(m), "float a")
     ok(a.Floating, "a is floating")
+    top_on: bool
+    top_on, top_changed = c.Toggle_Always_On_Top(m)
+    ok(top_changed && top_on && a.AlwaysOnTop, "floating client becomes always on top")
     eq(len(ws.Floaters), 1, "one floater")
     eq(len(ws.Cols), 1, "one tiled column left (b)")
     // default float rect is centered at 60% of the output
@@ -1354,10 +1359,15 @@ test_floating :: proc() {
     ok(c.Toggle_Floating(m), "float b")
     eq(len(ws.Floaters), 2, "two floaters")
     eq(len(ws.Cols), 0, "no tiled columns")
+    c.Arrange_All(m)
+    eq(a.Border, m.Cfg.BorderWidth,
+       "unfocused always-on-top floater keeps its visible border")
+    eq(b.Border, m.Cfg.BorderWidth, "focused floater keeps its visible border")
 
     // re-tile a -> becomes its own column; b stays floating
     c.Set_Floating(m, a, false)
     ok(!a.Floating, "a no longer floating")
+    ok(!a.AlwaysOnTop, "re-tiling clears always on top")
     eq(len(ws.Cols), 1, "a re-tiled as one column")
     eq(len(ws.Floaters), 1, "b still floating")
     eq(ws.Cols[0].Wins[0], a, "a is in the column")
@@ -2661,7 +2671,7 @@ test_ipc_windows_payload :: proc() {
     defer delete(pl)
     eq(string(pl), `{"version":1,"windows":[{"id":42,"title":"A \"quoted\" title",` +
         `"class":"XTerm","instance":"xterm","workspace":1,"output":"eDP-1","focused":true,` +
-        `"floating":false,"fullscreen":false,"scratchpad":false,"scratchpad_register":null,"scratchpad_registers":[],"urgent":false,"column":0,` +
+        `"floating":false,"always_on_top":false,"fullscreen":false,"scratchpad":false,"scratchpad_register":null,"scratchpad_registers":[],"urgent":false,"column":0,` +
         `"column_layout":"stacked","tab_index":0,"tab_count":1,"tab_active":false,"dock":false,` +
         `"rect":{"x":10,"y":20,"width":800,"height":600}}]}`,
         "GET_WINDOWS exposes metadata, state and geometry")
@@ -2803,6 +2813,9 @@ test_ipc_parse_command :: proc() {
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`move workspace previous`))
     ok(fine && cmd.action == .Move_To_Workspace_Prev, "move workspace previous parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`toggle-always-on-top`))
+    ok(fine && cmd.action == .Toggle_Always_On_Top, "always-on-top toggle parsed")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`layout tabbed`))
     ok(fine && cmd.action == .Layout_Tabbed, "layout tabbed parsed")

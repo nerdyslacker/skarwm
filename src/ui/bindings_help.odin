@@ -34,6 +34,7 @@ Binding_Description :: proc(b: ^input.Binding) -> string {
     case .Resize_Up:           return fmt.aprintf("shrink tile height")
     case .Resize_Down:         return fmt.aprintf("grow tile height")
     case .Toggle_Floating:     return fmt.aprintf("toggle floating")
+    case .Toggle_Always_On_Top:return fmt.aprintf("toggle always on top")
     case .Toggle_Fullscreen:   return fmt.aprintf("toggle fullscreen")
     case .Layout_Floating:     return fmt.aprintf("float all workspace windows")
     case .Layout_Tabbed:       return fmt.aprintf("use tabbed layout")

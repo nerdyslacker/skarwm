@@ -141,6 +141,7 @@ Draw_Decoration :: proc(state: ^State, m: ^c.Manager, xid: u32) {
     b := clamp(cfg.BorderWidth, i32(0), min(w, h)/2)
     title_h := min(max(i32(0), cfg.TitlebarHeight), max(i32(0), h-2*b))
     colors := c.Resolve_Decoration_Colors(cfg, m.Cfg.FocusedBorder, m.Cfg.UnfocusedBorder, m.Focused == cl)
+    if cl.AlwaysOnTop { colors.Border = cfg.Accent }
 
     // Keep the resize gutter visually quiet. Only the one-pixel outline and
     // title strip use active colors; the wider hit area remains dark.
@@ -169,11 +170,30 @@ Draw_Decoration :: proc(state: ^State, m: ^c.Manager, xid: u32) {
     x11.xcb_change_gc(state.Conn, state.TabGC, x11.GC_FOREGROUND | x11.GC_BACKGROUND, &text_vals[0])
     baseline := i16(b + max(i32(12), (title_h+10)/2))
     button_w := max(i32(1), cfg.TitlebarHeight)
+    title_x := b + 7
+    indicator_w := i32(0)
+    if cl.AlwaysOnTop && title_h >= 10 {
+        // A tiny geometric pushpin avoids depending on any icon font. Draw it
+        // in the existing configurable decoration accent.
+        pin_x := b + 7
+        pin_y := b + max(i32(1), (title_h-11)/2)
+        pin_vals := [2]u32{cfg.Accent, colors.Background}
+        x11.xcb_change_gc(state.Conn, state.TabGC, x11.GC_FOREGROUND | x11.GC_BACKGROUND, &pin_vals[0])
+        pin_head := x11.Rectangle{x=i16(pin_x), y=i16(pin_y), width=7, height=5}
+        pin_stem := x11.Rectangle{x=i16(pin_x+3), y=i16(pin_y+5), width=1, height=5}
+        x11.xcb_poly_fill_rectangle(state.Conn, xid, state.TabGC, 1, &pin_head)
+        x11.xcb_poly_fill_rectangle(state.Conn, xid, state.TabGC, 1, &pin_stem)
+        pin_tip := x11.Segment{x1=i16(pin_x+1), y1=i16(pin_y+10), x2=i16(pin_x+5), y2=i16(pin_y+10)}
+        x11.xcb_poly_segment(state.Conn, xid, state.TabGC, 1, &pin_tip)
+        title_x += 15
+        indicator_w = 15
+        x11.xcb_change_gc(state.Conn, state.TabGC, x11.GC_FOREGROUND | x11.GC_BACKGROUND, &text_vals[0])
+    }
     if cfg.ShowTitle {
-        max_chars := max(i32(0), (w - 3*button_w - 2*b - 14)/6)
+        max_chars := max(i32(0), (w - 3*button_w - 2*b - 14 - indicator_w)/6)
         buf: [255]u8
         n := min(decoration_ascii_title(cl, buf[:]), int(max_chars))
-        if n > 0 { x11.xcb_image_text_8(state.Conn, u8(n), xid, state.TabGC, i16(b+7), baseline, cstring(&buf[0])) }
+        if n > 0 { x11.xcb_image_text_8(state.Conn, u8(n), xid, state.TabGC, i16(title_x), baseline, cstring(&buf[0])) }
     }
     button_size := clamp(title_h-7, i32(8), i32(12))
     button_y := b + max(i32(0), (title_h-button_size)/2)

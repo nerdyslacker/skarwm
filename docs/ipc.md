@@ -19,6 +19,7 @@ skarwm-msg workspace N output NAME
 skarwm-msg move workspace N
 skarwm-msg move workspace next|prev
 skarwm-msg toggle-floating
+skarwm-msg toggle-always-on-top
 skarwm-msg toggle-fullscreen
 skarwm-msg layout scrolling-tile|vertical-scroller|dwindle|fibonacci|monocle|floating|next
 skarwm-msg decorations enable|disable|toggle
@@ -90,7 +91,8 @@ last arranged geometry for every managed client. Tiled clients also include
 non-tiled clients use null/zero values. The `scratchpad` boolean identifies a
 hidden client, `scratchpad_register` is one session register or null, and
 `scratchpad_registers` contains every register pointing at that client. The
-singular field is retained for simple consumers. Type 101 reports protocol
+`always_on_top` boolean reports the floating above-layer state. The singular
+scratchpad field is retained for simple consumers. Type 101 reports protocol
 version information. `get-topology` (extension type 102) reports the committed
 topology generation, scheduler/transaction diagnostics, every RandR connector
 (including connected-but-disabled connectors), and the current logical output

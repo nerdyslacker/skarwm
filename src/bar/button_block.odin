@@ -21,6 +21,8 @@ append_button_block :: proc(
     state: ^State,
     alignment: Block_Alignment,
     label, command: string,
+    foreground: u32 = 0, background: u32 = 0,
+    foreground_set: bool = false, background_set: bool = false,
 ) {
     if label == "" || len(label) > 64 || command == "" || len(command) >= 1024 { return }
     data := new(Button_Block_Data)
@@ -37,6 +39,8 @@ append_button_block :: proc(
             Destroy = button_destroy,
         },
         Data = data,
+        Foreground = foreground, Background = background,
+        ForegroundSet = foreground_set, BackgroundSet = background_set,
     })
 }
 
@@ -54,9 +58,12 @@ button_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, b
     wrapper_y := min(i32(3), max(i32(0), window.Geom.H / 4))
     fill_rect(
         state, X_Drawable(window.Canvas), x, wrapper_y, width, window.Geom.H - wrapper_y * 2,
-        state.Config.BlockBackground,
+        block_background(block, state),
     )
-    draw_text(state, window, x + 8, data.Label, state.Config.BlockForeground)
+    draw_text_centered(
+        state, window, x, wrapper_y, width, window.Geom.H - wrapper_y * 2,
+        data.Label, block_foreground(block, state),
+    )
     append(&window.Hits, Hitbox{
         X = x, Y = 0, W = width, H = window.Geom.H,
         BlockIndex = block_index,

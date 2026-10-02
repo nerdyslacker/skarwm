@@ -18,7 +18,11 @@ XEMBED_WINDOW_ACTIVATE :: u32(1)
 XEMBED_FOCUS_IN :: u32(4)
 TRAY_ICON_GAP :: i32(2)
 
-append_systray_block :: proc(state: ^State, alignment: Block_Alignment) {
+append_systray_block :: proc(
+    state: ^State, alignment: Block_Alignment,
+    foreground: u32 = 0, background: u32 = 0,
+    foreground_set: bool = false, background_set: bool = false,
+) {
     if state.Tray.Enabled { return }
     state.Tray.Enabled = true
     if state.Tray.Icons == nil { state.Tray.Icons = make([dynamic]u32, 0, 8) }
@@ -31,6 +35,8 @@ append_systray_block :: proc(state: ^State, alignment: Block_Alignment) {
             Draw = systray_draw,
             Destroy = systray_destroy,
         },
+        Foreground = foreground, Background = background,
+        ForegroundSet = foreground_set, BackgroundSet = background_set,
     })
 }
 
@@ -215,13 +221,12 @@ tray_arrange :: proc(state: ^State, window: ^Bar_Window, start_x: i32) {
 }
 
 systray_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, block_index: int) {
-    _ = block
     _ = block_index
     width := systray_measure(block, state, window)
     if width <= 0 { return }
     fill_rect(
         state, X_Drawable(window.Canvas), x, 0, width, window.Geom.H,
-        state.Config.Background,
+        block.BackgroundSet ? block.Background : state.Config.Background,
     )
     tray_arrange(state, window, x)
 }

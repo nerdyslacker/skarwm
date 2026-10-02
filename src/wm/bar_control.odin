@@ -28,15 +28,27 @@ bar_write_escaped :: proc(builder: ^strings.Builder, value: string) {
     }
 }
 
+bar_write_block_colours :: proc(builder: ^strings.Builder, block: ^Raw_Bar_Block) {
+    strings.write_byte(builder, '\t')
+    strings.write_i64(builder, block.foreground_set ? 1 : 0)
+    strings.write_byte(builder, '\t')
+    strings.write_u64(builder, u64(block.foreground))
+    strings.write_byte(builder, '\t')
+    strings.write_i64(builder, block.background_set ? 1 : 0)
+    strings.write_byte(builder, '\t')
+    strings.write_u64(builder, u64(block.background))
+}
+
 bar_publish_blocks :: proc() {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
-    strings.write_string(&builder, "version=1\n")
-    for block in g_wm.bar_blocks {
+    strings.write_string(&builder, "version=2\n")
+    for &block in g_wm.bar_blocks {
         switch block.kind {
         case .Workspaces:
             strings.write_string(&builder, "workspaces\t")
             strings.write_i64(&builder, i64(block.alignment))
+            bar_write_block_colours(&builder, &block)
             strings.write_byte(&builder, '\n')
         case .Script:
             strings.write_string(&builder, "script\t")
@@ -45,6 +57,7 @@ bar_publish_blocks :: proc() {
             strings.write_i64(&builder, i64(block.interval_ms))
             strings.write_byte(&builder, '\t')
             strings.write_i64(&builder, i64(block.timeout_ms))
+            bar_write_block_colours(&builder, &block)
             strings.write_byte(&builder, '\t')
             bar_write_escaped(&builder, block.name)
             strings.write_byte(&builder, '\t')
@@ -53,14 +66,42 @@ bar_publish_blocks :: proc() {
         case .Systray:
             strings.write_string(&builder, "systray\t")
             strings.write_i64(&builder, i64(block.alignment))
+            bar_write_block_colours(&builder, &block)
             strings.write_byte(&builder, '\n')
         case .Button:
             strings.write_string(&builder, "button\t")
             strings.write_i64(&builder, i64(block.alignment))
+            bar_write_block_colours(&builder, &block)
             strings.write_byte(&builder, '\t')
             bar_write_escaped(&builder, block.name)
             strings.write_byte(&builder, '\t')
             bar_write_escaped(&builder, block.command)
+            strings.write_byte(&builder, '\n')
+        case .Audio:
+            strings.write_string(&builder, "audio\t")
+            strings.write_i64(&builder, i64(block.alignment))
+            bar_write_block_colours(&builder, &block)
+            strings.write_byte(&builder, '\t')
+            bar_write_escaped(&builder, block.name)
+            if block.click_command != "" {
+                strings.write_byte(&builder, '\t')
+                bar_write_escaped(&builder, block.click_command)
+            }
+            strings.write_byte(&builder, '\n')
+        case .Bluetooth, .Network:
+            if block.kind == .Bluetooth {
+                strings.write_string(&builder, "bluetooth\t")
+            } else {
+                strings.write_string(&builder, "network\t")
+            }
+            strings.write_i64(&builder, i64(block.alignment))
+            bar_write_block_colours(&builder, &block)
+            strings.write_byte(&builder, '\t')
+            bar_write_escaped(&builder, block.name)
+            if block.click_command != "" {
+                strings.write_byte(&builder, '\t')
+                bar_write_escaped(&builder, block.click_command)
+            }
             strings.write_byte(&builder, '\n')
         }
     }

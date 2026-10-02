@@ -131,10 +131,17 @@ render_focus :: proc() {
     for cl in m.Clients {
         col := m.Cfg.UnfocusedBorder
         if cl == focused { col = m.Cfg.FocusedBorder }
+        if cl.AlwaysOnTop { col = m.Cfg.Decoration.Accent }
         x11.xcb_change_window_attributes(g_wm.conn, cl.Xid, x11.CW_BORDER_PIXEL, &col)
     }
     ui.Draw_All_Decorations(&g_wm.ui, m)
-    if focused != nil && focused.Floating { raise_focused() }
+    if focused != nil && focused.Floating {
+        raise_focused()
+    } else {
+        // Reassert the above/dock layers after every redraw. Decoration frames
+        // may have been newly mapped even when the focused client is tiled.
+        raise_docks()
+    }
     apply_x_focus()
 }
 
@@ -164,11 +171,37 @@ raise_focused :: proc() {
     raise_docks()
 }
 
+raise_always_on_top :: proc() {
+    focused := g_wm.m.Focused
+    // Preserve focus order inside this layer by raising its focused member
+    // after the other always-on-top clients.
+    for cl in g_wm.m.Clients {
+        if cl == focused || !cl.AlwaysOnTop || !cl.Floating || !cl.Mapped ||
+           cl.Stashed || cl.Fullscreen || cl.Ws == nil || cl.Out == nil ||
+           cl.Ws != cl.Out.Current { continue }
+        stack := x11.STACK_MODE_ABOVE
+        if cl.DecorationFrame != 0 {
+            x11.xcb_configure_window(g_wm.conn, cl.DecorationFrame, x11.CW_STACK_MODE, &stack)
+        }
+        x11.xcb_configure_window(g_wm.conn, cl.Xid, x11.CW_STACK_MODE, &stack)
+    }
+    if focused != nil && focused.AlwaysOnTop && focused.Floating && focused.Mapped &&
+       !focused.Stashed && !focused.Fullscreen && focused.Ws != nil &&
+       focused.Out != nil && focused.Ws == focused.Out.Current {
+        stack := x11.STACK_MODE_ABOVE
+        if focused.DecorationFrame != 0 {
+            x11.xcb_configure_window(g_wm.conn, focused.DecorationFrame, x11.CW_STACK_MODE, &stack)
+        }
+        x11.xcb_configure_window(g_wm.conn, focused.Xid, x11.CW_STACK_MODE, &stack)
+    }
+}
+
 // raise_docks restores the normal panel layer, then puts an active fullscreen
 // client above it. This is called anywhere a newly mapped or focused window can
 // disturb stacking, so docks remain above ordinary windows without covering a
 // real fullscreen client.
 raise_docks :: proc() {
+    raise_always_on_top()
     for o in g_wm.m.Outputs {
         for d in o.Docks {
             stack := x11.STACK_MODE_ABOVE
@@ -809,6 +842,8 @@ dispatch_action :: proc(b: ^input.Binding) {
         }
     case .Toggle_Floating:
         if c.Toggle_Floating(m) { reflow() }
+    case .Toggle_Always_On_Top:
+        if _, changed := c.Toggle_Always_On_Top(m); changed { reflow() }
     case .Toggle_Fullscreen:
         if _, changed := c.Toggle_Fullscreen(m); changed {
             raise_focused()

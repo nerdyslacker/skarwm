@@ -4,7 +4,7 @@ skarwm implements the EWMH/ICCCM subset used by normal applications, panels,
 launchers, and tools such as `wmctrl`:
 
 - client list, active window, desktop count/current desktop, and work areas;
-- fullscreen and paired horizontal/vertical maximize state;
+- fullscreen, floating always-on-top, and paired horizontal/vertical maximize state;
 - close-window and activation requests;
 - `WM_DELETE_WINDOW`, `WM_TAKE_FOCUS`, urgency, titles, and normal size hints.
 
@@ -24,6 +24,10 @@ available. Their requested size is preserved within the usable work area. This
 behavior also applies when a toolkit publishes the hint shortly after mapping,
 which keeps polkit authentication agents and file choosers from GTK, KDE, Xfce,
 and other XDG Desktop Portal backends stable without backend-specific rules.
+
+`_NET_WM_STATE_ABOVE` is supported for floating clients. Above clients remain
+over ordinary workspace windows and below docks/fullscreen windows. Requests
+for tiled clients are ignored, and re-tiling an above client clears the state.
 
 Focus follows the pointer by default:
 

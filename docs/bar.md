@@ -71,9 +71,50 @@ uses a single left-aligned workspace block.
 bar_block : workspaces : left
 bar_block : button : left : 󰀻 : "rofi -show drun"
 bar_block : script : right : _ : 2 : 1 : "cut -d ' ' -f 1 /proc/loadavg"
+bar_block : network : right : 󰤨
+bar_block : bluetooth : right : 󰂯
+bar_block : audio : right : 󰕾
 bar_block : systray : right
 bar_block : button : right : ⏻ : "rofi -show power-menu -modi power-menu:rofi-power-menu"
 bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
+```
+
+The `audio` block reads the default PipeWire/PulseAudio sink, toggles mute on
+middle click, and changes volume in five-percent steps when the pointer is over
+the block and the mouse wheel is scrolled. It uses `wpctl` when available and
+falls back to `pactl`.
+
+The `network` block reports the first active non-loopback interface name, uses
+`󰤭 off` when disconnected, and opens `nm-connection-editor` on left click.
+Middle click toggles the Wi-Fi radio. The `bluetooth` block reports its
+connection state using its configured icon when connected and `󰂲` when
+disconnected. The icon is followed by `on` or `off`. It opens
+`blueman-manager` on left click, and middle click toggles Bluetooth power.
+Muted audio replaces its configured icon with `󰝟` and displays `muted`.
+Missing NetworkManager tooling uses the network-off state without blocking the
+bar.
+
+Audio, Network, and Bluetooth accept an optional final shell command for left
+click. It replaces the Network/Bluetooth settings application; Audio has no
+default left-click action. Commands may contain colons and should be quoted:
+
+```rc
+bar_block : audio : right : 󰕾 : "pavucontrol"
+bar_block : network : right : 󰤨 : "rofi -show network"
+bar_block : bluetooth : right : 󰂯 : "blueman-manager"
+```
+
+Every block can override its foreground and background. Use `_` to inherit one
+of the global `bar_block_*` colours:
+
+```rc
+bar_block : workspaces : left : #0E0D0C : #917E6B
+bar_block : network : right : 󰤨 : #FCE8C3 : #3C3836
+bar_block : bluetooth : right : 󰂯 : #FCE8C3 : #3C3836
+bar_block : audio : right : 󰕾 : #121110 : #D79921 : "pavucontrol"
+bar_block : button : right : ⏻ : #FCE8C3 : #9D0006 : "rofi -show power-menu"
+bar_block : script : right : clock : 1 : 1 : _ : #3C3836 : "date '+%H:%M'"
+bar_block : systray : right : _ : #282828
 ```
 
 Button fields after the alignment are `label` and command. The label may be

@@ -50,6 +50,10 @@ import x11 "../x11"
 //       bar_block  : button : <left|center|right> : <label> : "<command>"
 //       bar_block  : script : <left|center|right> : <name> : <interval seconds> :
 //                    <timeout seconds> : "<command>"
+//       bar_block  : audio : <left|center|right> : <label> [: "<click command>"]
+//       bar_block  : network|bluetooth : <left|center|right> : <label> [: "<click command>"]
+//     Any block may append foreground/background colours (`_` inherits). For
+//     script/button blocks the pair appears immediately before the command.
 //       virtual_screen : <output> : split : <percent> [: <pixel offset>]
 //       mousebind  : …                       (warned + skipped: no mouse system yet)
 //
@@ -92,7 +96,7 @@ Raw_Rule :: struct {
     decorate_set:       bool,
 }
 
-Bar_Block_Kind :: enum u8 { Workspaces, Script, Systray, Button }
+Bar_Block_Kind :: enum u8 { Workspaces, Script, Systray, Button, Audio, Bluetooth, Network }
 Bar_Block_Alignment :: enum u8 { Left, Center, Right }
 
 // Raw_Bar_Block is owned configuration data. The WM publishes it for the
@@ -100,8 +104,10 @@ Bar_Block_Alignment :: enum u8 { Left, Center, Right }
 Raw_Bar_Block :: struct {
     kind: Bar_Block_Kind,
     alignment: Bar_Block_Alignment,
-    name, command: string,
+    name, command, click_command: string,
     interval_ms, timeout_ms: i32,
+    foreground, background: u32,
+    foreground_set, background_set: bool,
 }
 
 // Virtual_Screen_Profile is a declarative two-way horizontal split. The ratio
@@ -250,6 +256,7 @@ release_bar_blocks :: proc(blocks: ^[dynamic]Raw_Bar_Block) {
     for &block in blocks {
         if block.name != "" { delete(block.name) }
         if block.command != "" { delete(block.command) }
+        if block.click_command != "" { delete(block.click_command) }
     }
     delete(blocks^)
     blocks^ = {}
@@ -518,6 +525,8 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
         base.action = .Screen_Split_Ratio; base.arg = rb.argi; return base, ""
 
     case "togglefloating":   base.action = .Toggle_Floating;   return base, ""
+    case "togglealwaysontop", "toggle_always_on_top", "alwaysontop":
+        base.action = .Toggle_Always_On_Top; return base, ""
     case "togglefullscreen",
          "fullscreen":       base.action = .Toggle_Fullscreen; return base, ""
     case "layout_tabbed",
@@ -709,6 +718,9 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
             r.bar_blocks[i] = block
             if block.name != "" { r.bar_blocks[i].name = strings.clone(block.name) }
             if block.command != "" { r.bar_blocks[i].command = strings.clone(block.command) }
+            if block.click_command != "" {
+                r.bar_blocks[i].click_command = strings.clone(block.click_command)
+            }
         }
     } else {
         r.bar_blocks = make([dynamic]Raw_Bar_Block, 0, 1)
@@ -1014,6 +1026,49 @@ parse_bar_alignment :: proc(value: string) -> (Bar_Block_Alignment, bool) {
     return {}, false
 }
 
+parse_optional_bar_colour :: proc(value: string) -> (colour: u32, set, valid: bool) {
+    trimmed := strings.trim_space(value)
+    if trimmed == "_" { return 0, false, true }
+    parsed, ok := parse_color(trimmed)
+    return parsed, ok, ok
+}
+
+parse_bar_colours :: proc(value: string) -> (
+    foreground, background: u32, foreground_set, background_set, valid: bool,
+) {
+    fields := strings.split(value, ":")
+    defer delete(fields)
+    if len(fields) != 2 { return 0, 0, false, false, false }
+    foreground_ok, background_ok: bool
+    foreground, foreground_set, foreground_ok = parse_optional_bar_colour(fields[0])
+    background, background_set, background_ok = parse_optional_bar_colour(fields[1])
+    return foreground, background, foreground_set, background_set,
+        foreground_ok && background_ok
+}
+
+// Script/button commands remain the final field and may themselves contain
+// colons. Treat two leading fields as colours only when both parse as a colour
+// (or `_`, meaning inherit); otherwise leave the command untouched.
+take_leading_bar_colours :: proc(remaining: ^string) -> (
+    foreground, background: u32, foreground_set, background_set: bool,
+) {
+    original := remaining^
+    foreground_text, has_foreground := next_directive_field(remaining)
+    background_text, has_background := next_directive_field(remaining)
+    if !has_foreground || !has_background {
+        remaining^ = original
+        return
+    }
+    foreground_ok, background_ok: bool
+    foreground, foreground_set, foreground_ok = parse_optional_bar_colour(foreground_text)
+    background, background_set, background_ok = parse_optional_bar_colour(background_text)
+    if !foreground_ok || !background_ok {
+        remaining^ = original
+        return 0, 0, false, false
+    }
+    return foreground, background, foreground_set, background_set
+}
+
 parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string) -> bool {
     remaining := rest
     kind, has_kind := next_directive_field(&remaining)
@@ -1024,14 +1079,34 @@ parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string)
 
     switch kind {
     case "workspaces", "systray":
-        alignment, ok := parse_bar_alignment(remaining)
+        alignment_text := remaining
+        colour_text := ""
+        if parsed_alignment, has_more := next_directive_field(&remaining); has_more {
+            alignment_text = parsed_alignment
+            colour_text = remaining
+        }
+        alignment, ok := parse_bar_alignment(alignment_text)
         if !ok {
-            append(errs, fmt.aprintf("bar_block(%s): expected left/center/right, got %q", kind, remaining))
+            append(errs, fmt.aprintf("bar_block(%s): expected left/center/right, got %q", kind, alignment_text))
             return false
+        }
+        foreground, background: u32
+        foreground_set, background_set := false, false
+        if colour_text != "" {
+            valid: bool
+            foreground, background, foreground_set, background_set, valid = parse_bar_colours(colour_text)
+            if !valid {
+                append(errs, fmt.aprintf("bar_block(%s): expected foreground : background colours, got %q", kind, colour_text))
+                return false
+            }
         }
         block_kind := Bar_Block_Kind.Workspaces
         if kind == "systray" { block_kind = .Systray }
-        append(&sc.bar_blocks, Raw_Bar_Block{kind = block_kind, alignment = alignment})
+        append(&sc.bar_blocks, Raw_Bar_Block{
+            kind = block_kind, alignment = alignment,
+            foreground = foreground, background = background,
+            foreground_set = foreground_set, background_set = background_set,
+        })
     case "script":
         alignment_text, ok_alignment := next_directive_field(&remaining)
         name, ok_name := next_directive_field(&remaining)
@@ -1040,6 +1115,8 @@ parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string)
         alignment, valid_alignment := parse_bar_alignment(alignment_text)
         interval, valid_interval := parse_i32_value(interval_text)
         timeout, valid_timeout := parse_i32_value(timeout_text)
+        foreground, background, foreground_set, background_set :=
+            take_leading_bar_colours(&remaining)
         command := quoted_trim(remaining)
         if !ok_alignment || !valid_alignment || !ok_name || len(name) > 64 ||
            !ok_interval || !valid_interval || interval < 1 || interval > 86400 ||
@@ -1055,11 +1132,15 @@ parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string)
             kind = .Script, alignment = alignment,
             name = strings.clone(name), command = strings.clone(command),
             interval_ms = interval * 1000, timeout_ms = timeout * 1000,
+            foreground = foreground, background = background,
+            foreground_set = foreground_set, background_set = background_set,
         })
     case "button":
         alignment_text, ok_alignment := next_directive_field(&remaining)
         label, ok_label := next_directive_field(&remaining)
         alignment, valid_alignment := parse_bar_alignment(alignment_text)
+        foreground, background, foreground_set, background_set :=
+            take_leading_bar_colours(&remaining)
         command := quoted_trim(remaining)
         if !ok_alignment || !valid_alignment || !ok_label || label == "" || len(label) > 64 ||
            command == "" || len(command) >= 1024 {
@@ -1072,6 +1153,54 @@ parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string)
         append(&sc.bar_blocks, Raw_Bar_Block{
             kind = .Button, alignment = alignment,
             name = strings.clone(label), command = strings.clone(command),
+            foreground = foreground, background = background,
+            foreground_set = foreground_set, background_set = background_set,
+        })
+    case "audio", "bluetooth", "network":
+        original := remaining
+        alignment_text, ok_alignment := next_directive_field(&remaining)
+        label := strings.trim_space(remaining)
+        extra := ""
+        if parsed_label, has_extra := next_directive_field(&remaining); has_extra {
+            label = parsed_label
+            extra = remaining
+        }
+        alignment, valid_alignment := parse_bar_alignment(alignment_text)
+        foreground, background: u32
+        foreground_set, background_set := false, false
+        click_command := ""
+        valid_tail := true
+        if extra != "" {
+            colours_only: bool
+            foreground, background, foreground_set, background_set, colours_only =
+                parse_bar_colours(extra)
+            if !colours_only {
+                tail := extra
+                foreground, background, foreground_set, background_set =
+                    take_leading_bar_colours(&tail)
+                if tail != extra {
+                    click_command = quoted_trim(tail)
+                } else {
+                    click_command = quoted_trim(extra)
+                }
+                valid_tail = click_command != "" && len(click_command) < 1024
+            }
+        }
+        if !ok_alignment || !valid_alignment || label == "" || len(label) > 64 || !valid_tail {
+            append(errs, fmt.aprintf(
+                "bar_block(%s): expected alignment : label [: foreground : background] [: click command], got %q",
+                kind, original,
+            ))
+            return false
+        }
+        block_kind := Bar_Block_Kind.Audio
+        if kind == "bluetooth" { block_kind = .Bluetooth }
+        if kind == "network" { block_kind = .Network }
+        append(&sc.bar_blocks, Raw_Bar_Block{
+            kind = block_kind, alignment = alignment, name = strings.clone(label),
+            click_command = strings.clone(click_command),
+            foreground = foreground, background = background,
+            foreground_set = foreground_set, background_set = background_set,
         })
     case:
         append(errs, fmt.aprintf("bar_block: unknown block kind %q", kind))
@@ -1683,6 +1812,7 @@ cfg_apply_default :: proc() {
     add_bind_def(sc, "Mod4+Control+k", "resizeup", "")
 
     add_bind_def(sc, "Mod4+space", "togglefloating", "")
+    add_bind_def(sc, "Mod4+Shift+space", "togglealwaysontop", "")
     add_bind_def(sc, "Mod4+f", "togglefullscreen", "")
     add_bind_def(sc, "Mod4+t", "toggle_tabbed", "")
     add_bind_def(sc, "Mod4+g", "layout_next", "")
