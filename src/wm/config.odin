@@ -70,6 +70,7 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "core:time"
 
 // ----------------------------------------------------------------------------
 // Types
@@ -1961,10 +1962,124 @@ cfg_reload :: proc() {
     path := cfg_discover_path()
     if path == "" {
         cfg_apply_default()
+        cfg_watch_sync()
         return
     }
     defer delete(path)
     load_config_path(path, "reload")
+    cfg_watch_sync()
+}
+
+// ----------------------------------------------------------------------------
+// Automatic reload
+// ----------------------------------------------------------------------------
+
+// Editors commonly save by replacing the config file, so watching an open file
+// descriptor is not sufficient. Poll the path's identity and metadata instead;
+// this catches both in-place writes and atomic rename-over saves. A short
+// stability delay keeps us from parsing a file while an editor is still writing
+// it. Invalid files still retain the previous live configuration, as they do for
+// an explicit reload.
+
+CONFIG_WATCH_INTERVAL :: 250 * time.Millisecond
+CONFIG_WATCH_SETTLE   :: 100 * time.Millisecond
+
+Config_File_Snapshot :: struct {
+    exists: bool,
+    inode:  u128,
+    device: u64,
+    size:   i64,
+    mtime:  i64,
+}
+
+Config_Watch :: struct {
+    path:       string,
+    observed:   Config_File_Snapshot,
+    next_check: time.Tick,
+    reload_due: time.Tick,
+    pending:    bool,
+}
+
+g_config_watch: Config_Watch
+
+cfg_file_snapshot :: proc(path: string) -> Config_File_Snapshot {
+    if path == "" { return {} }
+    info, err := os.stat(path, context.allocator)
+    if err != nil { return {} }
+    defer os.file_info_delete(info, context.allocator)
+    return Config_File_Snapshot{
+        exists = true,
+        inode  = info.inode,
+        device = info.device,
+        size   = info.size,
+        mtime  = time.to_unix_nanoseconds(info.modification_time),
+    }
+}
+
+cfg_snapshots_equal :: proc(a, b: Config_File_Snapshot) -> bool {
+    return a.exists == b.exists &&
+           a.inode == b.inode && a.device == b.device &&
+           a.size == b.size && a.mtime == b.mtime
+}
+
+// Sync after startup and explicit reloads. Keep the old path when a watched
+// file was removed: that lets recreation by an atomic-save editor be detected.
+cfg_watch_sync :: proc() {
+    if g_active_config_path != "" && g_active_config_path != g_config_watch.path {
+        if g_config_watch.path != "" { delete(g_config_watch.path) }
+        g_config_watch.path = strings.clone(g_active_config_path)
+    }
+    if g_config_watch.path == "" { return }
+    g_config_watch.observed = cfg_file_snapshot(g_config_watch.path)
+    g_config_watch.pending = false
+    g_config_watch.next_check = time.tick_add(time.tick_now(), CONFIG_WATCH_INTERVAL)
+}
+
+cfg_watch_init :: proc() {
+    cfg_watch_sync()
+}
+
+cfg_watch_shutdown :: proc() {
+    if g_config_watch.path != "" { delete(g_config_watch.path) }
+    g_config_watch = {}
+}
+
+cfg_watch_poll_timeout_ms :: proc() -> i32 {
+    if g_config_watch.path == "" { return -1 }
+    deadline := g_config_watch.next_check
+    if g_config_watch.pending && time.tick_diff(g_config_watch.reload_due, deadline) > 0 {
+        deadline = g_config_watch.reload_due
+    }
+    remaining := time.tick_diff(time.tick_now(), deadline)
+    if remaining <= 0 { return 0 }
+    return i32((i64(remaining) + i64(time.Millisecond) - 1) / i64(time.Millisecond))
+}
+
+cfg_watch_run_due :: proc() {
+    if g_config_watch.path == "" { return }
+    now := time.tick_now()
+
+    if time.tick_diff(g_config_watch.next_check, now) >= 0 {
+        current := cfg_file_snapshot(g_config_watch.path)
+        if !cfg_snapshots_equal(current, g_config_watch.observed) {
+            g_config_watch.observed = current
+            g_config_watch.pending = true
+            g_config_watch.reload_due = time.tick_add(now, CONFIG_WATCH_SETTLE)
+        }
+        g_config_watch.next_check = time.tick_add(now, CONFIG_WATCH_INTERVAL)
+    }
+
+    if g_config_watch.pending && time.tick_diff(g_config_watch.reload_due, now) >= 0 {
+        // Confirm that the file remained unchanged throughout the settle window.
+        current := cfg_file_snapshot(g_config_watch.path)
+        if !cfg_snapshots_equal(current, g_config_watch.observed) {
+            g_config_watch.observed = current
+            g_config_watch.reload_due = time.tick_add(now, CONFIG_WATCH_SETTLE)
+            return
+        }
+        g_config_watch.pending = false
+        cfg_reload()
+    }
 }
 
 // ----------------------------------------------------------------------------

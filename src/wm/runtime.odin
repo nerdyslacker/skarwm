@@ -33,6 +33,7 @@ Run :: proc() {
     // Load configuration first so its rules also apply when adopting windows
     // that already exist at startup.
     cfg_initial_load()
+    cfg_watch_init()
     ewmh_init() // publish EWMH root state before any window is managed
     adopt_existing()
     x11.xcb_flush(g_wm.conn)
@@ -129,6 +130,7 @@ wm_startup :: proc() -> bool {
 }
 
 cleanup_all :: proc() {
+    cfg_watch_shutdown()
     bar_shutdown()
     randr_shutdown()
     ui.Hide_Drop(&g_wm.ui)
@@ -256,6 +258,10 @@ event_loop :: proc() {
         if timeout < 0 || (randr_timeout >= 0 && randr_timeout < timeout) {
             timeout = randr_timeout
         }
+        config_timeout := cfg_watch_poll_timeout_ms()
+        if timeout < 0 || (config_timeout >= 0 && config_timeout < timeout) {
+            timeout = config_timeout
+        }
         if posix.poll(raw_data(pfds), posix.nfds_t(len(pfds)), timeout) < 0 {
             delete(pfds) // EINTR or a signal: repoll
             continue
@@ -309,6 +315,7 @@ event_loop :: proc() {
         reminder_run_due()
         preview_hover_run_due()
         randr_run_due()
+        cfg_watch_run_due()
     }
 }
 
