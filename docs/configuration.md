@@ -4,12 +4,38 @@ skarwm loads the first existing configuration in this order:
 
 1. `skarwm -c FILE`
 2. `$SKARWM_CONFIG`
-3. `$XDG_CONFIG_HOME/skarwm/config.rc`
-4. `~/.config/skarwm/config.rc`
-5. `/etc/skarwm/config.rc`
+3. `${XDG_CONFIG_HOME:-$HOME/.config}/skarwm/default.conf`
+4. `/etc/skarwm/default.conf`
+5. Transitional user and system `config.rc` locations
 
 Without a file, built-in settings and bindings are used. Copy
-[`assets/example.rc`](../assets/example.rc) for a complete starting point.
+[`assets/default.conf`](../assets/default.conf) and
+[`assets/config.d`](../assets/config.d) for a complete modular starting point.
+The root file imports modules in declaration order; relative imports resolve
+against the importing file. Prefix an import path with `?` to make a missing
+file optional. Nested imports, cycle detection, and later overrides are
+supported.
+
+```ini
+[import]
+appearance = config.d/appearance.conf
+local = ?config.d/local.conf
+
+[window]
+outer_gap = 8
+inner_gap = 8
+
+[call]
+"mod + f" = togglefullscreen
+```
+
+See [the migration inventory](config-migration.md) for the complete section
+mapping, named-object behavior, precedence, and legacy compatibility status.
+
+## Legacy `.rc` reference
+
+The remainder of this page documents the transitional colon-separated format.
+Explicit `.rc` files still load but emit a deprecation warning.
 
 ## Settings
 

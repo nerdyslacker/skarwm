@@ -26,13 +26,19 @@ Run :: proc() {
         logger.Error("startup failed — cannot connect to X or another window manager is running")
         os.exit(1)
     }
-    defer cleanup_all()
-
-    parse_cli_args()
+    if !parse_cli_args() {
+        cleanup_all()
+        os.exit(1)
+    }
 
     // Load configuration first so its rules also apply when adopting windows
-    // that already exist at startup.
-    cfg_initial_load()
+    // that already exist at startup. An explicitly selected missing file is a
+    // startup error, not a request to silently use built-in defaults.
+    if !cfg_initial_load() {
+        cleanup_all()
+        os.exit(1)
+    }
+    defer cleanup_all()
     cfg_watch_init()
     ewmh_init() // publish EWMH root state before any window is managed
     adopt_existing()
@@ -45,20 +51,24 @@ Run :: proc() {
     event_loop()
 }
 
-// parse_cli_args reads command-line options. Today: skarwm -c FILE (config path).
-parse_cli_args :: proc() {
+// parse_cli_args reads the -c/--config FILE command-line option.
+parse_cli_args :: proc() -> bool {
     args := os.args
     i := 1
     for i < len(args) {
         switch args[i] {
         case "-c", "--config":
-            if i + 1 < len(args) {
-                g_cfg_flag = x11.strings_clone_here(args[i + 1])
-                i += 1
+            if i + 1 >= len(args) {
+                logger.Error(args[i], "requires a file path")
+                return false
             }
+            if g_cfg_flag != "" { delete(g_cfg_flag) }
+            g_cfg_flag = x11.strings_clone_here(args[i + 1])
+            i += 1
         }
         i += 1
     }
+    return true
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +156,7 @@ cleanup_all :: proc() {
     release_bar_blocks(&g_wm.bar_blocks)
     release_virtual_screens(&g_wm.virtual_screens)
     delete(g_wm.workspace_layouts)
+    release_config_files(&g_wm.config_files)
     if g_wm.ran_startups != nil {
         for s in g_wm.ran_startups { if s != "" { delete(s) } }
         delete(g_wm.ran_startups)

@@ -1,6 +1,7 @@
 # skarwm documentation
 
-- [Configuration](configuration.md) — rc discovery, settings, commands, rules, and reloads.
+- [Configuration](configuration.md) — modular `.conf` discovery, imports, settings, and legacy reference.
+- [Configuration migration](config-migration.md) — complete old-to-new mapping and compatibility status.
 - [Built-in bar](bar.md) — optional dock process, workspace/script blocks, XEmbed tray, and lifecycle.
 - [Layouts and windows](layouts-and-windows.md) — columns, stacks, tabs, floating, maximize, fullscreen, and resizing.
 - [Scrolling and drag/drop](scrolling-and-drag-drop.md) — the horizontal strip, edge previews, and pointer controls.
@@ -15,6 +16,6 @@
 - [Architecture](architecture.md) — packages, dependency direction, and source ownership.
 
 The bindings shown here are the built-in defaults. The core bindings also
-appear in [`assets/example.rc`](../assets/example.rc), which includes numbered
-workspace examples for 1–4. An explicit rc file replaces the built-in binding
-set, so include every binding you want to keep.
+appear in [`assets/config.d/keybindings.conf`](../assets/config.d/keybindings.conf),
+which includes numbered workspace examples for 1–4. An explicit configuration
+replaces the built-in binding set, so include every binding you want to keep.

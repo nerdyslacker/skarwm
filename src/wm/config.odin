@@ -7,20 +7,19 @@ import input "../input"
 import c "../core"
 import x11 "../x11"
 
-// rc configuration pipeline (no embedded scripting language).
+// Configuration pipeline (no embedded scripting language).
 //
 // Two sources of truth, one result:
 //
 //   - no configuration file found  -> cfg_apply_default() builds a Config_Result
 //                                     from the built-in defaults.
-//   - an rc file is found           -> cfg_file_result() parses its flat
-//                                     `key : value` / `directive : …` grammar,
-//                                     see below), collects the directives into a
-//                                     Load_Scratch, then resolves everything into
-//                                     a Config_Result.
+//   - a .conf file is found         -> imports are resolved and merged before
+//                                     schema validation fills Load_Scratch.
+//   - an explicit/legacy .rc file   -> the flat compatibility parser below
+//                                     fills the same Load_Scratch.
 //
-// The rc file completely replaces the built-in key bindings (a config file is
-// the whole config). A Config_Result is applied atomically: if any
+// A config file completely replaces the built-in key bindings. A Config_Result
+// is applied atomically: if any
 // step fails — syntax error, malformed combo, unknown keysym/action — cfg_apply()
 // is never reached and the WM keeps its previous settings, logs the error, and
 // continues running.
@@ -137,6 +136,7 @@ Config_Result :: struct {
     bar_blocks: [dynamic]Raw_Bar_Block,
     virtual_screens: [dynamic]Virtual_Screen_Profile,
     workspace_layouts: [dynamic]Workspace_Layout_Rule,
+    config_files: [dynamic]string,
 }
 
 // Load_Scratch accumulates raw settings + directives while the file is scanned.
@@ -271,6 +271,12 @@ release_virtual_screens :: proc(profiles: ^[dynamic]Virtual_Screen_Profile) {
     }
     delete(profiles^)
     profiles^ = {}
+}
+
+release_config_files :: proc(files: ^[dynamic]string) {
+    for path in files { if path != "" { delete(path) } }
+    delete(files^)
+    files^ = {}
 }
 
 free_errors :: proc(errs: ^[dynamic]string) {
@@ -749,6 +755,7 @@ destroy_result :: proc(r: ^Config_Result) {
     release_bar_blocks(&r.bar_blocks)
     release_virtual_screens(&r.virtual_screens)
     delete(r.workspace_layouts)
+    release_config_files(&r.config_files)
     r^ = {}
 }
 
@@ -1577,6 +1584,10 @@ scan_rc :: proc(sc: ^Load_Scratch, data: []byte, errs: ^[dynamic]string) -> bool
         key := strings.trim_space(line[:colon])
         rest := strings.trim_space(line[colon + 1:])
 
+        if key == "workspace_layout" {
+            if !parse_workspace_layout(sc, rest, errs) { ok = false }
+            continue
+        }
         if len(key) > len("workspace-") && key[:len("workspace-")] == "workspace-" ||
            len(key) > len("workspace_") && key[:len("workspace_")] == "workspace_" {
             if !parse_directive(sc, key, rest, errs) { ok = false }
@@ -1597,6 +1608,8 @@ scan_rc :: proc(sc: ^Load_Scratch, data: []byte, errs: ^[dynamic]string) -> bool
 // every directive resolved; r is then valid. On failure r is undefined (caller
 // must not touch it) and errs carries the diagnostic messages.
 cfg_file_result :: proc(path: string) -> (r: Config_Result, errs: [dynamic]string, ok: bool) {
+    if os.ext(path) == ".conf" { return conf_file_result(path) }
+    logger.Warn("legacy .rc configuration is deprecated; migrate to default.conf:", path)
     errs = make([dynamic]string, 0, 4)
     data, ferr := os.read_entire_file_from_path(path, context.allocator)
     if ferr != nil {
@@ -1617,6 +1630,10 @@ cfg_file_result :: proc(path: string) -> (r: Config_Result, errs: [dynamic]strin
         destroy_result(&r)
         return {}, errs, false
     }
+    active_path, path_error := os.get_absolute_path(path, context.allocator)
+    if path_error != nil { active_path = strings.clone(path) }
+    r.config_files = make([dynamic]string, 0, 1)
+    append(&r.config_files, active_path)
     return r, errs, true
 }
 
@@ -1757,6 +1774,10 @@ cfg_apply :: proc(r: ^Config_Result, label: string) {
     apply_virtual_profiles(&r.virtual_screens)
     apply_workspace_layout_config(&r.workspace_layouts)
 
+    release_config_files(&g_wm.config_files)
+    g_wm.config_files = r.config_files
+    r.config_files = {}
+
     // Startup commands run once per command text, so a reload never relaunches
     // programs the running config already started.
     for s in r.startups {
@@ -1791,37 +1812,42 @@ join_exists :: proc(base, tail: string) -> string {
 }
 
 // cfg_discover_path resolves the config file: -c FILE wins, followed by
-// $SKARWM_CONFIG, $XDG_CONFIG_HOME/skarwm/config.rc,
-// ~/.config/skarwm/config.rc, and finally /etc/skarwm/config.rc.
-// Returns "" when no file exists.
-cfg_discover_path :: proc() -> string {
+// $SKARWM_CONFIG, user default.conf, system default.conf, then legacy config.rc.
+// Returns "" when no discovered file exists. explicit_missing distinguishes
+// that normal fallback case from a missing path selected by the user.
+cfg_discover_path :: proc() -> (path: string, explicit_missing: bool) {
     if g_cfg_flag != "" {
         if os.exists(g_cfg_flag) {
-            return strings.clone(g_cfg_flag)
+            return strings.clone(g_cfg_flag), false
         }
         logger.Error("config file not found:", g_cfg_flag)
-        return ""
+        return "", true
     }
     eb: [1024]byte
     if configured := os.get_env_buf(eb[:], "SKARWM_CONFIG"); configured != "" {
         if os.exists(configured) {
-            return strings.clone(configured)
+            return strings.clone(configured), false
         }
         logger.Error("SKARWM_CONFIG file not found:", configured)
-        return ""
+        return "", true
     }
     xb: [1024]byte
     if xdg := os.get_env_buf(xb[:], "XDG_CONFIG_HOME"); xdg != "" {
-        if p := join_exists(xdg, "skarwm/config.rc"); p != "" { return p }
+        if p := join_exists(xdg, "skarwm/default.conf"); p != "" { return p, false }
+        if p := join_exists(xdg, "skarwm/config.rc"); p != "" { return p, false }
     }
     hb: [1024]byte
     if home := os.get_env_buf(hb[:], "HOME"); home != "" {
-        if p := join_exists(home, ".config/skarwm/config.rc"); p != "" { return p }
+        if p := join_exists(home, ".config/skarwm/default.conf"); p != "" { return p, false }
+        if p := join_exists(home, ".config/skarwm/config.rc"); p != "" { return p, false }
+    }
+    if os.exists("/etc/skarwm/default.conf") {
+        return strings.clone("/etc/skarwm/default.conf"), false
     }
     if os.exists("/etc/skarwm/config.rc") {
-        return strings.clone("/etc/skarwm/config.rc")
+        return strings.clone("/etc/skarwm/config.rc"), false
     }
-    return ""
+    return "", false
 }
 
 // add_bind_def appends a built-in Raw_Bind (mirroring the default key chords).
@@ -1920,13 +1946,13 @@ cfg_apply_default :: proc() {
 
 // load_config_path attempts to apply the config file at `path`. On any error it
 // logs and leaves the current configuration untouched.
-load_config_path :: proc(path, verb: string) {
+load_config_path :: proc(path, verb: string) -> bool {
     r, errs, ok := cfg_file_result(path)
     if !ok {
         logger.Error("could not", verb, "config — keeping current settings:")
         for e in errs { logger.Error("  ", e) }
         free_errors(&errs)
-        return
+        return false
     }
     free_errors(&errs)
     if topology_error := validate_virtual_profiles(r.virtual_screens[:]); topology_error != "" {
@@ -1934,7 +1960,7 @@ load_config_path :: proc(path, verb: string) {
         logger.Error("  ", topology_error)
         delete(topology_error)
         destroy_result(&r)
-        return
+        return false
     }
     active_path, path_error := os.get_absolute_path(path, context.allocator)
     if path_error != nil { active_path = strings.clone(path) }
@@ -1943,30 +1969,36 @@ load_config_path :: proc(path, verb: string) {
     label := fmt.aprintf("%s from %s", verb, path)
     cfg_apply(&r, label)
     delete(label)
+    return true
 }
 
 // cfg_initial_load runs once at startup, before window adoption.
-cfg_initial_load :: proc() {
-    path := cfg_discover_path()
+cfg_initial_load :: proc() -> bool {
+    path, explicit_missing := cfg_discover_path()
+    if explicit_missing { return false }
     if path == "" {
         cfg_apply_default()
-        return
+        return true
     }
     defer delete(path)
-    load_config_path(path, "load")
+    return load_config_path(path, "load")
 }
 
 // cfg_reload is the `.Reload` action: re-run discovery so a config that
 // appeared (or disappeared) since startup is honoured too.
 cfg_reload :: proc() {
-    path := cfg_discover_path()
+    path, explicit_missing := cfg_discover_path()
+    if explicit_missing {
+        cfg_watch_sync()
+        return
+    }
     if path == "" {
         cfg_apply_default()
         cfg_watch_sync()
         return
     }
     defer delete(path)
-    load_config_path(path, "reload")
+    _ = load_config_path(path, "reload")
     cfg_watch_sync()
 }
 
@@ -1974,12 +2006,11 @@ cfg_reload :: proc() {
 // Automatic reload
 // ----------------------------------------------------------------------------
 
-// Editors commonly save by replacing the config file, so watching an open file
-// descriptor is not sufficient. Poll the path's identity and metadata instead;
-// this catches both in-place writes and atomic rename-over saves. A short
-// stability delay keeps us from parsing a file while an editor is still writing
-// it. Invalid files still retain the previous live configuration, as they do for
-// an explicit reload.
+// Editors commonly save by replacing files, so watching open file descriptors
+// is not sufficient. Poll every normalized path in the resolved import graph,
+// including missing optional imports. A short stability delay keeps us from
+// parsing a file while an editor is still writing it. Invalid graphs still
+// retain the previous live configuration, as they do for an explicit reload.
 
 CONFIG_WATCH_INTERVAL :: 250 * time.Millisecond
 CONFIG_WATCH_SETTLE   :: 100 * time.Millisecond
@@ -1993,8 +2024,8 @@ Config_File_Snapshot :: struct {
 }
 
 Config_Watch :: struct {
-    path:       string,
-    observed:   Config_File_Snapshot,
+    paths:      [dynamic]string,
+    observed:   [dynamic]Config_File_Snapshot,
     next_check: time.Tick,
     reload_due: time.Tick,
     pending:    bool,
@@ -2025,12 +2056,20 @@ cfg_snapshots_equal :: proc(a, b: Config_File_Snapshot) -> bool {
 // Sync after startup and explicit reloads. Keep the old path when a watched
 // file was removed: that lets recreation by an atomic-save editor be detected.
 cfg_watch_sync :: proc() {
-    if g_active_config_path != "" && g_active_config_path != g_config_watch.path {
-        if g_config_watch.path != "" { delete(g_config_watch.path) }
-        g_config_watch.path = strings.clone(g_active_config_path)
+    if len(g_wm.config_files) > 0 {
+        release_config_files(&g_config_watch.paths)
+        delete(g_config_watch.observed)
+        g_config_watch.observed = make([dynamic]Config_File_Snapshot, 0, len(g_wm.config_files))
+        for path in g_wm.config_files {
+            append(&g_config_watch.paths, strings.clone(path))
+            append(&g_config_watch.observed, cfg_file_snapshot(path))
+        }
+    } else {
+        for path, index in g_config_watch.paths {
+            g_config_watch.observed[index] = cfg_file_snapshot(path)
+        }
     }
-    if g_config_watch.path == "" { return }
-    g_config_watch.observed = cfg_file_snapshot(g_config_watch.path)
+    if len(g_config_watch.paths) == 0 { return }
     g_config_watch.pending = false
     g_config_watch.next_check = time.tick_add(time.tick_now(), CONFIG_WATCH_INTERVAL)
 }
@@ -2040,12 +2079,13 @@ cfg_watch_init :: proc() {
 }
 
 cfg_watch_shutdown :: proc() {
-    if g_config_watch.path != "" { delete(g_config_watch.path) }
+    release_config_files(&g_config_watch.paths)
+    delete(g_config_watch.observed)
     g_config_watch = {}
 }
 
 cfg_watch_poll_timeout_ms :: proc() -> i32 {
-    if g_config_watch.path == "" { return -1 }
+    if len(g_config_watch.paths) == 0 { return -1 }
     deadline := g_config_watch.next_check
     if g_config_watch.pending && time.tick_diff(g_config_watch.reload_due, deadline) > 0 {
         deadline = g_config_watch.reload_due
@@ -2056,24 +2096,32 @@ cfg_watch_poll_timeout_ms :: proc() -> i32 {
 }
 
 cfg_watch_run_due :: proc() {
-    if g_config_watch.path == "" { return }
+    if len(g_config_watch.paths) == 0 { return }
     now := time.tick_now()
 
     if time.tick_diff(g_config_watch.next_check, now) >= 0 {
-        current := cfg_file_snapshot(g_config_watch.path)
-        if !cfg_snapshots_equal(current, g_config_watch.observed) {
-            g_config_watch.observed = current
-            g_config_watch.pending = true
-            g_config_watch.reload_due = time.tick_add(now, CONFIG_WATCH_SETTLE)
+        for path, index in g_config_watch.paths {
+            current := cfg_file_snapshot(path)
+            if !cfg_snapshots_equal(current, g_config_watch.observed[index]) {
+                g_config_watch.observed[index] = current
+                g_config_watch.pending = true
+                g_config_watch.reload_due = time.tick_add(now, CONFIG_WATCH_SETTLE)
+            }
         }
         g_config_watch.next_check = time.tick_add(now, CONFIG_WATCH_INTERVAL)
     }
 
     if g_config_watch.pending && time.tick_diff(g_config_watch.reload_due, now) >= 0 {
         // Confirm that the file remained unchanged throughout the settle window.
-        current := cfg_file_snapshot(g_config_watch.path)
-        if !cfg_snapshots_equal(current, g_config_watch.observed) {
-            g_config_watch.observed = current
+        changed := false
+        for path, index in g_config_watch.paths {
+            current := cfg_file_snapshot(path)
+            if !cfg_snapshots_equal(current, g_config_watch.observed[index]) {
+                g_config_watch.observed[index] = current
+                changed = true
+            }
+        }
+        if changed {
             g_config_watch.reload_due = time.tick_add(now, CONFIG_WATCH_SETTLE)
             return
         }

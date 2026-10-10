@@ -81,8 +81,8 @@ These optional programs cover common session features:
 - [anush](https://github.com/nerdyslacker/anush) — shell crafted for full desktop experience on skarwm
 
 None is required by skarwm. Commented autostart commands and bindings for each
-are available in `assets/example.rc`; enable only the programs installed on
-your system.
+are available in `assets/config.d/`; enable only the programs installed on your
+system.
 
 ## Build and install
 
@@ -94,11 +94,14 @@ sudo make install
 ```
 
 The install target adds `skarwm`, `skarwm-msg`, `skarwm-session`, the display
-manager entry, and the example configuration. Session integration files are
-kept under `assets/`.
+manager entry, the modular default configuration, and its legacy compatibility
+example. Session integration files are kept under `assets/`.
 
-Run a standalone nested session with `make xephyr`, or use
-`make xephyr-multi` for two RandR monitor objects.
+Run a standalone nested session with `make xephyr`. It loads
+`assets/default.conf`, including its `assets/config.d/` imports, so edits to the
+shipped modular configuration can be tested and hot-reloaded directly. Use
+`make xephyr-multi` for the virtual-monitor setup, or pass another config to the
+launcher explicitly with `scripts/xephyr.sh single --config FILE`.
 
 ## Source layout
 
@@ -128,27 +131,25 @@ bindings, scrolling, workspaces, scratchpads, visuals, and X11 integration.
 
 ## Configuration
 
-The configuration search order is `skarwm -c FILE`, `$SKARWM_CONFIG`,
-`$XDG_CONFIG_HOME/skarwm/config.rc`, `~/.config/skarwm/config.rc`, and finally
-`/etc/skarwm/config.rc`. If no file is found, built-in defaults are used.
-Reloading is atomic: an invalid file is reported while the previous
-configuration stays active.
+The configuration search order is `skarwm -c FILE`, `$SKARWM_CONFIG`, the user
+`skarwm/default.conf`, `/etc/skarwm/default.conf`, and transitional legacy
+`config.rc` locations. If no file is found, built-in defaults are used.
+Reloading the complete import graph is atomic: an invalid file is reported
+while the previous configuration stays active.
 
 Start with the documented example:
 
 ```sh
 mkdir -p ~/.config/skarwm
-cp assets/example.rc ~/.config/skarwm/config.rc
+cp -r assets/default.conf assets/config.d ~/.config/skarwm/
 skarwm
 ```
 
-Client corners can be rounded with `corner_radius : N`; `0` keeps them square,
-and fullscreen windows and bars are never clipped. Layout transitions are
-enabled by default (`animations : true`) with a 180 ms
-ease-out-cubic curve at a 60 FPS target. `animation_duration_ms`,
-`animation_fps`, and `animation_easing` (`linear` or `ease_out_cubic`) are
-reloadable; disabling animations applies geometry immediately and schedules no
-frames. See `assets/example.rc` for the complete settings.
+Client corners can be rounded with `[window] corner_radius = N`; `0` keeps them
+square, and fullscreen windows and bars are never clipped. Layout transitions
+are configured under `[animation]`. See `assets/default.conf` and
+`assets/config.d/` for the complete modular configuration. Explicit `.rc`
+files remain supported during migration.
 
 For `startx`, copy `assets/xinitrc.example` to `~/.xinitrc`. Display managers
 can use the installed `skarwm.desktop` entry. 
@@ -189,8 +190,9 @@ Tabbed mode affects only the focused column. Move windows into it with
 `Super+Shift+h/l`, select tabs with `Super+k/j`, and reorder them with
 `Super+Shift+k/j`. Press `Super+t` again to split the group back into columns.
 
-The fully commented [assets/example.rc](assets/example.rc) documents settings,
-bindings, workspace rules, window rules, and autostart commands.
+The modular files under [assets/config.d](assets/config.d) are the current
+examples. The fully commented [assets/example.rc](assets/example.rc) remains as
+a legacy-format reference during migration.
 
 ### Jumping to matching windows
 
