@@ -20,7 +20,7 @@ ipc_start :: proc(state: ^State) -> bool {
     state.IpcFd = fd
     if !ipc_send_request(state, .Subscribe, `["workspace","window","output"]`) ||
        !ipc_request_outputs(state) ||
-       !ipc_request_workspaces(state) {
+       !ipc_request_workspaces(state) || !ipc_request_windows(state) {
         ipc_disconnect(state)
         return false
     }
@@ -46,6 +46,10 @@ ipc_request_workspaces :: proc(state: ^State) -> bool {
 
 ipc_request_outputs :: proc(state: ^State) -> bool {
     return ipc_send_request(state, .Get_Outputs, "")
+}
+
+ipc_request_windows :: proc(state: ^State) -> bool {
+    return ipc_send_request(state, .Get_Windows, "")
 }
 
 ipc_switch_workspace :: proc(state: ^State, output: string, id: int) {
@@ -89,9 +93,14 @@ ipc_handle_frame :: proc(state: ^State, frame: protocol.Ipc_Frame) -> bool {
     case .Get_Workspaces:
         parse_workspace_snapshot(state, frame.payload)
         draw_all_bars(state)
+        refresh_hover_tooltip(state)
+    case .Get_Windows:
+        parse_window_snapshot(state, frame.payload)
+        draw_all_bars(state)
+        refresh_hover_tooltip(state)
     case .Event_Workspace, .Event_Window, .Event_Output:
         if kind == .Event_Output && !ipc_request_outputs(state) { return false }
-        return ipc_request_workspaces(state)
+        return ipc_request_workspaces(state) && ipc_request_windows(state)
     case:
     }
     return true
@@ -182,9 +191,28 @@ clear_workspaces :: proc(state: ^State) {
     for workspace in state.Workspaces {
         if workspace.Name != "" { delete(workspace.Name) }
         if workspace.Output != "" { delete(workspace.Output) }
+        if workspace.Layout != "" { delete(workspace.Layout) }
     }
     delete(state.Workspaces)
     state.Workspaces = make([dynamic]Workspace_State, 0, 16)
+}
+
+clear_windows_state :: proc(state: ^State) {
+    for client in state.WindowsState {
+        if client.Title != "" { delete(client.Title) }
+        if client.Output != "" { delete(client.Output) }
+    }
+    delete(state.WindowsState)
+    state.WindowsState = make([dynamic]Window_State, 0, 16)
+}
+
+clear_workspace_meta :: proc(state: ^State) {
+    for meta in state.WorkspaceMeta {
+        if meta.Icon != "" { delete(meta.Icon) }
+        if meta.Name != "" { delete(meta.Name) }
+    }
+    delete(state.WorkspaceMeta)
+    state.WorkspaceMeta = make([dynamic]Workspace_Meta, 0, 8)
 }
 
 find_json_field :: proc(object: []byte, name: string) -> int {
@@ -247,9 +275,11 @@ parse_workspace_object :: proc(state: ^State, object: []byte) {
     windows, _ := json_int_field(object, "windows")
     name, name_ok := json_string_field(object, "name")
     output, output_ok := json_string_field(object, "output")
-    if !id_ok || !name_ok || !output_ok {
+    layout, layout_ok := json_string_field(object, "layout")
+    if !id_ok || !name_ok || !output_ok || !layout_ok {
         if name != "" { delete(name) }
         if output != "" { delete(output) }
+        if layout != "" { delete(layout) }
         return
     }
     append(&state.Workspaces, Workspace_State{
@@ -257,7 +287,45 @@ parse_workspace_object :: proc(state: ^State, object: []byte) {
         Active = json_bool_field(object, "visible"),
         Occupied = windows > 0,
         Urgent = json_bool_field(object, "urgent"),
+        Layout = layout,
     })
+}
+
+parse_window_object :: proc(state: ^State, object: []byte) {
+    title, title_ok := json_string_field(object, "title")
+    output, output_ok := json_string_field(object, "output")
+    if !title_ok || !output_ok {
+        if title != "" { delete(title) }
+        if output != "" { delete(output) }
+        return
+    }
+    append(&state.WindowsState, Window_State{Title = title, Output = output,
+        Focused = json_bool_field(object, "focused")})
+}
+
+parse_window_snapshot :: proc(state: ^State, payload: []byte) {
+    clear_windows_state(state)
+    depth := 0
+    start := -1
+    in_string := false
+    escaped := false
+    for character, index in payload {
+        if in_string {
+            if escaped { escaped = false; continue }
+            if character == '\\' { escaped = true; continue }
+            if character == '"' { in_string = false }
+            continue
+        }
+        if character == '"' { in_string = true; continue }
+        // GET_WINDOWS wraps clients in {"version":…, "windows":[…]}.
+        // Capture only its direct child objects; nested geometry objects are
+        // part of the same client and must not create separate snapshots.
+        if character == '{' { if depth == 1 { start = index }; depth += 1
+        } else if character == '}' {
+            depth -= 1
+            if depth == 1 && start >= 0 { parse_window_object(state, payload[start:index + 1]); start = -1 }
+        }
+    }
 }
 
 parse_workspace_snapshot :: proc(state: ^State, payload: []byte) {

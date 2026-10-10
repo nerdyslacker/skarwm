@@ -42,11 +42,24 @@ bar_write_block_colours :: proc(builder: ^strings.Builder, block: ^Raw_Bar_Block
 bar_publish_blocks :: proc() {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
-    strings.write_string(&builder, "version=2\n")
+    strings.write_string(&builder, "version=3\n")
     for &block in g_wm.bar_blocks {
         switch block.kind {
         case .Workspaces:
             strings.write_string(&builder, "workspaces\t")
+            strings.write_i64(&builder, i64(block.alignment))
+            bar_write_block_colours(&builder, &block)
+            strings.write_byte(&builder, '\n')
+        case .Workspace_Meta:
+            strings.write_string(&builder, "workspace\t")
+            strings.write_i64(&builder, i64(block.interval_ms))
+            strings.write_byte(&builder, '\t')
+            bar_write_escaped(&builder, block.name)
+            strings.write_byte(&builder, '\t')
+            bar_write_escaped(&builder, block.command)
+            strings.write_byte(&builder, '\n')
+        case .Layout, .Title:
+            strings.write_string(&builder, block.kind == .Layout ? "layout\t" : "title\t")
             strings.write_i64(&builder, i64(block.alignment))
             bar_write_block_colours(&builder, &block)
             strings.write_byte(&builder, '\n')

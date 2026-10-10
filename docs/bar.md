@@ -65,10 +65,22 @@ aligned blocks.
 
 Block order is the order of repeated `bar_block` directives. Alignment may be
 `left`, `center`, or `right`. If there are no `bar_block` directives, the bar
-uses a single left-aligned workspace block.
+shows left-aligned workspace and current-layout blocks plus the focused window
+title in the centre.
+
+The layout block uses Nerd Font glyphs for Scrolling Tile, Vertical Scroller,
+Tabbed, Dwindle, Monocle, and Floating.
+
+The title block fits short titles and caps its width at 240 pixels. Long titles
+are ellipsized;
+hover the title to see the complete text. Hover a layout glyph to see its name.
 
 ```rc
 bar_block : workspaces : left
+workspace-1 : scrolling-tile : 󰈹 : Web
+workspace-2 : dwindle : 󰆍 : Code
+bar_block : layout : left
+bar_block : title : center
 bar_block : button : left : 󰀻 : "rofi -show drun"
 bar_block : script : right : _ : 2 : 1 : "cut -d ' ' -f 1 /proc/loadavg"
 bar_block : network : right : 󰤨
@@ -86,9 +98,10 @@ falls back to `pactl`.
 
 The `network` block reports the first active non-loopback interface name, uses
 `󰤭 off` when disconnected, and opens `nm-connection-editor` on left click.
-Middle click toggles the Wi-Fi radio. The `bluetooth` block reports its
-connection state using its configured icon when connected and `󰂲` when
-disconnected. The icon is followed by `on` or `off`. It opens
+Middle click toggles the Wi-Fi radio. The `bluetooth` block reports adapter
+power using its configured icon when enabled and `󰂲` when disabled. The icon
+is followed by `on` or `off`; hover it to see each connected device and its
+battery percentage when available. It opens
 `blueman-manager` on left click, and middle click toggles Bluetooth power.
 Muted audio replaces its configured icon with `󰝟` and displays `muted`.
 Missing NetworkManager tooling uses the network-off state without blocking the

@@ -73,9 +73,12 @@ call : mod + Control + Alt + r : reminder_show_all
 call : mod + Control + Shift + r : reminder_clear_all
 workspace : mod + 1 : view 1
 workspace : mod + Shift + 1 : tag 1
-workspace_layout : 3 : dwindle
+workspace-3 : dwindle : 󰕮 : Code
 autostart : "xsetroot -solid '#202020'"
 bar_block : workspaces : left
+workspace-1 : scrolling-tile : 󰈹 : Web
+bar_block : layout : left
+bar_block : title : center
 bar_block : systray : right
 bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
 bar_block : network : right : 󰤨
@@ -111,8 +114,9 @@ bar_block : bluetooth : right : 󰂯 : "blueman-manager"
 switches workspace and `workspace tag` sends the focused window. `autostart`
 runs once at startup and is not run again by configuration reloads.
 
-`workspace_layout : ID : LAYOUT` gives that workspace/tag a persistent default
-layout on every output. `tag_layout` is an alias. Supported names are
+`workspace-ID : LAYOUT : ICON [: NAME]` gives that workspace/tag a persistent
+layout on every output and configures its bar icon plus optional hover name.
+`workspace_ID` is accepted as an equivalent spelling. Supported names are
 `scrolling-tile`, `vertical-scrolling-tile`, `dwindle` (`fibonacci` is an
 alias), `monocle`, and `floating`. Matching workspaces are created and updated when the configuration
 loads or reloads, so windows opened later use the declared layout. A manual
@@ -148,7 +152,10 @@ call : mod + F8 : screen_split_grow 15
 ```
 
 `bar_block` directives define the built-in bar's blocks in declaration order.
-Workspace and `systray` blocks take an alignment. Button blocks take an
+Workspace, layout, title, and `systray` blocks take an alignment. A workspace
+declaration uses `workspace-ID : LAYOUT : ICON [: NAME]` (or `workspace_ID`):
+it sets the workspace layout and changes the corresponding workspace cell
+without rendering its own block. Button blocks take an
 alignment, display label, and left-click shell command. Audio, network, and
 Bluetooth blocks take an alignment and label, provide built-in actions, and
 optionally take a final left-click shell command.

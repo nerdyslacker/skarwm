@@ -31,6 +31,8 @@ Bar_Window :: struct {
     Geom: Monitor,
     Hits: [dynamic]Hitbox,
     HoverWorkspace: int,
+    HoverBlock: int,
+    HoverRootX, HoverRootY: i32,
     Canvas: X_Pixmap,
     TextDraw: ^Xft_Draw,
 }
@@ -47,7 +49,16 @@ Workspace_State :: struct {
     Active: bool,
     Occupied: bool,
     Urgent: bool,
+    Layout: string,
 }
+
+Window_State :: struct {
+    Title: string,
+    Output: string,
+    Focused: bool,
+}
+
+Workspace_Meta :: struct { Id: int, Icon, Name: string }
 
 State :: struct {
     Conn: ^x11.Connection,
@@ -66,8 +77,12 @@ State :: struct {
     Visual: ^X_Visual,
     Colormap: X_Colormap,
     NormalFont, BoldFont: ^Xft_Font,
+    TooltipXid: u32,
+    TooltipDraw: ^Xft_Draw,
     Blocks: [dynamic]Block,
     Workspaces: [dynamic]Workspace_State,
+    WindowsState: [dynamic]Window_State,
+    WorkspaceMeta: [dynamic]Workspace_Meta,
     LogicalMonitors: [dynamic]Monitor,
     LogicalMonitorsReady: bool,
     IpcFd: posix.FD,
@@ -227,6 +242,8 @@ connect :: proc(state: ^State) -> bool {
     state.Atoms = make(map[string]u32)
     state.Windows = make([dynamic]Bar_Window, 0, 4)
     state.Workspaces = make([dynamic]Workspace_State, 0, 16)
+    state.WindowsState = make([dynamic]Window_State, 0, 16)
+    state.WorkspaceMeta = make([dynamic]Workspace_Meta, 0, 8)
     state.LogicalMonitors = make([dynamic]Monitor, 0, 4)
     state.IpcFd = -1
 
@@ -246,6 +263,8 @@ shutdown :: proc(state: ^State) {
     destroy_windows(state)
     renderer_shutdown(state)
     clear_workspaces(state)
+    clear_windows_state(state)
+    clear_workspace_meta(state)
     clear_logical_monitors(state)
     if state.Atoms != nil { delete(state.Atoms) }
     if state.Conn != nil { x11.xcb_disconnect(state.Conn) }

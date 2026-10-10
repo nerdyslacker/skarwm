@@ -4,9 +4,12 @@ import x11 "../x11"
 
 import c "core:c"
 import "core:fmt"
+import "core:strings"
 
 BAR_PAD :: i32(6)
 BLOCK_GAP :: i32(4)
+
+ELLIPSIS :: "…"
 
 renderer_init :: proc(state: ^State) {
     state.Display = XOpenDisplay(nil)
@@ -25,6 +28,7 @@ renderer_init :: proc(state: ^State) {
 }
 
 renderer_shutdown :: proc(state: ^State) {
+    tooltip_shutdown(state)
     if state.Display != nil {
         if state.GC != nil { XFreeGC(state.Display, state.GC) }
         if state.BoldFont != nil && state.BoldFont != state.NormalFont {
@@ -36,6 +40,75 @@ renderer_shutdown :: proc(state: ^State) {
     state.GC = nil
     state.Display, state.Visual = nil, nil
     state.NormalFont, state.BoldFont = nil, nil
+}
+
+draw_text_ellipsized :: proc(state: ^State, window: ^Bar_Window, x: i32, label: string, max_width: i32, foreground: u32) {
+    if text_width(state, label) <= max_width { draw_text(state, window, x, label, foreground); return }
+    ellipsis_width := text_width(state, ELLIPSIS)
+    end := 0
+    for end < len(label) {
+        next := end + 1
+        for next < len(label) && (u8(label[next]) & 0xc0) == 0x80 { next += 1 }
+        if text_width(state, label[:next]) + ellipsis_width > max_width { break }
+        end = next
+    }
+    shortened := fmt.aprintf("%s%s", label[:end], ELLIPSIS)
+    defer delete(shortened)
+    draw_text(state, window, x, shortened, foreground)
+}
+
+tooltip_show :: proc(state: ^State, mouse_x, mouse_y: i32, label: string) {
+    if state.Display == nil || label == "" { return }
+    lines := strings.split(label, "\n")
+    defer delete(lines)
+    max_line_width := i32(0)
+    for line in lines { max_line_width = max(max_line_width, text_width(state, line)) }
+    width := min(max(i32(1), max_line_width + 16), max(i32(1), state.RootW - 8))
+    height := max(i32(1), i32(len(lines)) * i32(state.NormalFont.height) + 8)
+    x := clamp(mouse_x - width / 2, i32(4), max(i32(4), state.RootW - width - 4))
+    y := mouse_y - height - 6
+    if y < 0 { y = mouse_y + 16 }
+    if state.TooltipXid == 0 {
+        xid := x11.xcb_generate_id(state.Conn)
+        values := [2]u32{state.Config.Background, 1}
+        cookie := x11.xcb_create_window_checked(state.Conn, 0, xid, state.Root,
+            i16(x), i16(y), u16(width), u16(height), 0, x11.WINDOW_CLASS_INPUT_OUTPUT, 0,
+            x11.CW_BACK_PIXEL | x11.CW_OVERRIDE_REDIRECT, &values[0])
+        if err := x11.xcb_request_check(state.Conn, cookie); err != nil { x11.free_libc(err); return }
+        state.TooltipXid = xid
+        state.TooltipDraw = XftDrawCreate(state.Display, X_Drawable(xid), state.Visual, state.Colormap)
+    } else {
+        values := [4]u32{u32(x), u32(y), u32(width), u32(height)}
+        x11.xcb_configure_window(state.Conn, state.TooltipXid,
+            x11.CW_X | x11.CW_Y | x11.CW_WIDTH | x11.CW_HEIGHT, &values[0])
+    }
+    if state.TooltipDraw == nil { return }
+    // This is a second X connection: commit XCB window lifetime/geometry
+    // before issuing Xlib drawing requests against the tooltip drawable.
+    x11.xcb_flush(state.Conn)
+    fill_rect(state, X_Drawable(state.TooltipXid), 0, 0, width, height, state.Config.Background)
+    colour := xft_colour(state.Config.Foreground)
+    baseline := i32(state.NormalFont.ascent) + 4
+    for line in lines {
+        XftDrawStringUtf8(state.TooltipDraw, &colour, state.NormalFont, 8, baseline,
+            ([^]u8)(raw_data(line)), i32(len(line)))
+        baseline += i32(state.NormalFont.height)
+    }
+    x11.xcb_map_window(state.Conn, state.TooltipXid)
+    stack := x11.STACK_MODE_ABOVE
+    x11.xcb_configure_window(state.Conn, state.TooltipXid, x11.CW_STACK_MODE, &stack)
+    XFlush(state.Display)
+    x11.xcb_flush(state.Conn)
+}
+
+tooltip_hide :: proc(state: ^State) {
+    if state.TooltipXid != 0 { x11.xcb_unmap_window(state.Conn, state.TooltipXid); x11.xcb_flush(state.Conn) }
+}
+
+tooltip_shutdown :: proc(state: ^State) {
+    if state.TooltipDraw != nil { XftDrawDestroy(state.TooltipDraw) }
+    if state.Conn != nil && state.TooltipXid != 0 { x11.xcb_destroy_window(state.Conn, state.TooltipXid) }
+    state.TooltipXid, state.TooltipDraw = 0, nil
 }
 
 font_weight_name :: proc(weight: Bar_Font_Weight) -> string {

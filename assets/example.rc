@@ -94,6 +94,8 @@ bar_block_background : #C5B088
 # Buttons run their command on left click. Examples:
 # bar_block : button : left : 󰀻 : "rofi -show drun"
 bar_block : workspaces : left
+bar_block : layout : left
+bar_block : title : center
 # Use _ as the name to render only the command output. Other names render as
 # "name value" without inserted punctuation, which also works well for icons.
 bar_block : script : center : 󰃭 : 1 : 1 : "date '+%a, %b %d - %H:%M:%S'"
@@ -112,9 +114,10 @@ bar_block : systray : right
 # controls the left region and the signed final field nudges the boundary.
 # virtual_screen : DP-1 : split : 75 : -30
 
-# Give individual workspaces/tags a default layout. `tag_layout` is an alias.
-# workspace_layout : 3 : dwindle
-# workspace_layout : 5 : monocle
+# Give individual workspaces/tags a layout plus bar icon and hover name.
+# workspace-1 : scrolling-tile : 󰈹 : Web
+# workspace-3 : dwindle : 󰆍 : Code
+# workspace-5 : monocle : 󰍹 : Focus
 
 # ---- launching ----------------------------------------------------------------
 

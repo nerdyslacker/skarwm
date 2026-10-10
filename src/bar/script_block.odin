@@ -19,6 +19,7 @@ Script_Block_Data :: struct {
     ClickCommand: [1024]byte,
     ClickCommandLen: int,
     Text: string,
+    HoverText: string,
     Interval, Timeout: time.Duration,
     NextRun, Started: time.Tick,
     Pid: posix.pid_t,
@@ -90,7 +91,7 @@ script_label :: proc(block: ^Block) -> string {
     data := script_data(block)
     if data == nil { return fmt.aprintf("") }
     if block.Kind == .Bluetooth {
-        if data.Text == "connected" { return fmt.aprintf("%s on", data.Name) }
+        if data.Text != "off" && data.Text != "unavailable" { return fmt.aprintf("%s on", data.Name) }
         return fmt.aprintf("%s off", BLUETOOTH_OFF_ICON)
     }
     if block.Kind == .Network && (data.Text == "offline" || data.Text == "unavailable") {
@@ -170,7 +171,7 @@ audio_click :: proc(block: ^Block, state: ^State, window: ^Bar_Window, payload: 
 NETWORK_READ_COMMAND :: `if command -v nmcli >/dev/null 2>&1; then LC_ALL=C nmcli -t -f DEVICE,STATE device status | awk -F: '$2 == "connected" && $1 != "lo" {print $1; found=1; exit} END {if (!found) print "offline"}'; else printf 'unavailable'; fi`
 NETWORK_CLICK_COMMAND :: `command -v nm-connection-editor >/dev/null 2>&1 && exec nm-connection-editor`
 NETWORK_TOGGLE_COMMAND :: `if command -v nmcli >/dev/null 2>&1; then if [ "$(nmcli radio wifi)" = "enabled" ]; then nmcli radio wifi off; else nmcli radio wifi on; fi; fi`
-BLUETOOTH_READ_COMMAND :: `if command -v bluetoothctl >/dev/null 2>&1 && bluetoothctl devices Connected 2>/dev/null | grep -q .; then printf 'connected'; else printf 'disconnected'; fi`
+BLUETOOTH_READ_COMMAND :: `if command -v bluetoothctl >/dev/null 2>&1 && bluetoothctl show 2>/dev/null | grep -q 'Powered: yes'; then printf 'on'; bluetoothctl devices Connected 2>/dev/null | while read -r _ mac name; do battery=$(bluetoothctl info "$mac" 2>/dev/null | sed -n 's/.*Battery Percentage:.*(\([0-9][0-9]*\)).*/\1/p; s/.*Battery Percentage: *\([0-9][0-9]*\)%.*/\1/p'); if [ -n "$battery" ]; then printf '\n%s — %s%%' "$name" "$battery"; else printf '\n%s' "$name"; fi; done; else printf 'off'; fi`
 BLUETOOTH_CLICK_COMMAND :: `command -v blueman-manager >/dev/null 2>&1 && exec blueman-manager`
 BLUETOOTH_TOGGLE_COMMAND :: `if command -v bluetoothctl >/dev/null 2>&1; then if bluetoothctl show 2>/dev/null | grep -q 'Powered: yes'; then bluetoothctl power off; else bluetoothctl power on; fi; fi`
 
@@ -234,6 +235,7 @@ script_destroy :: proc(block: ^Block, state: ^State) {
     script_stop(data)
     if data.Name != "" { delete(data.Name) }
     if data.Text != "" { delete(data.Text) }
+    if data.HoverText != "" { delete(data.HoverText) }
     free(data)
     block.Data = nil
 }
@@ -306,14 +308,32 @@ script_read_output :: proc(data: ^Script_Block_Data) {
     }
 }
 
-script_set_result :: proc(data: ^Script_Block_Data, success: bool) {
+script_set_result :: proc(data: ^Script_Block_Data, success: bool, preserve_lines: bool = false) {
     if data.Text != "" { delete(data.Text) }
+    if data.HoverText != "" { delete(data.HoverText) }
     if !success {
         data.Text = strings.clone(data.TimedOut ? "timeout" : "error")
         return
     }
     bytes := make([]byte, data.OutputLen)
     copy(bytes, data.Output[:data.OutputLen])
+    if preserve_lines {
+        split := 0
+        for split < len(bytes) && bytes[split] != '\n' { split += 1 }
+        data.Text = strings.clone(strings.trim_space(string(bytes[:split])))
+        if split < len(bytes) {
+            detail := make([]byte, len(bytes) - split - 1)
+            copy(detail, bytes[split + 1:])
+            for &byte in detail {
+                if byte == '\r' || byte == '\t' { byte = ' ' }
+                if byte < 0x20 && byte != '\n' { byte = '?' }
+            }
+            data.HoverText = strings.clone(strings.trim_right_space(string(detail)))
+            delete(detail)
+        }
+        delete(bytes)
+        return
+    }
     for &byte in bytes {
         if byte == '\n' || byte == '\r' || byte == '\t' { byte = ' ' }
         if byte < 0x20 { byte = '?' }
@@ -323,7 +343,7 @@ script_set_result :: proc(data: ^Script_Block_Data, success: bool) {
     delete(bytes)
 }
 
-script_service_one :: proc(data: ^Script_Block_Data, now: time.Tick) -> bool {
+script_service_one :: proc(block: ^Block, data: ^Script_Block_Data, now: time.Tick) -> bool {
     if data.Pid <= 0 {
         if time.tick_diff(data.NextRun, now) >= 0 { return script_start(data, now) }
         return false
@@ -345,7 +365,7 @@ script_service_one :: proc(data: ^Script_Block_Data, now: time.Tick) -> bool {
     // A shell command that backgrounds work must not leave that work attached
     // to the bar after the shell itself exits.
     posix.killpg(data.Pid, .SIGKILL)
-    script_set_result(data, success)
+    script_set_result(data, success, block.Kind == .Bluetooth)
     if data.Fd >= 0 { posix.close(data.Fd) }
     data.Fd = -1
     data.Pid = 0
@@ -358,7 +378,7 @@ scripts_service :: proc(state: ^State) {
     changed := false
     for &block in state.Blocks {
         if data := script_data(&block); data != nil {
-            if script_service_one(data, now) { changed = true }
+            if script_service_one(&block, data, now) { changed = true }
         }
     }
     if changed { draw_all_bars(state) }

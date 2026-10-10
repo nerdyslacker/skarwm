@@ -46,6 +46,8 @@ import x11 "../x11"
 //       rule       : <class|instance|title> : <pattern> : <effects…>
 //       autostart  : "<command>"
 //       bar_block  : workspaces : <left|center|right>
+//       bar_block  : layout : <left|center|right>
+//       bar_block  : title : <left|center|right>
 //       bar_block  : systray : <left|center|right>
 //       bar_block  : button : <left|center|right> : <label> : "<command>"
 //       bar_block  : script : <left|center|right> : <name> : <interval seconds> :
@@ -96,7 +98,7 @@ Raw_Rule :: struct {
     decorate_set:       bool,
 }
 
-Bar_Block_Kind :: enum u8 { Workspaces, Script, Systray, Button, Audio, Bluetooth, Network }
+Bar_Block_Kind :: enum u8 { Workspaces, Workspace_Meta, Layout, Title, Script, Systray, Button, Audio, Bluetooth, Network }
 Bar_Block_Alignment :: enum u8 { Left, Center, Right }
 
 // Raw_Bar_Block is owned configuration data. The WM publishes it for the
@@ -723,8 +725,10 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
             }
         }
     } else {
-        r.bar_blocks = make([dynamic]Raw_Bar_Block, 0, 1)
+        r.bar_blocks = make([dynamic]Raw_Bar_Block, 0, 3)
         append(&r.bar_blocks, Raw_Bar_Block{kind = .Workspaces, alignment = .Left})
+        append(&r.bar_blocks, Raw_Bar_Block{kind = .Layout, alignment = .Left})
+        append(&r.bar_blocks, Raw_Bar_Block{kind = .Title, alignment = .Center})
     }
     r.virtual_screens = make([dynamic]Virtual_Screen_Profile, len(sc.virtual_screens))
     for profile, i in sc.virtual_screens {
@@ -1078,7 +1082,7 @@ parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string)
     }
 
     switch kind {
-    case "workspaces", "systray":
+    case "workspaces", "layout", "title", "systray":
         alignment_text := remaining
         colour_text := ""
         if parsed_alignment, has_more := next_directive_field(&remaining); has_more {
@@ -1101,6 +1105,8 @@ parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string)
             }
         }
         block_kind := Bar_Block_Kind.Workspaces
+        if kind == "layout" { block_kind = .Layout }
+        if kind == "title" { block_kind = .Title }
         if kind == "systray" { block_kind = .Systray }
         append(&sc.bar_blocks, Raw_Bar_Block{
             kind = block_kind, alignment = alignment,
@@ -1302,13 +1308,55 @@ parse_workspace_layout :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]
     return true
 }
 
-// parse_directive handles bind/call/workspace/rule/autostart/bar_block,
-// virtual_screen, workspace_layout, and mousebind lines.
-parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]string) -> bool {
-    switch key {
-    case "workspace_layout", "tag_layout":
-        return parse_workspace_layout(sc, rest, errs)
+parse_workspace_declaration :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string) -> bool {
+    fields := strings.split(rest, ":")
+    defer delete(fields)
+    if len(fields) < 3 || len(fields) > 4 {
+        append(errs, fmt.aprintf("workspace: expected ID : layout : icon [: name], got %q", rest))
+        return false
+    }
+    id_text := strings.trim_space(fields[0])
+    layout_text := strings.trim_space(fields[1])
+    icon := quoted_trim(fields[2])
+    name := ""
+    if len(fields) == 4 { name = quoted_trim(fields[3]) }
+    id, id_ok := parse_i32_value(id_text)
+    if !id_ok || id < 1 || id > 64 || icon == "" || len(icon) > 64 || len(name) > 128 {
+        append(errs, fmt.aprintf("workspace: invalid ID, icon, or name in %q", rest))
+        return false
+    }
+    for block in sc.bar_blocks {
+        if block.kind == .Workspace_Meta && block.interval_ms == id {
+            append(errs, fmt.aprintf("workspace: duplicate declaration for %d", id))
+            return false
+        }
+    }
+    layout_rule := fmt.aprintf("%s : %s", id_text, layout_text)
+    defer delete(layout_rule)
+    if !parse_workspace_layout(sc, layout_rule, errs) { return false }
+    append(&sc.bar_blocks, Raw_Bar_Block{kind = .Workspace_Meta,
+        name = strings.clone(icon), command = strings.clone(name), interval_ms = id})
+    sc.bar_blocks_set = true
+    return true
+}
 
+// parse_directive handles bind/call/workspace/rule/autostart/bar_block,
+// virtual_screen, workspace-N metadata, and mousebind lines.
+parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]string) -> bool {
+    prefix_len := 0
+    if len(key) > len("workspace-") && key[:len("workspace-")] == "workspace-" {
+        prefix_len = len("workspace-")
+    } else if len(key) > len("workspace_") && key[:len("workspace_")] == "workspace_" {
+        prefix_len = len("workspace_")
+    }
+    if prefix_len > 0 {
+        id, ok := parse_i32_value(key[prefix_len:])
+        if !ok { append(errs, fmt.aprintf("%s: invalid workspace ID", key)); return false }
+        declaration := fmt.aprintf("%d : %s", id, rest)
+        defer delete(declaration)
+        return parse_workspace_declaration(sc, declaration, errs)
+    }
+    switch key {
     case "virtual_screen":
         return parse_virtual_screen(sc, rest, errs)
 
@@ -1528,8 +1576,13 @@ scan_rc :: proc(sc: ^Load_Scratch, data: []byte, errs: ^[dynamic]string) -> bool
         key := strings.trim_space(line[:colon])
         rest := strings.trim_space(line[colon + 1:])
 
+        if len(key) > len("workspace-") && key[:len("workspace-")] == "workspace-" ||
+           len(key) > len("workspace_") && key[:len("workspace_")] == "workspace_" {
+            if !parse_directive(sc, key, rest, errs) { ok = false }
+            continue
+        }
         switch key {
-        case "bind", "call", "workspace", "workspace_layout", "tag_layout",
+        case "bind", "call", "workspace",
              "rule", "autostart", "bar_block", "virtual_screen", "mousebind":
             if !parse_directive(sc, key, rest, errs) { ok = false }
         case:

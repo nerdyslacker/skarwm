@@ -7,7 +7,7 @@ import "core:strconv"
 import "core:strings"
 
 Block_Alignment :: enum u8 { Left, Center, Right }
-Block_Kind :: enum u8 { Workspaces, Script, Systray, Button, Audio, Bluetooth, Network }
+Block_Kind :: enum u8 { Workspaces, Workspace_Meta, Layout, Title, Script, Systray, Button, Audio, Bluetooth, Network }
 
 Block_Measure_Proc :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32
 Block_Draw_Proc :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, block_index: int)
@@ -37,10 +37,46 @@ Hitbox :: struct {
     Payload: int,
 }
 
+// Keep the title visually comparable to the example clock block while still
+// leaving enough room for a useful prefix before ellipsizing.
+TITLE_BLOCK_WIDTH :: i32(240)
+TITLE_BLOCK_TEXT_WIDTH :: TITLE_BLOCK_WIDTH - 16
+
 blocks_init :: proc(state: ^State) {
     state.Blocks = make([dynamic]Block, 0, 4)
     if state.Config.Managed && blocks_read_managed(state) { return }
     append_workspace_block(state, .Left)
+    append_layout_block(state, .Left)
+    append_title_block(state, .Center)
+}
+
+append_indicator_block :: proc(state: ^State, kind: Block_Kind, alignment: Block_Alignment,
+    foreground: u32 = 0, background: u32 = 0, foreground_set: bool = false, background_set: bool = false) {
+    append(&state.Blocks, Block{
+        Kind = kind, Alignment = alignment,
+        Ops = Block_Ops{Measure = indicator_measure, Draw = indicator_draw,
+            Click = kind == .Layout ? layout_click : nil},
+        Foreground = foreground, Background = background,
+        ForegroundSet = foreground_set, BackgroundSet = background_set,
+    })
+}
+
+layout_click :: proc(block: ^Block, state: ^State, window: ^Bar_Window, payload: int, button: u8) {
+    _ = block
+    _ = window
+    _ = payload
+    if button != 1 { return }
+    if !ipc_send_request(state, .Command, "layout next") { ipc_disconnect(state) }
+}
+
+append_layout_block :: proc(state: ^State, alignment: Block_Alignment,
+    foreground: u32 = 0, background: u32 = 0, foreground_set: bool = false, background_set: bool = false) {
+    append_indicator_block(state, .Layout, alignment, foreground, background, foreground_set, background_set)
+}
+
+append_title_block :: proc(state: ^State, alignment: Block_Alignment,
+    foreground: u32 = 0, background: u32 = 0, foreground_set: bool = false, background_set: bool = false) {
+    append_indicator_block(state, .Title, alignment, foreground, background, foreground_set, background_set)
 }
 
 block_foreground :: proc(block: ^Block, state: ^State) -> u32 {
@@ -131,30 +167,41 @@ parse_managed_colours :: proc(fields: []string, start: int) -> (
 }
 
 blocks_read_managed :: proc(state: ^State) -> bool {
+    clear_workspace_meta(state)
     payload, ok := x11.get_text(state.Conn, state.Root, atom(state, BAR_BLOCKS_ATOM))
     if !ok { return false }
     defer delete(payload)
     lines := strings.split(payload, "\n")
     defer delete(lines)
-    if len(lines) == 0 || (lines[0] != "version=1" && lines[0] != "version=2") { return false }
-    version_two := lines[0] == "version=2"
+    if len(lines) == 0 || (lines[0] != "version=1" && lines[0] != "version=2" && lines[0] != "version=3") { return false }
+    version_two := lines[0] == "version=2" || lines[0] == "version=3"
 
     parsed_any := false
     for line in lines[1:] {
         if line == "" { continue }
         fields := split_block_fields(line)
-        if !version_two && len(fields) == 2 && fields[0] == "workspaces" {
+        if version_two && len(fields) == 4 && fields[0] == "workspace" {
+            id, id_ok := strconv.parse_i64(fields[1], 10)
+            if id_ok && id >= 1 && id <= 64 && fields[2] != "" && len(fields[2]) <= 64 && len(fields[3]) <= 128 {
+                append(&state.WorkspaceMeta, Workspace_Meta{Id = int(id), Icon = strings.clone(fields[2]), Name = strings.clone(fields[3])})
+            }
+        } else if !version_two && len(fields) == 2 && fields[0] == "workspaces" {
             if alignment, valid := parse_block_alignment(fields[1]); valid {
                 append_workspace_block(state, alignment)
                 parsed_any = true
             }
-        } else if version_two && len(fields) == 6 && fields[0] == "workspaces" {
+        } else if version_two && len(fields) == 6 && (fields[0] == "workspaces" || fields[0] == "layout" || fields[0] == "title") {
             alignment, alignment_ok := parse_block_alignment(fields[1])
             foreground, background, foreground_set, background_set, colours_ok :=
                 parse_managed_colours(fields[:], 2)
             if alignment_ok && colours_ok {
-                append_workspace_block(state, alignment, foreground, background,
-                    foreground_set, background_set)
+                if fields[0] == "workspaces" {
+                    append_workspace_block(state, alignment, foreground, background, foreground_set, background_set)
+                } else if fields[0] == "layout" {
+                    append_layout_block(state, alignment, foreground, background, foreground_set, background_set)
+                } else {
+                    append_title_block(state, alignment, foreground, background, foreground_set, background_set)
+                }
                 parsed_any = true
             }
         } else if !version_two && len(fields) == 6 && fields[0] == "script" {
@@ -244,7 +291,11 @@ blocks_read_managed :: proc(state: ^State) -> bool {
 blocks_reload :: proc(state: ^State) {
     blocks_destroy(state)
     state.Blocks = make([dynamic]Block, 0, 4)
-    if !blocks_read_managed(state) { append_workspace_block(state, .Left) }
+    if !blocks_read_managed(state) {
+        append_workspace_block(state, .Left)
+        append_layout_block(state, .Left)
+        append_title_block(state, .Center)
+    }
     tray_update_owner(state)
     draw_all_bars(state)
 }
@@ -264,7 +315,20 @@ workspace_for_slot :: proc(state: ^State, window: ^Bar_Window, id: int) -> ^Work
     return nil
 }
 
-workspace_label :: proc(id: int, ws: ^Workspace_State) -> string {
+workspace_meta_for_id :: proc(state: ^State, id: int) -> ^Workspace_Meta {
+    for &meta in state.WorkspaceMeta { if meta.Id == id { return &meta } }
+    return nil
+}
+
+workspace_hover_text :: proc(state: ^State, id: int) -> string {
+    if meta := workspace_meta_for_id(state, id); meta != nil && meta.Name != "" {
+        return fmt.aprintf("%s", meta.Name)
+    }
+    return fmt.aprintf("")
+}
+
+workspace_label :: proc(state: ^State, id: int, ws: ^Workspace_State) -> string {
+    if meta := workspace_meta_for_id(state, id); meta != nil { return fmt.aprintf("%s", meta.Icon) }
     if ws == nil { return fmt.aprintf("%d", id) }
     if ws.Urgent { return fmt.aprintf("%s!", ws.Name) }
     return fmt.aprintf("%s", ws.Name)
@@ -286,7 +350,7 @@ workspace_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> 
     _ = block
     width := i32(0)
     for id := 1; id <= int(state.Config.WorkspaceCount); id += 1 {
-        label := workspace_label(id, workspace_for_slot(state, window, id))
+        label := workspace_label(state, id, workspace_for_slot(state, window, id))
         ws := workspace_for_slot(state, window, id)
         width += workspace_width(state, label, ws != nil && ws.Occupied)
         delete(label)
@@ -300,7 +364,7 @@ workspace_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, start_
     base_foreground := block_foreground(block, state)
     for id := 1; id <= int(state.Config.WorkspaceCount); id += 1 {
         ws := workspace_for_slot(state, window, id)
-        label := workspace_label(id, ws)
+        label := workspace_label(state, id, ws)
         occupied := ws != nil && ws.Occupied
         width := workspace_width(state, label, occupied)
         background := block.BackgroundSet ? base_background : state.Config.WorkspaceBackground
@@ -321,7 +385,7 @@ workspace_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, start_
             )
         }
         fill_rect(state, X_Drawable(window.Canvas), x, 0, width, window.Geom.H, background)
-        draw_text(state, window, x + 10, label, foreground, occupied)
+        draw_text_centered(state, window, x, 0, width, window.Geom.H, label, foreground, occupied)
         if occupied {
             fill_rect(
                 state, X_Drawable(window.Canvas), x + 6, window.Geom.H - 2,
@@ -353,4 +417,85 @@ workspace_click :: proc(block: ^Block, state: ^State, window: ^Bar_Window, works
     if button != 1 && button != 4 && button != 5 { return }
     if target < 1 || target > int(state.Config.WorkspaceCount) { return }
     ipc_switch_workspace(state, window.Output, target)
+}
+
+indicator_label :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> string {
+    if block.Kind == .Layout {
+        for ws in state.Workspaces {
+            if ws.Output == window.Output && ws.Active { return layout_glyph(ws.Layout) }
+        }
+    } else if block.Kind == .Title {
+        for client in state.WindowsState {
+            if client.Focused && client.Output == window.Output { return fmt.aprintf("%s", client.Title) }
+        }
+    }
+    return fmt.aprintf("")
+}
+
+indicator_hover_text :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> string {
+    if block.Kind == .Layout {
+        for ws in state.Workspaces {
+            if ws.Output == window.Output && ws.Active { return layout_name(ws.Layout) }
+        }
+    } else if block.Kind == .Title {
+        for client in state.WindowsState {
+            if client.Focused && client.Output == window.Output &&
+               text_width(state, client.Title) > TITLE_BLOCK_TEXT_WIDTH {
+                return fmt.aprintf("%s", client.Title)
+            }
+        }
+    }
+    return fmt.aprintf("")
+}
+
+layout_name :: proc(layout: string) -> string {
+    switch layout {
+    case "scrolling-tile":          return fmt.aprintf("Scrolling Tile")
+    case "vertical-scrolling-tile": return fmt.aprintf("Vertical Scroller")
+    case "tabbed":                  return fmt.aprintf("Tabbed")
+    case "dwindle":                 return fmt.aprintf("Dwindle")
+    case "monocle":                 return fmt.aprintf("Monocle")
+    case "floating":                return fmt.aprintf("Floating")
+    }
+    return fmt.aprintf("%s", layout)
+}
+
+layout_glyph :: proc(layout: string) -> string {
+    switch layout {
+    case "scrolling-tile":          return fmt.aprintf("󰙀")
+    case "vertical-scrolling-tile": return fmt.aprintf("󱥣")
+    case "tabbed":                  return fmt.aprintf("󰓩")
+    case "dwindle":                 return fmt.aprintf("󰕮")
+    case "monocle":                 return fmt.aprintf("󰍹")
+    case "floating":                return fmt.aprintf("󰕰")
+    }
+    return fmt.aprintf("%s", layout)
+}
+
+indicator_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32 {
+    label := indicator_label(block, state, window)
+    defer delete(label)
+    if label == "" { return 0 }
+    if block.Kind == .Title { return min(TITLE_BLOCK_WIDTH, text_width(state, label) + 16) }
+    return text_width(state, label[:min(len(label), SCRIPT_VISIBLE_MAX)]) + 16
+}
+
+indicator_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, block_index: int) {
+    _ = block_index
+    label := indicator_label(block, state, window)
+    defer delete(label)
+    if label == "" { return }
+    width := block.Kind == .Title ? min(TITLE_BLOCK_WIDTH, text_width(state, label) + 16) : text_width(state, label[:min(len(label), SCRIPT_VISIBLE_MAX)]) + 16
+    wrapper_y := min(i32(3), max(i32(0), window.Geom.H / 4))
+    fill_rect(state, X_Drawable(window.Canvas), x, wrapper_y, width, window.Geom.H - wrapper_y * 2, block_background(block, state))
+    if block.Kind == .Layout {
+        draw_text_centered(state, window, x, wrapper_y, width, window.Geom.H - wrapper_y * 2,
+            label, block_foreground(block, state))
+    } else if block.Kind == .Title && label != "" {
+        draw_text_ellipsized(state, window, x + 8, label, TITLE_BLOCK_TEXT_WIDTH, block_foreground(block, state))
+    } else if label != "" {
+        visible := label[:min(len(label), SCRIPT_VISIBLE_MAX)]
+        draw_text(state, window, x + 8, visible, block_foreground(block, state))
+    }
+    append(&window.Hits, Hitbox{X = x, Y = 0, W = width, H = window.Geom.H, BlockIndex = block_index})
 }

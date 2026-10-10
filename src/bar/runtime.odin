@@ -117,15 +117,50 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
             window.HoverWorkspace = hovered
             draw_bar(state, window)
         }
+        window.HoverBlock = -1
+        if hit, ok := hit_at(window, i32(motion.event_x), i32(motion.event_y)); ok {
+            window.HoverBlock = hit.BlockIndex
+        }
+        window.HoverRootX, window.HoverRootY = i32(motion.root_x), i32(motion.root_y)
+        refresh_hover_tooltip(state)
     case u8(x11.EVENT_LEAVE_NOTIFY):
+        tooltip_hide(state)
         leave := (^x11.Enter_Notify_Event)(event)
-        if window := window_by_xid(state, leave.event); window != nil && window.HoverWorkspace != 0 {
-            window.HoverWorkspace = 0
-            draw_bar(state, window)
+        if window := window_by_xid(state, leave.event); window != nil {
+            window.HoverBlock = -1
+            if window.HoverWorkspace != 0 {
+                window.HoverWorkspace = 0
+                draw_bar(state, window)
+            }
         }
     case:
     }
     return true
+}
+
+refresh_hover_tooltip :: proc(state: ^State) {
+    tooltip_hide(state)
+    for &window in state.Windows {
+        if window.HoverBlock < 0 || window.HoverBlock >= len(state.Blocks) { continue }
+        block := &state.Blocks[window.HoverBlock]
+        if block.Kind == .Layout || block.Kind == .Title {
+            label := indicator_hover_text(block, state, &window)
+            defer delete(label)
+            if label != "" { tooltip_show(state, window.HoverRootX, window.HoverRootY, label) }
+        } else if block.Kind == .Workspaces {
+            hit, ok := hit_at(&window, window.HoverRootX - window.Geom.X, window.HoverRootY - window.Geom.Y)
+            if ok {
+                label := workspace_hover_text(state, hit.Payload)
+                defer delete(label)
+                if label != "" { tooltip_show(state, window.HoverRootX, window.HoverRootY, label) }
+            }
+        } else if block.Kind == .Bluetooth {
+            if data := script_data(block); data != nil && data.HoverText != "" {
+                tooltip_show(state, window.HoverRootX, window.HoverRootY, data.HoverText)
+            }
+        }
+        return
+    }
 }
 
 run_event_loop :: proc(state: ^State) {
