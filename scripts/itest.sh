@@ -43,7 +43,7 @@ export XDG_CONFIG_HOME="$XDGC"
 # The resolver intentionally falls back to ~/.config when XDG_CONFIG_HOME has
 # no file. A deliberately absent explicit path stops that fallback and selects
 # built-in defaults; tests that pass `-c FILE` still take precedence.
-export SKARWM_CONFIG="$XDGC/no-config.rc"
+export SKARWM_CONFIG="$XDGC/missing-skarwm.rc"
 PICOM_PID=""
 
 say() { printf '%s\n' "$*"; }
@@ -149,6 +149,23 @@ Xvnc "$DISP" -geometry 1280x800 -depth 24 -localhost -SecurityTypes None >/tmp/x
 sleep 1.2
 export DISPLAY="$DISP"
 xwininfo -root >/dev/null 2>&1 || die_display
+
+# The shipped example must load from the default skarwm.rc discovery path.
+mkdir -p "$XDGC/skarwm"
+cp assets/example.rc "$XDGC/skarwm/skarwm.rc"
+rm -f "$WM_LOG"
+env -u SKARWM_CONFIG TERMINAL=xterm SKARWM_BAR=/bin/true ./build/skarwm >"$WM_LOG" 2>&1 &
+example_wm_pid=$!
+for _ in $(seq 1 30); do ./build/skarwm-msg get-windows >/dev/null 2>&1 && break; sleep 0.1; done
+if grep -q "config applied: load from $XDGC/skarwm/skarwm.rc" "$WM_LOG"; then
+  pass "example configuration loads from skarwm.rc"
+else
+  fail "skarwm.rc example discovery/load"
+fi
+kill "$example_wm_pid" 2>/dev/null || true
+wait "$example_wm_pid" 2>/dev/null || true
+rm -f "$SKARWM_SOCKET"
+rm -rf "$XDGC"
 
 rm -f "$WM_LOG"
 TERMINAL=xterm nohup ./build/skarwm >"$WM_LOG" 2>&1 &
@@ -558,6 +575,7 @@ say "== rc config: load / reload / keep-previous-on-error =="
 rm -rf "$XDGC"; mkdir -p "$XDGC"
 RC=/tmp/skarwm_itest.rc
 cat > "$RC" <<'RC'
+; workspace number : workspace layout : workspace icon : workspace name
 mod_key : super
 inner_gap : 8
 outer_gap : 8

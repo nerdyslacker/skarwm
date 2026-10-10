@@ -4,7 +4,7 @@
 external docks and desktop shells continue to work without any built-in bar
 process or reserved space.
 
-Enable the managed bar in `config.rc`:
+Enable the managed bar in `skarwm.rc`:
 
 ```rc
 bar_enabled : true

@@ -129,8 +129,8 @@ bindings, scrolling, workspaces, scratchpads, visuals, and X11 integration.
 ## Configuration
 
 The configuration search order is `skarwm -c FILE`, `$SKARWM_CONFIG`,
-`$XDG_CONFIG_HOME/skarwm/config.rc`, `~/.config/skarwm/config.rc`, and finally
-`/etc/skarwm/config.rc`. If no file is found, built-in defaults are used.
+`$XDG_CONFIG_HOME/skarwm/skarwm.rc`, `~/.config/skarwm/skarwm.rc`, and finally
+`/etc/skarwm/skarwm.rc`. If no file is found, built-in defaults are used.
 Reloading is atomic: an invalid file is reported while the previous
 configuration stays active.
 
@@ -138,7 +138,7 @@ Start with the documented example:
 
 ```sh
 mkdir -p ~/.config/skarwm
-cp assets/example.rc ~/.config/skarwm/config.rc
+cp assets/example.rc ~/.config/skarwm/skarwm.rc
 skarwm
 ```
 

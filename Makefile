@@ -55,7 +55,7 @@ install: build/skarwm build/skarwm-msg build/skarwm-bar
 	install -Dm755 build/skarwm-bar $(DESTDIR)$(BINDIR)/skarwm-bar
 	install -Dm755 assets/skarwm-session $(DESTDIR)$(BINDIR)/skarwm-session
 	install -Dm644 assets/skarwm.desktop $(DESTDIR)$(SESSIONDIR)/skarwm.desktop
-	install -Dm644 assets/example.rc $(DESTDIR)$(SKARWMDIR)/config.rc
+	install -Dm644 assets/example.rc $(DESTDIR)$(SKARWMDIR)/skarwm.rc
 
 test: build/skarwm build/skarwm-msg build/skarwm-bar
 	odin run tests/core_tests
@@ -69,7 +69,7 @@ xephyr-multi: build/skarwm build/skarwm-msg
 	SKARWM_XEPHYR_DISPLAY="$(XEPHYR_DISPLAY)" scripts/xephyr.sh multi
 
 xephyr-anush: build/skarwm build/skarwm-msg
-	SKARWM_XEPHYR_DISPLAY="$(XEPHYR_DISPLAY)" scripts/xephyr.sh single -c "$(HOME)/.config/skarwm/config.rc"
+	SKARWM_XEPHYR_DISPLAY="$(XEPHYR_DISPLAY)" scripts/xephyr.sh single -c "$(HOME)/.config/skarwm/skarwm.rc"
 
 itest-decoration: build/skarwm build/skarwm-msg
 	bash scripts/itest-decoration.sh

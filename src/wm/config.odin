@@ -1791,8 +1791,8 @@ join_exists :: proc(base, tail: string) -> string {
 }
 
 // cfg_discover_path resolves the config file: -c FILE wins, followed by
-// $SKARWM_CONFIG, $XDG_CONFIG_HOME/skarwm/config.rc,
-// ~/.config/skarwm/config.rc, and finally /etc/skarwm/config.rc.
+// $SKARWM_CONFIG, $XDG_CONFIG_HOME/skarwm/skarwm.rc,
+// ~/.config/skarwm/skarwm.rc, and finally /etc/skarwm/skarwm.rc.
 // Returns "" when no file exists.
 cfg_discover_path :: proc() -> string {
     if g_cfg_flag != "" {
@@ -1812,14 +1812,14 @@ cfg_discover_path :: proc() -> string {
     }
     xb: [1024]byte
     if xdg := os.get_env_buf(xb[:], "XDG_CONFIG_HOME"); xdg != "" {
-        if p := join_exists(xdg, "skarwm/config.rc"); p != "" { return p }
+        if p := join_exists(xdg, "skarwm/skarwm.rc"); p != "" { return p }
     }
     hb: [1024]byte
     if home := os.get_env_buf(hb[:], "HOME"); home != "" {
-        if p := join_exists(home, ".config/skarwm/config.rc"); p != "" { return p }
+        if p := join_exists(home, ".config/skarwm/skarwm.rc"); p != "" { return p }
     }
-    if os.exists("/etc/skarwm/config.rc") {
-        return strings.clone("/etc/skarwm/config.rc")
+    if os.exists("/etc/skarwm/skarwm.rc") {
+        return strings.clone("/etc/skarwm/skarwm.rc")
     }
     return ""
 }
