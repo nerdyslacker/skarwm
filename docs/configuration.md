@@ -74,7 +74,7 @@ a single `skarwm.rc` continues to work as before.
 | `bar_font_weight : normal` | Default text weight: `normal`, `medium`, or `bold`. |
 | `bar_foreground : #E6E6E6` | Built-in bar text colour. |
 | `bar_background : #1E1E2E` | Built-in bar background colour. |
-| `bar_tag_count : 8` | Fixed workspace slots shown on every monitor, `1..64`. |
+| `bar_tag_count : 8` | Fixed workspace slots shown by the built-in bar and exported to EWMH pagers on every monitor, `1..64`. |
 | `bar_tag_foreground : #262626` | Workspace-slot text colour. |
 | `bar_tag_background : #5F87AF` | Workspace-slot wrapper colour. |
 | `bar_block_foreground : #262626` | Script/status block text colour. |
@@ -145,6 +145,19 @@ layout on every output and configures its bar icon plus optional hover name.
 alias), `monocle`, and `floating`. Matching workspaces are created and updated when the configuration
 loads or reloads, so windows opened later use the declared layout. A manual
 layout selection may override it until the next reload.
+
+The older layout-only directives remain available so existing configurations
+continue to load:
+
+```rc
+workspace_layout : 3 : dwindle
+# Equivalent deprecated spelling:
+tag_layout : 4 : monocle
+```
+
+Both `workspace_layout` and `tag_layout` are deprecated and will be removed in
+a future release. Use `workspace-ID : LAYOUT : ICON [: NAME]` for new
+configurations.
 
 Workspace-wide layout actions are `layout_scrolling_tile`,
 `layout_vertical_scroller`, `layout_dwindle`

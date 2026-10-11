@@ -1353,8 +1353,14 @@ parse_workspace_declaration :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dyn
 }
 
 // parse_directive handles bind/call/workspace/rule/autostart/bar_block,
-// virtual_screen, workspace-N metadata, and mousebind lines.
+// virtual_screen, workspace-N metadata, deprecated per-workspace layout
+// directives, and mousebind lines.
 parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]string) -> bool {
+    // Keep these compatibility names ahead of the workspace_ID prefix parser.
+    if key == "workspace_layout" || key == "tag_layout" {
+        return parse_workspace_layout(sc, rest, errs)
+    }
+
     prefix_len := 0
     if len(key) > len("workspace-") && key[:len("workspace-")] == "workspace-" {
         prefix_len = len("workspace-")
@@ -1595,6 +1601,10 @@ scan_rc :: proc(
         key := strings.trim_space(line[:colon])
         rest := strings.trim_space(line[colon + 1:])
 
+        if key == "workspace_layout" || key == "tag_layout" {
+            if !parse_directive(sc, key, rest, errs) { ok = false }
+            continue
+        }
         if len(key) > len("workspace-") && key[:len("workspace-")] == "workspace-" ||
            len(key) > len("workspace_") && key[:len("workspace_")] == "workspace_" {
             if !parse_directive(sc, key, rest, errs) { ok = false }

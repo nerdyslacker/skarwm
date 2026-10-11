@@ -749,6 +749,15 @@ wait_xp() { local want="$1"; shift; local i=0; while [ "$i" -lt 30 ]; do
   [ "$(xp_val "$@")" = "$want" ] && return 0; sleep 0.3; i=$((i+1)); done; return 1; }
 wait_xp_hex() { local want="$1"; shift; local i=0; while [ "$i" -lt 30 ]; do
   [ "$(xp_hex "$@")" = "$want" ] && return 0; sleep 0.3; i=$((i+1)); done; return 1; }
+repeat_quad() {
+  local quad="$1" count="$2" out="" i=0
+  while [ "$i" -lt "$count" ]; do
+    [ -n "$out" ] && out="$out, "
+    out="$out$quad"
+    i=$((i+1))
+  done
+  printf '%s\n' "$out"
+}
 
 ew="$rcwin" # configuration-test window: 1232x752+24+24 on workspace 1, focused
 
@@ -772,12 +781,29 @@ fi
 sup=$(xprop -root _NET_SUPPORTED 2>/dev/null)
 if [ -n "$sup" ] && echo "$sup" | grep -q _NET_CLIENT_LIST \
    && echo "$sup" | grep -q _NET_ACTIVE_WINDOW \
+   && echo "$sup" | grep -q _NET_DESKTOP_NAMES \
+   && echo "$sup" | grep -q _NET_DESKTOP_VIEWPORT \
    && echo "$sup" | grep -q _NET_WM_STATE_FULLSCREEN \
    && echo "$sup" | grep -q _NET_WM_STATE_MAXIMIZED_VERT \
    && echo "$sup" | grep -q _NET_WM_STATE_MAXIMIZED_HORZ; then
   pass "ewmh: _NET_SUPPORTED claims the implemented subset"
 else
   fail "ewmh: _NET_SUPPORTED subset"
+fi
+if wait_xp '"1", "2", "3", "4", "5", "6", "7", "8"' -root _NET_DESKTOP_NAMES; then
+  pass "ewmh: fixed numeric desktop names for external pagers"
+else
+  fail "ewmh: _NET_DESKTOP_NAMES ($(xp_val -root _NET_DESKTOP_NAMES))"
+fi
+if wait_xp "1280, 800" -root _NET_DESKTOP_GEOMETRY; then
+  pass "ewmh: desktop geometry matches the X root"
+else
+  fail "ewmh: _NET_DESKTOP_GEOMETRY ($(xp_val -root _NET_DESKTOP_GEOMETRY))"
+fi
+if wait_xp "$(repeat_quad '0, 0' 8)" -root _NET_DESKTOP_VIEWPORT; then
+  pass "ewmh: desktop viewports expose monitor pinning data"
+else
+  fail "ewmh: _NET_DESKTOP_VIEWPORT ($(xp_val -root _NET_DESKTOP_VIEWPORT))"
 fi
 
 # managed clients carry _NET_WM_DESKTOP and ICCCM WM_STATE Normal
@@ -810,8 +836,8 @@ if wait_xp "1" -root _NET_CURRENT_DESKTOP; then
 else
   fail "ewmh: _NET_CURRENT_DESKTOP after switch ($(xp_val -root _NET_CURRENT_DESKTOP))"
 fi
-if wait_xp "2" -root _NET_NUMBER_OF_DESKTOPS; then
-  pass "ewmh: _NET_NUMBER_OF_DESKTOPS grows with the workspace list"
+if wait_xp "8" -root _NET_NUMBER_OF_DESKTOPS; then
+  pass "ewmh: _NET_NUMBER_OF_DESKTOPS exposes every configured workspace slot"
 else
   fail "ewmh: _NET_NUMBER_OF_DESKTOPS ($(xp_val -root _NET_NUMBER_OF_DESKTOPS))"
 fi
@@ -882,6 +908,16 @@ if command -v wmctrl >/dev/null 2>&1; then
   else
     fail "ewmh: wmctrl fullscreen remove"
   fi
+  wmctrl -i -r "$ew" -t 2
+  if wait_xp "2" -id "$ew" _NET_WM_DESKTOP && wait_hidden_x "$ew"; then
+    pass "ewmh: _NET_WM_DESKTOP message moves a client from a pager"
+  else
+    fail "ewmh: pager client move ($(xp_val -id "$ew" _NET_WM_DESKTOP))"
+  fi
+  wmctrl -i -r "$ew" -t 0
+  if ! wait_xp "0" -id "$ew" _NET_WM_DESKTOP; then
+    fail "ewmh: pager client move restore"
+  fi
   wmctrl -s 1
   if wait_xp "1" -root _NET_CURRENT_DESKTOP; then
     pass "ewmh: _NET_CURRENT_DESKTOP message (wmctrl) switches workspace"
@@ -912,7 +948,7 @@ fi
 # shrinks the tiling work area live. Work-area numbers below assume the built-in
 # defaults (outer 8 / border 2): baseline client 1260x780+10+10; a 24 px top
 # strut pushes it to 1260x756+10+34; a 48 px strut to 1260x732+10+58; the root
-# _NET_WORKAREA is "8, 32, 1264, 760" repeated per desktop.
+# _NET_WORKAREA is "8, 32, 1264, 760" repeated for all eight desktop slots.
 say "== 13. docks and struts =="
 pkill -x skarwm; pkill -x xterm; sleep 0.7
 rm -f "$WM_LOG"
@@ -1003,8 +1039,8 @@ if ! wait_focus "$(printf '%d' "$xt")"; then
 fi
 
 # workarea root property mirrors the current work rect (one desktop so far)
-if wait_xp "8, 32, 1264, 760" -root _NET_WORKAREA; then
-  pass "dock: _NET_WORKAREA = work rect (8,32,1264,760)"
+if wait_xp "$(repeat_quad '8, 32, 1264, 760' 8)" -root _NET_WORKAREA; then
+  pass "dock: _NET_WORKAREA repeats the work rect for every desktop slot"
 else
   fail "dock: _NET_WORKAREA ($(xp_val -root _NET_WORKAREA))"
 fi
@@ -1017,8 +1053,8 @@ if wait_abs_geom "$DOCK" "1280x24+0+0"; then
 else
   fail "dock: panel hidden by ws switch"
 fi
-if wait_xp "8, 32, 1264, 760, 8, 32, 1264, 760" -root _NET_WORKAREA; then
-  pass "dock: workarea repeated per desktop (2 desktops now)"
+if wait_xp "$(repeat_quad '8, 32, 1264, 760' 8)" -root _NET_WORKAREA; then
+  pass "dock: fixed-slot workarea remains stable after workspace creation"
 else
   fail "dock: workarea multi-desktop ($(xp_val -root _NET_WORKAREA))"
 fi

@@ -70,9 +70,18 @@ bar_block : systray : right
 # workspace-3 : dwindle : 󰆍 : Code
 # workspace-5 : monocle : 󰍹 : Focus
 
+# Optional per-tag defaults (also accepts `tag_layout`).
+# Deprecated: this syntax will be removed in a future release. Prefer
+# `workspace-ID : LAYOUT : ICON [: NAME]` in new configurations.
+# workspace_layout : 3 : dwindle
+
 # Launching: bind runs commands; autostart runs once.
 bind : mod + Return : "st"
 # bind : mod + Return : "kitty"
+# Rounded Polybar corners need picom plus `pseudo-transparency = false` in the
+# Polybar config. With pseudo-transparency enabled, use a wallpaper setter such
+# as feh instead of xsetroot or Polybar falls back to black transparent pixels.
+# autostart : "polybar"
 autostart : "xsetroot -solid '#262522'"
 # autostart : "picom --config ~/.config/picom/picom.conf -b"
 # autostart : "dunst -config ~/.config/dunst/dunstrc"

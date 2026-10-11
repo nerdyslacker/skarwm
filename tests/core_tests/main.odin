@@ -1753,6 +1753,12 @@ test_multi_output :: proc() {
     eq(floating.FloatingRect, c.Rect{X = 180, Y = 100, W = 400, H = 300},
        "floating client preserves screen-relative geometry")
     eq(floating.Ws.Focus, floating, "moved floating client is remembered on target")
+    pager_moved := add_tiled(m, 105)
+    ok(c.Move_Client_To_WS(m, pager_moved, m.Outputs[0], 3),
+       "pager-style move sends an arbitrary client to another output workspace")
+    eq(pager_moved.Out, m.Outputs[0], "pager-moved client records destination output")
+    eq(pager_moved.Ws.Id, 3, "pager-moved client records destination workspace")
+    eq(c.Active_Output(m).Name, "HDMI-1", "pager-style move does not steal output focus")
     stranded := add_tiled(m, 103)
     shell_surface := add_dock(m, 104, c.Insets{}, c.Rect{X = 1920, Y = 0, W = 1280, H = 1024})
 

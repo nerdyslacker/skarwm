@@ -38,7 +38,10 @@ workspace, window, and output events through the existing i3-compatible IPC
 socket and refreshes from `GET_WORKSPACES`; there is no render-loop polling.
 Each monitor always renders `bar_tag_count` slots (eight by default),
 including empty workspaces which are not yet present in the WM snapshot. The
-active workspace uses the main bar color pair. Hover and vacant colors are
+same fixed slots, names, occupied state, and per-monitor mapping are exported
+through EWMH for external bars such as Polybar and tint2. See
+[X11 integration](x11-integration.md#external-bars-and-workspace-pagers).
+The active workspace uses the main bar color pair. Hover and vacant colors are
 derived from the configured palette instead of hard-coded values. Occupied
 workspaces use a bold face and underline, while urgent workspaces carry `!`.
 Left-click switches to the selected slot on the clicked

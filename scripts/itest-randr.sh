@@ -16,6 +16,16 @@ BAR_PID=
 say() { printf '%s\n' "$*"; }
 pass() { PASS=$((PASS + 1)); say "PASS  $*"; }
 fail() { FAIL=$((FAIL + 1)); say "FAIL  $*"; }
+xp_val() { xprop "$@" 2>/dev/null | sed -nE 's/^.*= //p' | tr '\n' ' ' | sed 's/ $//'; }
+repeat_pair() {
+  local pair="$1" count="$2" out="" i=0
+  while [ "$i" -lt "$count" ]; do
+    [ -n "$out" ] && out="$out, "
+    out="$out$pair"
+    i=$((i+1))
+  done
+  printf '%s\n' "$out"
+}
 cleanup() {
   [ -z "$BAR_PID" ] || kill "$BAR_PID" 2>/dev/null || true
   [ -z "$SUB_PID" ] || kill "$SUB_PID" 2>/dev/null || true
@@ -25,7 +35,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for tool in Xvnc xrandr xdotool xwininfo xterm; do
+for tool in Xvnc xrandr xdotool xwininfo xprop xterm; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     say "FATAL: missing integration-test dependency: $tool"
     exit 1
@@ -135,6 +145,23 @@ if [[ $outputs == *'"name":"LEFT"'*'"current_workspace":"1"'*'"name":"RIGHT"'*'"
   pass "keeps independent current workspaces per monitor"
 else
   fail "independent monitor workspaces"
+fi
+if [ "$(xp_val -root _NET_NUMBER_OF_DESKTOPS)" = "16" ] &&
+   [ "$(xp_val -root _NET_CURRENT_DESKTOP)" = "0" ]; then
+  pass "EWMH flattens eight workspace slots per monitor"
+else
+  fail "EWMH multi-monitor desktop count/current mapping"
+fi
+expected_viewports="$(repeat_pair '0, 0' 8), $(repeat_pair '640, 0' 8)"
+if [ "$(xp_val -root _NET_DESKTOP_VIEWPORT)" = "$expected_viewports" ]; then
+  pass "EWMH viewports map workspace ranges to their monitors"
+else
+  fail "EWMH multi-monitor viewport mapping ($(xp_val -root _NET_DESKTOP_VIEWPORT))"
+fi
+if [ -n "$wid" ] && [ "$(xp_val -id "$wid" _NET_WM_DESKTOP)" = "0" ]; then
+  pass "EWMH client desktop follows a cross-monitor move"
+else
+  fail "EWMH cross-monitor client desktop"
 fi
 
 ./build/skarwm-bar --height 26 --workspaces 8 >"${TMPDIR:-/tmp}/skarwm_randr_bar.log" 2>&1 &

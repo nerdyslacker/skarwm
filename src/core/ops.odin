@@ -786,14 +786,16 @@ Move_Floating_To_Output :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output) -> boo
     return true
 }
 
-// Move_Focused_To_WS relocates the focused window of the active workspace to the
-// workspace with the given id, creating it when needed. The source workspace
-// keeps a sensible focus. Returns true when the window moved.
-Move_Focused_To_WS :: proc(m: ^Manager, id: int) -> bool {
-    src := Current_WS(m)
-    if src == nil || src.Focus == nil { return false }
-    cl := src.Focus
-    tgt := Ensure_WS(m, id)
+// Move_Client_To_WS relocates any ordinary managed client to a workspace on a
+// chosen output. This is also the model operation behind EWMH pager drag/drop
+// (_NET_WM_DESKTOP), so it must not depend on the client being focused.
+Move_Client_To_WS :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output, id: int) -> bool {
+    if m == nil || cl == nil || cl.Dock || cl.Stashed || cl.Ws == nil ||
+       cl.Out == nil || dst_o == nil || id < 1 {
+        return false
+    }
+    src, src_o := cl.Ws, cl.Out
+    tgt := Ensure_WS_On_Output(dst_o, id)
     if tgt == nil || tgt == src { return false }
 
     cl.Fullscreen = false // never arrive fullscreen elsewhere
@@ -801,26 +803,32 @@ Move_Focused_To_WS :: proc(m: ^Manager, id: int) -> bool {
     if cl.Floating {
         remove_floater(src, cl)
         if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
+        if src_o != dst_o && !rect_empty(cl.FloatingRect) {
+            cl.FloatingRect = translate_floating_rect(cl.FloatingRect, src_o.Geom, dst_o.Geom)
+        }
+        append(&tgt.Floaters, cl)
+        cl.Ws, cl.Out = tgt, dst_o
+        tgt.Focus = cl
     } else {
         ci, col, row := column_of(src, cl)
-        if col != nil {
-            if col.Focus == cl {
-                col.Focus = in_column_focus_after_removal(col, row)
-            }
-            ordered_remove(&col.Wins, row)
-            column_removed := len(col.Wins) == 0
-            if column_removed {
-                detach_column_empty(src, ci)
-            } else {
-                normalize_stack_weights(col)
-            }
-        }
+        if col == nil { return false }
+        if col.Focus == cl { col.Focus = in_column_focus_after_removal(col, row) }
+        ordered_remove(&col.Wins, row)
+        if len(col.Wins) == 0 { detach_column_empty(src, ci) } else { normalize_stack_weights(col) }
         if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
+        attach_new_window(m, tgt, cl)
     }
-
-    attach_new_window(m, tgt, cl)
     Sync_Focus(m)
     return true
+}
+
+// Move_Focused_To_WS relocates the focused window of the active workspace to the
+// workspace with the given id, creating it when needed. The source workspace
+// keeps a sensible focus. Returns true when the window moved.
+Move_Focused_To_WS :: proc(m: ^Manager, id: int) -> bool {
+    src := Current_WS(m)
+    if src == nil || src.Focus == nil { return false }
+    return Move_Client_To_WS(m, src.Focus, Active_Output(m), id)
 }
 
 // Move_Focused_To_Output_Rel sends the focused client to the next/previous
