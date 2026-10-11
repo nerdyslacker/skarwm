@@ -9,14 +9,12 @@ import x11 "../x11"
 
 // Configuration pipeline (no embedded scripting language).
 //
-// Two sources of truth, one result:
+// One file format, one result:
 //
 //   - no configuration file found  -> cfg_apply_default() builds a Config_Result
 //                                     from the built-in defaults.
 //   - a .conf file is found         -> imports are resolved and merged before
 //                                     schema validation fills Load_Scratch.
-//   - an explicit/legacy .rc file   -> the flat compatibility parser below
-//                                     fills the same Load_Scratch.
 //
 // A config file completely replaces the built-in key bindings. A Config_Result
 // is applied atomically: if any
@@ -24,46 +22,9 @@ import x11 "../x11"
 // is never reached and the WM keeps its previous settings, logs the error, and
 // continues running.
 //
-// rc grammar
-// ----------
-//   - `#` starts a whole-line comment; lines are `key : value` (settings) or a
-//     directive with extra `:` fields. Settings are collected during a single
-//     scan and directives resolved afterwards, so `mod_key` may appear anywhere.
-//   - settings: mod_key (alias modkey), inner_gap, outer_gap, gap (seeds both),
-//     border_width, corner_radius, norm_outer_border (unfocused colour), sel_outer_border
-//     (focused colour), focus_follows_mouse, animations,
-//     animation_duration_ms, animation_fps, animation_easing, bar_enabled,
-//     bar_position, bar_height, bar_foreground, bar_background,
-//     bar_tag_count, bar_tag_foreground, bar_tag_background,
-//     bar_block_foreground, bar_block_background. Legacy decorative/titlebar keys
-//     are accepted and ignored; an unknown setting logs one warning.
-//   - directives:
-//       bind       : <combo> : "<command>"
-//       call       : <combo> : <action> [arguments]
-//       workspace  : <combo> : view <N>      (switch to N)
-//       workspace  : <combo> : tag <N>       (move focused window to N)
-//       rule       : <class|instance|title> : <pattern> : <effects…>
-//       autostart  : "<command>"
-//       bar_block  : workspaces : <left|center|right>
-//       bar_block  : layout : <left|center|right>
-//       bar_block  : title : <left|center|right>
-//       bar_block  : systray : <left|center|right>
-//       bar_block  : button : <left|center|right> : <label> : "<command>"
-//       bar_block  : script : <left|center|right> : <name> : <interval seconds> :
-//                    <timeout seconds> : "<command>"
-//       bar_block  : audio : <left|center|right> : <label> [: "<click command>"]
-//       bar_block  : network|bluetooth : <left|center|right> : <label> [: "<click command>"]
-//     Any block may append foreground/background colours (`_` inherits). For
-//     script/button blocks the pair appears immediately before the command.
-//       virtual_screen : <output> : split : <percent> [: <pixel offset>]
-//       mousebind  : …                       (warned + skipped: no mouse system yet)
-//
 // A combo is modifier tokens (`mod`, Shift, Control, Mod1..Mod5, Super, Alt)
 // joined by `+` with one keysym (Return, space, h, j, …). `mod` means the
-// configured primary modifier (mod_key). Recognised legacy call actions that have
-// no skarwm equivalent yet (zoom, togglemaximize, inc/dec/zero/set gaps,
-// restartwm, movemouse/resizemouse, bare view) are warned about and skipped so a
-// older compatible configuration files still load.
+// configured primary modifier (`[general] mod_key`).
 
 import "core:fmt"
 import "core:os"
@@ -86,8 +47,8 @@ Raw_Bind :: struct {
     match_class, match_instance, match_title: string,
 }
 
-// Raw_Rule is a `rule :` line. Empty match field == wildcard. Only fields whose
-// *_set flag is true impose anything.
+// Empty match field == wildcard. Only fields whose *_set flag is true impose
+// anything.
 Raw_Rule :: struct {
     class, instance, title: string,
     ws:                 int,
@@ -113,7 +74,7 @@ Raw_Bar_Block :: struct {
 }
 
 // Virtual_Screen_Profile is a declarative two-way horizontal split. The ratio
-// is stored as a percentage to keep the rc syntax exact and easy to validate;
+// is stored as a percentage to keep configuration exact and easy to validate;
 // geometry is always derived from the current physical output at activation.
 Virtual_Screen_Profile :: struct {
     output: string,
@@ -139,9 +100,9 @@ Config_Result :: struct {
     config_files: [dynamic]string,
 }
 
-// Load_Scratch accumulates raw settings + directives while the file is scanned.
-// It exists so the `mod` from mod_key can be applied to every combo regardless
-// of the order the lines appear in the file.
+// Load_Scratch accumulates validated settings and named objects while the
+// merged configuration is processed. It lets `mod_key` apply to every combo
+// regardless of declaration order.
 Load_Scratch :: struct {
     // mod token
     mod_key:     string,
@@ -176,7 +137,7 @@ Load_Scratch :: struct {
     bar_foreground_set, bar_background_set: bool,
     bar_tag_foreground_set, bar_tag_background_set: bool,
     bar_block_foreground_set, bar_block_background_set: bool,
-    // directives
+    // configured objects
     binds:    [dynamic]Raw_Bind,
     rules:    [dynamic]Raw_Rule,
     startups: [dynamic]string,
@@ -184,7 +145,6 @@ Load_Scratch :: struct {
     bar_blocks_set: bool,
     virtual_screens: [dynamic]Virtual_Screen_Profile,
     workspace_layouts: [dynamic]Workspace_Layout_Rule,
-    warned:   [dynamic]string, // unknown settings already warned about
 }
 
 g_cfg_flag: string // -c FILE (owned; freed in cleanup_all)
@@ -202,7 +162,6 @@ scratch_new :: proc() -> ^Load_Scratch {
     sc.bar_blocks = make([dynamic]Raw_Bar_Block, 0, 8)
     sc.virtual_screens = make([dynamic]Virtual_Screen_Profile, 0, 2)
     sc.workspace_layouts = make([dynamic]Workspace_Layout_Rule, 0, 4)
-    sc.warned = make([dynamic]string, 0, 8)
     return sc
 }
 
@@ -225,8 +184,6 @@ scratch_destroy :: proc(sc: ^Load_Scratch) {
     release_bar_blocks(&sc.bar_blocks)
     release_virtual_screens(&sc.virtual_screens)
     delete(sc.workspace_layouts)
-    for w in sc.warned { if w != "" { delete(w) } }
-    delete(sc.warned)
     free(sc)
 }
 
@@ -612,35 +569,6 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
     }
 }
 
-// Recognized legacy actions with no skarwm equivalent yet: warn and skip the
-// line so older compatible configuration files still load.
-unimplemented_action :: proc(action: string) -> bool {
-    switch action {
-    case "zoom", "togglemaximize", "inc_gaps", "dec_gaps", "zero_gaps",
-         "setgaps", "restartwm", "movemouse", "resizemouse", "view":
-        return true
-    }
-    return false
-}
-
-// Ignored legacy decorative settings accepted for compatibility but not applied.
-ignored_setting :: proc(key: string) -> bool {
-    switch key {
-    case "norm_bg", "norm_inner_border",
-         "sel_bg", "sel_inner_border",
-         "urgent_color",
-         "title_active_bg", "title_active_fg",
-         "title_inactive_bg", "title_inactive_fg",
-         "show_titlebar", "show_title", "show_buttons",
-         "snap",
-         "outer_border_width", "inner_border_width", "total_border_width",
-         "insert_end", "strip_align",
-         "show_move_indicator", "move_indicator_color":
-        return true
-    }
-    return false
-}
-
 // ----------------------------------------------------------------------------
 // build_result: resolve a filled Load_Scratch into a Config_Result
 // ----------------------------------------------------------------------------
@@ -698,11 +626,6 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
 
     r.bindings = make([dynamic]input.Binding, 0, 48)
     for rb in sc.binds {
-        if unimplemented_action(rb.action) {
-            logger.Warn("ignoring unsupported action:", rb.action,
-                "(key", rb.combo, ")")
-            continue
-        }
         b, e := resolve_bind(rb, mod_key)
         if e != "" {
             append(errs, e)
@@ -763,20 +686,11 @@ destroy_result :: proc(r: ^Config_Result) {
 // Loading
 // ----------------------------------------------------------------------------
 
-// warn_once logs an unknown setting key only the first time it is seen.
-warn_once :: proc(sc: ^Load_Scratch, key: string) {
-    for w in sc.warned {
-        if w == key { return }
-    }
-    append(&sc.warned, strings.clone(key))
-    logger.Warn("unknown setting ignored:", key)
-}
-
-// parse_setting handles a `key : value` line. Hard value errors are appended to
-// errs and flag failure via the return value.
-parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]string) -> bool {
+// parse_config_setting validates one schema-mapped setting and stores it in the
+// scratch result. Errors are appended to errs.
+parse_config_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]string) -> bool {
     switch key {
-    case "mod_key", "modkey":
+    case "mod_key":
         v := strings.trim_space(value)
         if v == "" || input.canonical_mods_for_name(v, &g_wm.kb, &g_wm.mm) == 0 {
             append(errs, fmt.aprintf("mod_key: unknown modifier %q", v))
@@ -834,7 +748,7 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         if !ok { append(errs, fmt.aprintf("decorations_enabled: expected true/false, got %q", value)); return false }
         sc.decoration.Enabled = v; sc.decoration_enabled_set = true
         return true
-    case "decoration_titlebar_height", "titlebar_height":
+    case "decoration_titlebar_height":
         n, ok := parse_i32_value(value)
         if !ok || n < 16 || n > 128 { append(errs, fmt.aprintf("decoration_titlebar_height: expected 16..128, got %q", value)); return false }
         sc.decoration.TitlebarHeight = n; sc.decoration_titlebar_height_set = true
@@ -985,7 +899,7 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         if !ok { append(errs, fmt.aprintf("bar_background: expected #RRGGBB, got %q", value)); return false }
         sc.bar_background = v; sc.bar_background_set = true
         return true
-    case "bar_tag_count", "bar_workspace_count":
+    case "bar_tag_count":
         n, ok := parse_i32_value(value)
         if !ok || n < 1 || n > 64 {
             append(errs, fmt.aprintf("bar_tag_count: expected 1..64, got %q", value))
@@ -993,12 +907,12 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         }
         sc.bar_tag_count = n; sc.bar_tag_count_set = true
         return true
-    case "bar_tag_foreground", "bar_workspace_foreground":
+    case "bar_tag_foreground":
         v, ok := parse_color(value)
         if !ok { append(errs, fmt.aprintf("bar_tag_foreground: expected #RRGGBB, got %q", value)); return false }
         sc.bar_tag_foreground = v; sc.bar_tag_foreground_set = true
         return true
-    case "bar_tag_background", "bar_workspace_background":
+    case "bar_tag_background":
         v, ok := parse_color(value)
         if !ok { append(errs, fmt.aprintf("bar_tag_background: expected #RRGGBB, got %q", value)); return false }
         sc.bar_tag_background = v; sc.bar_tag_background_set = true
@@ -1015,18 +929,9 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         return true
 
     case:
-        if ignored_setting(key) { return true }
-        warn_once(sc, key)
-        return true
+        append(errs, fmt.aprintf("internal: unknown mapped setting %q", key))
+        return false
     }
-}
-
-next_directive_field :: proc(rest: ^string) -> (string, bool) {
-    colon := strings.index_byte(rest^, ':')
-    if colon < 0 { return "", false }
-    field := strings.trim_space(rest^[:colon])
-    rest^ = strings.trim_space(rest^[colon + 1:])
-    return field, field != ""
 }
 
 parse_bar_alignment :: proc(value: string) -> (Bar_Block_Alignment, bool) {
@@ -1045,204 +950,13 @@ parse_optional_bar_colour :: proc(value: string) -> (colour: u32, set, valid: bo
     return parsed, ok, ok
 }
 
-parse_bar_colours :: proc(value: string) -> (
-    foreground, background: u32, foreground_set, background_set, valid: bool,
-) {
-    fields := strings.split(value, ":")
-    defer delete(fields)
-    if len(fields) != 2 { return 0, 0, false, false, false }
-    foreground_ok, background_ok: bool
-    foreground, foreground_set, foreground_ok = parse_optional_bar_colour(fields[0])
-    background, background_set, background_ok = parse_optional_bar_colour(fields[1])
-    return foreground, background, foreground_set, background_set,
-        foreground_ok && background_ok
-}
-
-// Script/button commands remain the final field and may themselves contain
-// colons. Treat two leading fields as colours only when both parse as a colour
-// (or `_`, meaning inherit); otherwise leave the command untouched.
-take_leading_bar_colours :: proc(remaining: ^string) -> (
-    foreground, background: u32, foreground_set, background_set: bool,
-) {
-    original := remaining^
-    foreground_text, has_foreground := next_directive_field(remaining)
-    background_text, has_background := next_directive_field(remaining)
-    if !has_foreground || !has_background {
-        remaining^ = original
-        return
-    }
-    foreground_ok, background_ok: bool
-    foreground, foreground_set, foreground_ok = parse_optional_bar_colour(foreground_text)
-    background, background_set, background_ok = parse_optional_bar_colour(background_text)
-    if !foreground_ok || !background_ok {
-        remaining^ = original
-        return 0, 0, false, false
-    }
-    return foreground, background, foreground_set, background_set
-}
-
-parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string) -> bool {
-    remaining := rest
-    kind, has_kind := next_directive_field(&remaining)
-    if !has_kind {
-        append(errs, fmt.aprintf("bar_block: expected a block kind and alignment, got %q", remaining))
-        return false
-    }
-
-    switch kind {
-    case "workspaces", "layout", "title", "systray":
-        alignment_text := remaining
-        colour_text := ""
-        if parsed_alignment, has_more := next_directive_field(&remaining); has_more {
-            alignment_text = parsed_alignment
-            colour_text = remaining
-        }
-        alignment, ok := parse_bar_alignment(alignment_text)
-        if !ok {
-            append(errs, fmt.aprintf("bar_block(%s): expected left/center/right, got %q", kind, alignment_text))
-            return false
-        }
-        foreground, background: u32
-        foreground_set, background_set := false, false
-        if colour_text != "" {
-            valid: bool
-            foreground, background, foreground_set, background_set, valid = parse_bar_colours(colour_text)
-            if !valid {
-                append(errs, fmt.aprintf("bar_block(%s): expected foreground : background colours, got %q", kind, colour_text))
-                return false
-            }
-        }
-        block_kind := Bar_Block_Kind.Workspaces
-        if kind == "layout" { block_kind = .Layout }
-        if kind == "title" { block_kind = .Title }
-        if kind == "systray" { block_kind = .Systray }
-        append(&sc.bar_blocks, Raw_Bar_Block{
-            kind = block_kind, alignment = alignment,
-            foreground = foreground, background = background,
-            foreground_set = foreground_set, background_set = background_set,
-        })
-    case "script":
-        alignment_text, ok_alignment := next_directive_field(&remaining)
-        name, ok_name := next_directive_field(&remaining)
-        interval_text, ok_interval := next_directive_field(&remaining)
-        timeout_text, ok_timeout := next_directive_field(&remaining)
-        alignment, valid_alignment := parse_bar_alignment(alignment_text)
-        interval, valid_interval := parse_i32_value(interval_text)
-        timeout, valid_timeout := parse_i32_value(timeout_text)
-        foreground, background, foreground_set, background_set :=
-            take_leading_bar_colours(&remaining)
-        command := quoted_trim(remaining)
-        if !ok_alignment || !valid_alignment || !ok_name || len(name) > 64 ||
-           !ok_interval || !valid_interval || interval < 1 || interval > 86400 ||
-           !ok_timeout || !valid_timeout || timeout < 1 || timeout > 60 ||
-           command == "" || len(command) >= 1024 {
-            append(errs, fmt.aprintf(
-                "bar_block(script): expected alignment : name : interval(1..86400) : timeout(1..60) : command, got %q",
-                remaining,
-            ))
-            return false
-        }
-        append(&sc.bar_blocks, Raw_Bar_Block{
-            kind = .Script, alignment = alignment,
-            name = strings.clone(name), command = strings.clone(command),
-            interval_ms = interval * 1000, timeout_ms = timeout * 1000,
-            foreground = foreground, background = background,
-            foreground_set = foreground_set, background_set = background_set,
-        })
-    case "button":
-        alignment_text, ok_alignment := next_directive_field(&remaining)
-        label, ok_label := next_directive_field(&remaining)
-        alignment, valid_alignment := parse_bar_alignment(alignment_text)
-        foreground, background, foreground_set, background_set :=
-            take_leading_bar_colours(&remaining)
-        command := quoted_trim(remaining)
-        if !ok_alignment || !valid_alignment || !ok_label || label == "" || len(label) > 64 ||
-           command == "" || len(command) >= 1024 {
-            append(errs, fmt.aprintf(
-                "bar_block(button): expected alignment : label : command, got %q",
-                remaining,
-            ))
-            return false
-        }
-        append(&sc.bar_blocks, Raw_Bar_Block{
-            kind = .Button, alignment = alignment,
-            name = strings.clone(label), command = strings.clone(command),
-            foreground = foreground, background = background,
-            foreground_set = foreground_set, background_set = background_set,
-        })
-    case "audio", "bluetooth", "network":
-        original := remaining
-        alignment_text, ok_alignment := next_directive_field(&remaining)
-        label := strings.trim_space(remaining)
-        extra := ""
-        if parsed_label, has_extra := next_directive_field(&remaining); has_extra {
-            label = parsed_label
-            extra = remaining
-        }
-        alignment, valid_alignment := parse_bar_alignment(alignment_text)
-        foreground, background: u32
-        foreground_set, background_set := false, false
-        click_command := ""
-        valid_tail := true
-        if extra != "" {
-            colours_only: bool
-            foreground, background, foreground_set, background_set, colours_only =
-                parse_bar_colours(extra)
-            if !colours_only {
-                tail := extra
-                foreground, background, foreground_set, background_set =
-                    take_leading_bar_colours(&tail)
-                if tail != extra {
-                    click_command = quoted_trim(tail)
-                } else {
-                    click_command = quoted_trim(extra)
-                }
-                valid_tail = click_command != "" && len(click_command) < 1024
-            }
-        }
-        if !ok_alignment || !valid_alignment || label == "" || len(label) > 64 || !valid_tail {
-            append(errs, fmt.aprintf(
-                "bar_block(%s): expected alignment : label [: foreground : background] [: click command], got %q",
-                kind, original,
-            ))
-            return false
-        }
-        block_kind := Bar_Block_Kind.Audio
-        if kind == "bluetooth" { block_kind = .Bluetooth }
-        if kind == "network" { block_kind = .Network }
-        append(&sc.bar_blocks, Raw_Bar_Block{
-            kind = block_kind, alignment = alignment, name = strings.clone(label),
-            click_command = strings.clone(click_command),
-            foreground = foreground, background = background,
-            foreground_set = foreground_set, background_set = background_set,
-        })
-    case:
-        append(errs, fmt.aprintf("bar_block: unknown block kind %q", kind))
-        return false
-    }
-    sc.bar_blocks_set = true
-    return true
-}
-
-parse_virtual_screen :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string) -> bool {
-    fields := strings.split(rest, ":")
-    defer delete(fields)
-    if len(fields) < 3 || len(fields) > 4 {
-        append(errs, fmt.aprintf(
-            "virtual_screen: expected output : split : percent [: offset], got %q", rest,
-        ))
-        return false
-    }
-    output := strings.trim_space(fields[0])
-    mode := strings.trim_space(fields[1])
-    ratio_text := strings.trim_space(fields[2])
-    has_offset := len(fields) == 4
-    offset_text := ""
-    if has_offset { offset_text = strings.trim_space(fields[3]) }
+parse_virtual_screen_config :: proc(sc: ^Load_Scratch, output, mode, ratio_text, offset_text: string, has_offset: bool, errs: ^[dynamic]string) -> bool {
+    output := strings.trim_space(output)
+    mode := strings.trim_space(mode)
+    ratio_text := strings.trim_space(ratio_text)
+    offset_text := strings.trim_space(offset_text)
     if output == "" || mode != "split" || ratio_text == "" || (has_offset && offset_text == "") {
-        append(errs, fmt.aprintf(
-            "virtual_screen: expected output : split : percent [: offset], got %q", rest,
-        ))
+        append(errs, strings.clone("virtual screen requires a named output, mode = split, and a ratio"))
         return false
     }
     ratio, ok := parse_i32_value(ratio_text)
@@ -1270,17 +984,9 @@ parse_virtual_screen :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]st
     return true
 }
 
-parse_workspace_layout :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string) -> bool {
-    fields := strings.split(rest, ":")
-    defer delete(fields)
-    if len(fields) != 2 {
-        append(errs, fmt.aprintf(
-            "workspace_layout: expected workspace : layout, got %q", rest,
-        ))
-        return false
-    }
-    workspace_text := strings.trim_space(fields[0])
-    layout_text := strings.trim_space(fields[1])
+parse_workspace_layout_config :: proc(sc: ^Load_Scratch, workspace_text, layout_text: string, errs: ^[dynamic]string) -> bool {
+    workspace_text := strings.trim_space(workspace_text)
+    layout_text := strings.trim_space(layout_text)
     workspace, ok := parse_i32_value(workspace_text)
     if !ok || workspace < 1 || workspace > c.IPC_MAX_WORKSPACE_ID {
         append(errs, fmt.aprintf(
@@ -1316,21 +1022,14 @@ parse_workspace_layout :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]
     return true
 }
 
-parse_workspace_declaration :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string) -> bool {
-    fields := strings.split(rest, ":")
-    defer delete(fields)
-    if len(fields) < 3 || len(fields) > 4 {
-        append(errs, fmt.aprintf("workspace: expected ID : layout : icon [: name], got %q", rest))
-        return false
-    }
-    id_text := strings.trim_space(fields[0])
-    layout_text := strings.trim_space(fields[1])
-    icon := quoted_trim(fields[2])
-    name := ""
-    if len(fields) == 4 { name = quoted_trim(fields[3]) }
+parse_workspace_config :: proc(sc: ^Load_Scratch, id_text, layout_text, icon, name: string, errs: ^[dynamic]string) -> bool {
+    id_text := strings.trim_space(id_text)
+    layout_text := strings.trim_space(layout_text)
+    icon := strings.trim_space(icon)
+    name := strings.trim_space(name)
     id, id_ok := parse_i32_value(id_text)
     if !id_ok || id < 1 || id > 64 || icon == "" || len(icon) > 64 || len(name) > 128 {
-        append(errs, fmt.aprintf("workspace: invalid ID, icon, or name in %q", rest))
+        append(errs, strings.clone("workspace has an invalid ID, icon, or name"))
         return false
     }
     for block in sc.bar_blocks {
@@ -1339,60 +1038,20 @@ parse_workspace_declaration :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dyn
             return false
         }
     }
-    layout_rule := fmt.aprintf("%s : %s", id_text, layout_text)
-    defer delete(layout_rule)
-    if !parse_workspace_layout(sc, layout_rule, errs) { return false }
+    if !parse_workspace_layout_config(sc, id_text, layout_text, errs) { return false }
     append(&sc.bar_blocks, Raw_Bar_Block{kind = .Workspace_Meta,
         name = strings.clone(icon), command = strings.clone(name), interval_ms = id})
     sc.bar_blocks_set = true
     return true
 }
 
-// parse_directive handles bind/call/workspace/rule/autostart/bar_block,
-// virtual_screen, workspace-N metadata, and mousebind lines.
-parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]string) -> bool {
-    prefix_len := 0
-    if len(key) > len("workspace-") && key[:len("workspace-")] == "workspace-" {
-        prefix_len = len("workspace-")
-    } else if len(key) > len("workspace_") && key[:len("workspace_")] == "workspace_" {
-        prefix_len = len("workspace_")
-    }
-    if prefix_len > 0 {
-        id, ok := parse_i32_value(key[prefix_len:])
-        if !ok { append(errs, fmt.aprintf("%s: invalid workspace ID", key)); return false }
-        declaration := fmt.aprintf("%d : %s", id, rest)
-        defer delete(declaration)
-        return parse_workspace_declaration(sc, declaration, errs)
-    }
+// parse_config_binding validates one [bind], [call], or [workspace.bindings]
+// assignment.
+parse_config_binding :: proc(sc: ^Load_Scratch, key, combo, tail: string, errs: ^[dynamic]string) -> bool {
     switch key {
-    case "virtual_screen":
-        return parse_virtual_screen(sc, rest, errs)
-
-    case "bar_block":
-        return parse_bar_block(sc, rest, errs)
-
-    case "autostart":
-        cmd := quoted_trim(rest)
-        if cmd == "" {
-            append(errs, "autostart: empty command")
-            return false
-        }
-        append(&sc.startups, strings.clone(cmd))
-        return true
-
-    case "mousebind":
-        logger.Warn("ignoring mousebind (no mouse-action system yet):", rest)
-        return true
-
     case "bind", "call", "workspace":
-        // rest = "<combo> : <tail>"
-        c2 := strings.index_byte(rest, ':')
-        if c2 < 0 {
-            append(errs, fmt.aprintf("%s: expected \"combo : …\", got %q", key, rest))
-            return false
-        }
-        combo := strings.trim_space(rest[:c2])
-        tail := strings.trim_space(rest[c2 + 1:])
+        combo := strings.trim_space(combo)
+        tail := strings.trim_space(tail)
         if combo == "" {
             append(errs, fmt.aprintf("%s: empty combo", key))
             return false
@@ -1468,83 +1127,9 @@ parse_directive :: proc(sc: ^Load_Scratch, key, rest: string, errs: ^[dynamic]st
         }
         append(&sc.binds, rb)
         return true
-
-    case "rule":
-        // rest = "<field> : <pattern> : <effects…>"
-        c2 := strings.index_byte(rest, ':')
-        if c2 < 0 {
-            append(errs, fmt.aprintf("rule: expected \"field : pattern : effects\", got %q", rest))
-            return false
-        }
-        field := strings.trim_space(rest[:c2])
-        rest2 := rest[c2 + 1:]
-        c3 := strings.index_byte(rest2, ':')
-        if c3 < 0 {
-            append(errs, fmt.aprintf("rule: expected \"field : pattern : effects\", got %q", rest))
-            return false
-        }
-        pattern := quoted_trim(rest2[:c3])
-        effects := strings.trim_space(rest2[c3 + 1:])
-
-        rr := Raw_Rule {}
-        switch field {
-        case "class":
-            rr.class = strings.clone(pattern)
-        case "instance":
-            rr.instance = strings.clone(pattern)
-        case "title":
-            rr.title = strings.clone(pattern)
-        case:
-            append(errs, fmt.aprintf("rule: unknown match field %q (want class|instance|title)", field))
-            return false
-        }
-
-        toks := split_ws(effects)
-        defer delete(toks)
-        i := 0
-        bad := false
-        for i < len(toks) {
-            switch toks[i] {
-            case "workspace":
-                if i + 1 >= len(toks) {
-                    append(errs, fmt.aprintf("rule %q: workspace needs a number", pattern))
-                    bad = true; i += 1; continue
-                }
-                n, ok := parse_i32_value(toks[i + 1])
-                if !ok || n < 1 {
-                    append(errs, fmt.aprintf("rule %q: bad workspace id %q", pattern, toks[i + 1]))
-                    bad = true; i += 2; continue
-                }
-                rr.ws = int(n); rr.ws_set = true
-                i += 2
-            case "floating":
-                rr.floating = true; rr.floating_set = true
-                i += 1
-                if i < len(toks) {
-                    if toks[i] == "true" { i += 1 }
-                    else if toks[i] == "false" { rr.floating = false; i += 1 }
-                }
-            case "decorate":
-                rr.decorate = true; rr.decorate_set = true
-                i += 1
-                if i < len(toks) {
-                    if toks[i] == "true" { i += 1 }
-                    else if toks[i] == "false" { rr.decorate = false; i += 1 }
-                }
-            case:
-                append(errs, fmt.aprintf("rule %q: unknown effect %q (want workspace <N>, floating, or decorate)", pattern, toks[i]))
-                bad = true
-                i += 1
-            }
-        }
-        if bad {
-            release_rule(&rr)
-            return false
-        }
-        append(&sc.rules, rr)
-        return true
     }
-    return true
+    append(errs, fmt.aprintf("internal: unsupported binding section %q", key))
+    return false
 }
 
 free_bind :: proc(rb: ^Raw_Bind) {
@@ -1562,79 +1147,6 @@ release_rule :: proc(rr: ^Raw_Rule) {
     if rr.instance != "" { delete(rr.instance) }
     if rr.title != "" { delete(rr.title) }
     rr^ = {}
-}
-
-// scan_rc parses `data` into the scratch. Returns false when any hard error was
-// recorded (errs then carries the messages; nothing should be applied).
-scan_rc :: proc(sc: ^Load_Scratch, data: []byte, errs: ^[dynamic]string) -> bool {
-    ok := true
-    lines := strings.split_lines(string(data))
-    defer delete(lines)
-    for ln in lines {
-        line := strings.trim_space(ln)
-        if line == "" { continue }
-        if line[0] == '#' { continue } // whole-line comment
-
-        colon := strings.index_byte(line, ':')
-        if colon < 0 {
-            append(errs, fmt.aprintf("ignoring line with no ':' — %q", line))
-            ok = false
-            continue
-        }
-        key := strings.trim_space(line[:colon])
-        rest := strings.trim_space(line[colon + 1:])
-
-        if key == "workspace_layout" {
-            if !parse_workspace_layout(sc, rest, errs) { ok = false }
-            continue
-        }
-        if len(key) > len("workspace-") && key[:len("workspace-")] == "workspace-" ||
-           len(key) > len("workspace_") && key[:len("workspace_")] == "workspace_" {
-            if !parse_directive(sc, key, rest, errs) { ok = false }
-            continue
-        }
-        switch key {
-        case "bind", "call", "workspace",
-             "rule", "autostart", "bar_block", "virtual_screen", "mousebind":
-            if !parse_directive(sc, key, rest, errs) { ok = false }
-        case:
-            if !parse_setting(sc, key, rest, errs) { ok = false }
-        }
-    }
-    return ok
-}
-
-// cfg_file_result loads and validates an rc config file. `ok` is true only when
-// every directive resolved; r is then valid. On failure r is undefined (caller
-// must not touch it) and errs carries the diagnostic messages.
-cfg_file_result :: proc(path: string) -> (r: Config_Result, errs: [dynamic]string, ok: bool) {
-    if os.ext(path) == ".conf" { return conf_file_result(path) }
-    logger.Warn("legacy .rc configuration is deprecated; migrate to default.conf:", path)
-    errs = make([dynamic]string, 0, 4)
-    data, ferr := os.read_entire_file_from_path(path, context.allocator)
-    if ferr != nil {
-        append(&errs, strings.concatenate({"cannot read config file: ", path}))
-        return {}, errs, false
-    }
-    defer delete(data)
-
-    sc := scratch_new()
-    defer scratch_destroy(sc)
-
-    if !scan_rc(sc, data, &errs) {
-        return {}, errs, false
-    }
-
-    r = build_result(sc, &errs)
-    if len(errs) > 0 {
-        destroy_result(&r)
-        return {}, errs, false
-    }
-    active_path, path_error := os.get_absolute_path(path, context.allocator)
-    if path_error != nil { active_path = strings.clone(path) }
-    r.config_files = make([dynamic]string, 0, 1)
-    append(&r.config_files, active_path)
-    return r, errs, true
 }
 
 // ----------------------------------------------------------------------------
@@ -1812,7 +1324,7 @@ join_exists :: proc(base, tail: string) -> string {
 }
 
 // cfg_discover_path resolves the config file: -c FILE wins, followed by
-// $SKARWM_CONFIG, user default.conf, system default.conf, then legacy config.rc.
+// $SKARWM_CONFIG, user default.conf, then system default.conf.
 // Returns "" when no discovered file exists. explicit_missing distinguishes
 // that normal fallback case from a missing path selected by the user.
 cfg_discover_path :: proc() -> (path: string, explicit_missing: bool) {
@@ -1834,18 +1346,13 @@ cfg_discover_path :: proc() -> (path: string, explicit_missing: bool) {
     xb: [1024]byte
     if xdg := os.get_env_buf(xb[:], "XDG_CONFIG_HOME"); xdg != "" {
         if p := join_exists(xdg, "skarwm/default.conf"); p != "" { return p, false }
-        if p := join_exists(xdg, "skarwm/config.rc"); p != "" { return p, false }
     }
     hb: [1024]byte
     if home := os.get_env_buf(hb[:], "HOME"); home != "" {
         if p := join_exists(home, ".config/skarwm/default.conf"); p != "" { return p, false }
-        if p := join_exists(home, ".config/skarwm/config.rc"); p != "" { return p, false }
     }
     if os.exists("/etc/skarwm/default.conf") {
         return strings.clone("/etc/skarwm/default.conf"), false
-    }
-    if os.exists("/etc/skarwm/config.rc") {
-        return strings.clone("/etc/skarwm/config.rc"), false
     }
     return "", false
 }
@@ -1866,7 +1373,7 @@ add_bind_def :: proc(sc: ^Load_Scratch, combo, action, arg_str: string, arg_num:
 }
 
 // cfg_apply_default installs the built-in defaults (same chords the WM had
-// before any config existed). It runs when no rc file is present.
+// before any config existed). It runs when no configuration file is present.
 cfg_apply_default :: proc() {
     sc := scratch_new()
     defer scratch_destroy(sc)
@@ -1947,7 +1454,7 @@ cfg_apply_default :: proc() {
 // load_config_path attempts to apply the config file at `path`. On any error it
 // logs and leaves the current configuration untouched.
 load_config_path :: proc(path, verb: string) -> bool {
-    r, errs, ok := cfg_file_result(path)
+    r, errs, ok := conf_file_result(path)
     if !ok {
         logger.Error("could not", verb, "config — keeping current settings:")
         for e in errs { logger.Error("  ", e) }

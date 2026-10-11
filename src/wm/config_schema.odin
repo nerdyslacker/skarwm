@@ -11,9 +11,9 @@ conf_error :: proc(errs: ^[dynamic]string, entry: ^conf.Resolved_Assignment, mes
         entry.source, entry.line, entry.section, entry.key, message))
 }
 
-conf_parse_setting :: proc(sc: ^Load_Scratch, entry: ^conf.Resolved_Assignment, legacy_key: string, errs: ^[dynamic]string) -> bool {
+conf_parse_setting :: proc(sc: ^Load_Scratch, entry: ^conf.Resolved_Assignment, setting_key: string, errs: ^[dynamic]string) -> bool {
     local := make([dynamic]string, 0, 1)
-    valid := parse_setting(sc, legacy_key, entry.value, &local)
+    valid := parse_config_setting(sc, setting_key, entry.value, &local)
     for message in local { conf_error(errs, entry, message) }
     free_errors(&local)
     return valid
@@ -82,7 +82,7 @@ conf_seen :: proc(sections: []string, section: string) -> bool {
 
 conf_named_section :: proc(section: string) -> bool {
     return strings.has_prefix(section, "rule.") ||
-           strings.has_prefix(section, "bar.blocks.") ||
+           strings.has_prefix(section, "bar.block.") ||
            strings.has_prefix(section, "virtual_screen.") ||
            strings.has_prefix(section, "workspace.") && section != "workspace.bindings"
 }
@@ -133,13 +133,11 @@ conf_validate_binding_duplicates :: proc(document: ^conf.Resolved_Document, errs
 }
 
 conf_parse_binding :: proc(sc: ^Load_Scratch, entry: ^conf.Resolved_Assignment, errs: ^[dynamic]string) -> bool {
-    directive := "bind"
-    if entry.section == "call" { directive = "call" }
-    if entry.section == "workspace.bindings" { directive = "workspace" }
-    rest := fmt.aprintf("%s : %s", entry.key, entry.value)
-    defer delete(rest)
+    binding_kind := "bind"
+    if entry.section == "call" { binding_kind = "call" }
+    if entry.section == "workspace.bindings" { binding_kind = "workspace" }
     local := make([dynamic]string, 0, 1)
-    valid := parse_directive(sc, directive, rest, &local)
+    valid := parse_config_binding(sc, binding_kind, entry.key, entry.value, &local)
     for message in local { conf_error(errs, entry, message) }
     free_errors(&local)
     return valid
@@ -194,13 +192,9 @@ conf_parse_workspace :: proc(sc: ^Load_Scratch, document: ^conf.Merged_Document,
     if has_name && !has_icon { conf_error(errs, name, "name requires an icon"); valid = false }
     if !valid { return false }
     if has_icon {
-        declaration := fmt.aprintf("%d : %s : %s : %s", id, layout.value, icon.value, name.value if has_name else "")
-        defer delete(declaration)
-        return parse_workspace_declaration(sc, declaration, errs)
+        return parse_workspace_config(sc, id_text, layout.value, icon.value, name.value if has_name else "", errs)
     }
-    declaration := fmt.aprintf("%d : %s", id, layout.value)
-    defer delete(declaration)
-    return parse_workspace_layout(sc, declaration, errs)
+    return parse_workspace_layout_config(sc, id_text, layout.value, errs)
 }
 
 conf_parse_virtual_screen :: proc(sc: ^Load_Scratch, document: ^conf.Merged_Document, section: string, first: ^conf.Resolved_Assignment, errs: ^[dynamic]string) -> bool {
@@ -216,13 +210,9 @@ conf_parse_virtual_screen :: proc(sc: ^Load_Scratch, document: ^conf.Merged_Docu
     }
     if !has_mode || !has_ratio { conf_error(errs, first, "virtual screen requires mode and ratio"); return false }
     if !valid { return false }
-    declaration := fmt.aprintf("%s : %s : %s", output, mode.value, ratio.value)
-    if has_offset {
-        with_offset := fmt.aprintf("%s : %s", declaration, offset.value)
-        delete(declaration); declaration = with_offset
-    }
-    defer delete(declaration)
-    return parse_virtual_screen(sc, declaration, errs)
+    return parse_virtual_screen_config(
+        sc, output, mode.value, ratio.value, offset.value if has_offset else "", has_offset, errs,
+    )
 }
 
 conf_parse_bar_block :: proc(sc: ^Load_Scratch, document: ^conf.Merged_Document, section: string, first: ^conf.Resolved_Assignment, errs: ^[dynamic]string) -> bool {
@@ -262,10 +252,10 @@ conf_parse_bar_block :: proc(sc: ^Load_Scratch, document: ^conf.Merged_Document,
             else if entry.key == "interval" { block.interval_ms = i32(value * 1000) }
             else { block.timeout_ms = i32(value * 1000) }
         case "foreground", "background":
-            colour, ok := parse_color(entry.value)
-            if !ok { conf_error(errs, &entry, "expected #RRGGBB"); valid = false }
-            else if entry.key == "foreground" { block.foreground = colour; block.foreground_set = true }
-            else { block.background = colour; block.background_set = true }
+            colour, colour_set, ok := parse_optional_bar_colour(entry.value)
+            if !ok { conf_error(errs, &entry, "expected #RRGGBB or _"); valid = false }
+            else if entry.key == "foreground" { block.foreground = colour; block.foreground_set = colour_set }
+            else { block.background = colour; block.background_set = colour_set }
         case: conf_error(errs, &entry, "unknown bar-block property"); valid = false
         }
     }
@@ -289,8 +279,8 @@ scan_conf :: proc(sc: ^Load_Scratch, document: ^conf.Merged_Document, errs: ^[dy
     processed := make([dynamic]string, 0, 16)
     defer { for section in processed { delete(section) }; delete(processed) }
     for &entry in document.entries {
-        if legacy_key := conf_setting_key(entry.section, entry.key); legacy_key != "" {
-            if !conf_parse_setting(sc, &entry, legacy_key, errs) { valid = false }
+        if setting_key := conf_setting_key(entry.section, entry.key); setting_key != "" {
+            if !conf_parse_setting(sc, &entry, setting_key, errs) { valid = false }
             continue
         }
         if binding_section := entry.section == "bind" || entry.section == "call" || entry.section == "workspace.bindings"; binding_section {
@@ -303,7 +293,7 @@ scan_conf :: proc(sc: ^Load_Scratch, document: ^conf.Merged_Document, errs: ^[dy
             continue
         }
         named := strings.has_prefix(entry.section, "rule.") || strings.has_prefix(entry.section, "workspace.") ||
-                 strings.has_prefix(entry.section, "virtual_screen.") || strings.has_prefix(entry.section, "bar.blocks.")
+                 strings.has_prefix(entry.section, "virtual_screen.") || strings.has_prefix(entry.section, "bar.block.")
         if named && !conf_seen(processed[:], entry.section) {
             append(&processed, strings.clone(entry.section))
             object_ok := false

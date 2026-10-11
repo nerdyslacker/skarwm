@@ -1,7 +1,7 @@
 package core
 
 // Config holds every tunable that drives layout/behavior and is settable from
-// the rc configuration layer (src/wm/config.odin). It lives in `core` so layout
+// the configuration layer (src/wm/config.odin). It lives in `core` so layout
 // math can be tested without X or the config parser.
 //
 // `Gap` / `OuterGap` / `InnerGap` / `BorderWidth` / `CornerRadius` are in pixels; the two
@@ -83,7 +83,7 @@ Animation_Easing :: enum u8 {
 }
 
 // Apply_Gap_Alias seeds both OuterGap and InnerGap from Gap when the caller only
-// supplied Gap. Call after filling a Config from the rc settings.
+// supplied Gap. Call after filling a Config from configuration settings.
 Apply_Gap_Alias :: proc(cfg: ^Config) {
     if cfg.Gap > 0 {
         cfg.OuterGap = cfg.Gap

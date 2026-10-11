@@ -22,18 +22,19 @@ windows, and fullscreen area. Fullscreen on the left does not cover the right.
 
 The example configuration uses Mod+F5 through Mod+F8:
 
-```rc
+```ini
+[call]
 # Make the main screen 15px narrower and the side screen 15px wider.
-call : mod + F5 : screen_split_shrink 15
+"mod + F5" = screen_split_shrink 15
 
 # Return to one logical screen covering the full physical monitor.
-call : mod + F6 : screen_split_disable
+"mod + F6" = screen_split_disable
 
 # Create the default 75/25 main/side split.
-call : mod + F7 : screen_split_enable 75
+"mod + F7" = screen_split_enable 75
 
 # Make the main screen 15px wider and the side screen 15px narrower.
-call : mod + F8 : screen_split_grow 15
+"mod + F8" = screen_split_grow 15
 ```
 
 `screen_split_grow` and `screen_split_shrink` always move the shared boundary
@@ -84,14 +85,19 @@ skarwm-msg move output prev
 
 To start or reload with a split on a named physical output, add:
 
-```rc
-virtual_screen : DP-1 : split : 75
+```ini
+[virtual_screen.DP-1]
+mode = split
+ratio = 75
 ```
 
 An optional signed pixel offset adjusts the ratio-derived boundary:
 
-```rc
-virtual_screen : DP-1 : split : 75 : -30
+```ini
+[virtual_screen.DP-1]
+mode = split
+ratio = 75
+offset = -30
 ```
 
 This makes the main region `75% - 30px` wide and gives the side region the

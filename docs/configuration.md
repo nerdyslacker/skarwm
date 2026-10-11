@@ -1,200 +1,165 @@
 # Configuration
 
-skarwm loads the first existing configuration in this order:
+skarwm uses section-based `.conf` files. It loads the first existing path in
+this order:
 
 1. `skarwm -c FILE`
 2. `$SKARWM_CONFIG`
 3. `${XDG_CONFIG_HOME:-$HOME/.config}/skarwm/default.conf`
 4. `/etc/skarwm/default.conf`
-5. Transitional user and system `config.rc` locations
 
 Without a file, built-in settings and bindings are used. Copy
 [`assets/default.conf`](../assets/default.conf) and
-[`assets/config.d`](../assets/config.d) for a complete modular starting point.
-The root file imports modules in declaration order; relative imports resolve
-against the importing file. Prefix an import path with `?` to make a missing
-file optional. Nested imports, cycle detection, and later overrides are
-supported.
+[`assets/config.d`](../assets/config.d) for a complete starting point.
+
+## Imports and merging
+
+The root file imports modules in declaration order. Relative paths resolve
+against the importing file; prefix a path with `?` when it is optional.
 
 ```ini
 [import]
 appearance = config.d/appearance.conf
 local = ?config.d/local.conf
+```
+
+Imports may be nested. Cycles and missing required files are errors. Later
+assignments override earlier scalar values. Named objects merge by identifier
+without changing their original order.
+
+Lines beginning with `#` or `;` are comments. Quoted keys and values decode
+`\"` and `\\`; unquoted values preserve shell punctuation including `:`, `=`,
+`%`, `$`, and `#`.
+
+## Settings
+
+```ini
+[general]
+mod_key = super
 
 [window]
 outer_gap = 8
 inner_gap = 8
+border_width = 2
+corner_radius = 0
+focus_follows_mouse = true
+
+[window.border]
+normal = #504D47
+selected = #FCE8C3
+
+[scroll]
+preview_hover_delay_ms = 250
+
+[animation]
+enabled = true
+duration_ms = 180
+fps = 60
+easing = ease_out_cubic
+```
+
+Decoration settings live under `[window.decoration]`. The complete palette and
+defaults are in [`assets/config.d/appearance.conf`](../assets/config.d/appearance.conf).
+
+## Commands and keybindings
+
+`[bind]` launches shell commands. `[call]` invokes WM actions.
+`[workspace.bindings]` switches workspaces or sends the focused window.
+
+```ini
+[bind]
+"mod + Return" = st
 
 [call]
 "mod + f" = togglefullscreen
+"mod + a" = focus class URxvt title VIM
+"mod + m" = focus title "Music Player"
+
+[workspace.bindings]
+"mod + 1" = view 1
+"mod + Shift + 1" = tag 1
 ```
 
-See [the migration inventory](config-migration.md) for the complete section
-mapping, named-object behavior, precedence, and legacy compatibility status.
+See [`assets/config.d/keybindings.conf`](../assets/config.d/keybindings.conf)
+for the complete annotated set.
 
-## Legacy `.rc` reference
+## Named objects
 
-The remainder of this page documents the transitional colon-separated format.
-Explicit `.rc` files still load but emit a deprecation warning.
+### Workspaces
 
-## Settings
-
-| Setting | Meaning |
-|---|---|
-| `mod_key : super` | Modifier represented by `mod` in bindings. |
-| `outer_gap : 8` | Space around the output work area. |
-| `inner_gap : 8` | Space between columns and stacked windows. |
-| `gap : 8` | Convenience value that sets both gaps. |
-| `border_width : 2` | Focused-window border width; `0` disables borders and their reserved inset. |
-| `corner_radius : 0` | Rounded-corner radius; `0` disables shaping. |
-| `norm_outer_border : #504D47` | Compatibility colour; unfocused borders are hidden. |
-| `sel_outer_border : #FF5F00` | Focused border colour. |
-| `decorations_enabled : false` | Opt in to skarwm-owned client titlebars and frames. |
-| `decoration_titlebar_height : 20` | Compact titlebar height in pixels, `16..128`. |
-| `decoration_border_width : 1` | Painted decoration frame width, `0..32`. |
-| `decoration_resize_hit_width : 4` | Edge/corner input target width, `1..32`; independent of the painted width. |
-| `decoration_show_title : true` | Draw the client title when the decoration renderer is enabled. |
-| `decoration_color_source : active-border` | Style source: `active-border`, `accent`, or `explicit`. |
-| `decoration_accent : #89B4FA` | Accent used by the `accent` source. |
-| `decoration_active_background : #313244` | Explicit active titlebar background. |
-| `decoration_inactive_background : #1E1E2E` | Explicit inactive titlebar background. |
-| `decoration_active_foreground : #FFFFFF` | Active title foreground. |
-| `decoration_inactive_foreground : #A6ADC8` | Inactive title foreground. |
-| `decoration_active_border : #89B4FA` | Explicit active frame colour. |
-| `decoration_inactive_border : #45475A` | Explicit inactive frame colour. |
-| `focus_follows_mouse : true` | Focus a window when the pointer enters it. |
-| `preview_hover_delay_ms : 250` | Delay before a stationary pointer reveals a scroll preview, `0..5000`. |
-| `animations : true` | Enable layout transitions. |
-| `animation_duration_ms : 180` | Transition duration, `0..5000`. |
-| `animation_fps : 60` | Animation target rate, `1..240`. |
-| `animation_easing : ease_out_cubic` | `linear` or `ease_out_cubic`. |
-| `bar_enabled : false` | Launch the optional built-in `skarwm-bar`; disabled by default. |
-| `bar_position : top` | Place the built-in bar at `top` or `bottom`. |
-| `bar_height : 26` | Bar height in pixels, `1..512`. |
-| `bar_font : monospace` | Fontconfig family used by the built-in bar. |
-| `bar_font_size : 11` | Bar font size in points, `6..72`. |
-| `bar_font_weight : normal` | Default text weight: `normal`, `medium`, or `bold`. |
-| `bar_foreground : #E6E6E6` | Built-in bar text colour. |
-| `bar_background : #1E1E2E` | Built-in bar background colour. |
-| `bar_tag_count : 8` | Fixed workspace slots shown on every monitor, `1..64`. |
-| `bar_tag_foreground : #262626` | Workspace-slot text colour. |
-| `bar_tag_background : #5F87AF` | Workspace-slot wrapper colour. |
-| `bar_block_foreground : #262626` | Script/status block text colour. |
-| `bar_block_background : #AF5F5F` | Script/status block wrapper colour. |
-
-See [Built-in bar](bar.md) for the current implementation status and manual
-launch options.
-
-## Directives
-
-```rc
-bind : mod + Return : "xterm"
-call : mod + f : togglefullscreen
-call : mod + g : layout_next
-call : mod + Control + Alt + h : show_bindings
-call : mod + Control + Alt + t : show_datetime
-call : mod + Control + Alt + b : show_battery
-call : mod + Control + r : reminder_new
-call : mod + Control + Alt + r : reminder_show_all
-call : mod + Control + Shift + r : reminder_clear_all
-workspace : mod + 1 : view 1
-workspace : mod + Shift + 1 : tag 1
-workspace-3 : dwindle : 󰕮 : Code
-autostart : "xsetroot -solid '#202020'"
-bar_block : workspaces : left
-workspace-1 : scrolling-tile : 󰈹 : Web
-bar_block : layout : left
-bar_block : title : center
-bar_block : systray : right
-bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
-bar_block : network : right : 󰤨
-bar_block : bluetooth : right : 󰂯
-bar_block : audio : right : 󰕾
-virtual_screen : DP-1 : split : 75 : -30
-rule : class : Firefox : workspace 3 floating decorate false
+```ini
+[workspace.1]
+layout = scrolling-tile
+icon = 󰈹
+name = Web
 ```
 
-Append `foreground : background` to workspace, audio, or systray blocks. Put
-the same pair immediately before the final command for script and button
-blocks. Either value may be `_` to inherit the global block colour. The audio
-block toggles mute on middle click and changes the default sink volume by five
-percent when scrolled. Network shows its active non-loopback interface name,
-or `󰤭 off` when disconnected; middle click toggles the Wi-Fi radio.
-Bluetooth shows its configured icon while connected and `󰂲` while
-disconnected, followed by `on` or `off`. Muted audio uses the `󰝟` icon and
-displays `muted`. Bluetooth middle click toggles adapter power. Network and
-Bluetooth open `nm-connection-editor` or `blueman-manager` on left click.
+Layouts are `scrolling-tile`, `vertical-scrolling-tile`, `dwindle`, `monocle`,
+and `floating`. `fibonacci` is an alias for `dwindle`.
 
-Audio, Network, and Bluetooth blocks accept an optional final quoted shell
-command for left click. Put it after the label, or after the optional colour
-pair. It overrides the Network/Bluetooth default application; Audio otherwise
-has no left-click action:
+### Rules
 
-```rc
-bar_block : audio : right : 󰕾 : "pavucontrol"
-bar_block : network : right : 󰤨 : _ : _ : "rofi -show network"
-bar_block : bluetooth : right : 󰂯 : "blueman-manager"
+```ini
+[rule.firefox]
+class = Firefox
+workspace = 3
+floating = false
+decorate = true
 ```
 
-`bind` launches a shell command. `call` invokes a WM action. `workspace view`
-switches workspace and `workspace tag` sends the focused window. `autostart`
-runs once at startup and is not run again by configuration reloads.
+A rule may match `class`, `instance`, or `title`. Effects are `workspace`,
+`floating`, and `decorate`.
 
-`workspace-ID : LAYOUT : ICON [: NAME]` gives that workspace/tag a persistent
-layout on every output and configures its bar icon plus optional hover name.
-`workspace_ID` is accepted as an equivalent spelling. Supported names are
-`scrolling-tile`, `vertical-scrolling-tile`, `dwindle` (`fibonacci` is an
-alias), `monocle`, and `floating`. Matching workspaces are created and updated when the configuration
-loads or reloads, so windows opened later use the declared layout. A manual
-layout selection may override it until the next reload.
+### Virtual screens
 
-Workspace-wide layout actions are `layout_scrolling_tile`,
-`layout_vertical_scroller`, `layout_dwindle`
-(`layout_fibonacci` is an alias), `layout_monocle`, `layout_floating`, and
-`layout_next`. The last one cycles Scrolling Tile → Vertical Scrolling Tile →
-Dwindle/Fibonacci → Monocle → Floating and is bound to `Super+g` by the built-in defaults.
-`layout_scroller` remains a compatibility alias. `togglefloating` changes only
-the focused window. `togglealwaysontop` toggles the above layer for a focused
-floating window and has no effect on tiled windows. Returning the window to
-tiling clears the state. Always-on-top borders and titlebar pins use
-`decoration_accent`, which defaults to blue.
-
-`virtual_screen` declares a horizontal logical split for a named physical
-RandR output. The split is a percentage from 10 through 90; the optional final
-field adjusts the boundary by signed pixels. The example uses 75% minus 30
-pixels for the left screen and the exact remainder for the right. Geometry is
-recomputed from the current physical output after resolution changes. Profiles
-for disconnected outputs are retained and applied when that output appears.
-Duplicate output profiles and profiles that cannot satisfy the 160-pixel
-minimum on a connected output reject the whole reload.
-
-The same feature is bindable without a declarative profile:
-
-```rc
-call : mod + F5 : screen_split_shrink 15
-call : mod + F6 : screen_split_disable
-call : mod + F7 : screen_split_enable 75
-call : mod + F8 : screen_split_grow 15
+```ini
+[virtual_screen.DP-1]
+mode = split
+ratio = 75
+offset = -30
 ```
 
-`bar_block` directives define the built-in bar's blocks in declaration order.
-Workspace, layout, title, and `systray` blocks take an alignment. A workspace
-declaration uses `workspace-ID : LAYOUT : ICON [: NAME]` (or `workspace_ID`):
-it sets the workspace layout and changes the corresponding workspace cell
-without rendering its own block. Button blocks take an
-alignment, display label, and left-click shell command. Audio, network, and
-Bluetooth blocks take an alignment and label, provide built-in actions, and
-optionally take a final left-click shell command.
-Script blocks additionally
-take a name, interval in seconds, timeout in seconds, and a shell command. See
-[Built-in bar](bar.md) for limits, failure handling, and security details.
+The ratio must be `10..90`; the optional offset adjusts the boundary in pixels.
 
-Rules use a substring match against `class`, `instance`, or `title`. Effects are
-`workspace N`, `floating`, `floating true|false`, `decorate`, and
-`decorate true|false`; the first matching rule is used. A decoration rule
-overrides the global `decorations_enabled` value for that client.
+### Bar blocks
 
-The active configuration file is watched and reloaded automatically after it
-changes (including editor saves that replace the file). `Super+Shift+r` also
-runs `reload_config` on demand. Reload is atomic: malformed input leaves the
-active configuration unchanged.
+Global block colors use `[bar.block]`; each named block uses
+`[bar.block.NAME]`. Named blocks accept `type`, `position`, `foreground`, and
+`background`, plus type-specific properties. Omit a color or set it to `_` to
+inherit the corresponding global color.
+
+```ini
+[bar.block]
+foreground = #0E0D0C
+background = #C5B088
+
+[bar.block.clock]
+type = script
+position = right
+icon = 󰃭
+interval = 1
+timeout = 1
+foreground = #FCE8C3
+background = #3C3836
+command = date '+%H:%M'
+```
+
+See [`assets/config.d/bar.conf`](../assets/config.d/bar.conf) and
+[Built-in bar](bar.md) for every block type and property.
+
+### Autostart
+
+Each assignment under `[autostart]` is a named command. Commands run once at
+startup and are not rerun on configuration reload.
+
+```ini
+[autostart]
+background = xsetroot -solid '#202020'
+```
+
+## Reloading
+
+skarwm watches the complete normalized import graph. Changes to the root,
+nested imports, or creation of a missing optional import schedule an atomic
+reload. `reload_config` performs the same operation on demand. An invalid
+reload is reported while the active configuration remains unchanged.

@@ -155,13 +155,26 @@ fi
 kill "$WM_PID" 2>/dev/null || true
 wait "$WM_PID" 2>/dev/null || true
 WM_PID=""
-TERMINAL=xterm ./build/skarwm --config tests/decoration.rc >"$WM_LOG" 2>&1 &
+TERMINAL=xterm ./build/skarwm --config tests/decoration.conf >"$WM_LOG" 2>&1 &
 WM_PID=$!
 for _ in $(seq 1 40); do ./build/skarwm-msg get-windows >/dev/null 2>&1 && break; sleep 0.1; done
-if grep -q 'legacy .rc configuration is deprecated' "$WM_LOG" && grep -q 'config applied: load' "$WM_LOG"; then
-  pass "--config keeps explicit legacy rc support with warning"
+if grep -q 'config applied: load' "$WM_LOG"; then
+  pass "explicit modular configuration loads"
 else
-  fail "legacy rc compatibility"
+  fail "explicit modular configuration"
+  sed -n '1,20p' "$WM_LOG"
+fi
+
+kill "$WM_PID" 2>/dev/null || true
+wait "$WM_PID" 2>/dev/null || true
+WM_PID=""
+TERMINAL=xterm SKARWM_BAR=/bin/true ./build/skarwm --config assets/default.conf >"$WM_LOG" 2>&1 &
+WM_PID=$!
+for _ in $(seq 1 40); do ./build/skarwm-msg get-windows >/dev/null 2>&1 && break; sleep 0.1; done
+if grep -q 'config applied: load' "$WM_LOG"; then
+  pass "modular example configuration loads"
+else
+  fail "modular example configuration"
   sed -n '1,20p' "$WM_LOG"
 fi
 

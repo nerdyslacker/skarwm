@@ -13,7 +13,7 @@ import x11 "../x11"
 //   1. connect, claim the screen (checked SubstructureRedirect; a BadAccess here
 //      means another WM already owns it → exit)
 //   2. parse argv (-c FILE), load keyboard/modifier maps
-//   3. load configuration (rc file, or built-in defaults) and grab keys
+//   3. load configuration (.conf file, or built-in defaults) and grab keys
 //   4. adopt any windows already present at start-up
 //   5. poll() on the X connection fd and dispatch events forever
 

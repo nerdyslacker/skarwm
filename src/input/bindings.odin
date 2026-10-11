@@ -1,6 +1,6 @@
 package input
 
-// Resolved input actions are shared by the rc loader, dispatcher, and help UI.
+// Resolved input actions are shared by the config loader, dispatcher, and help UI.
 
 Action_Kind :: enum u8 {
     None,

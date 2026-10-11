@@ -24,7 +24,7 @@ Tiled_Resize_State :: struct {
 }
 
 // Border colours come from Config.FocusedBorder / Config.UnfocusedBorder
-// (0xRRGGBB), settable from the rc file (norm_outer_border / sel_outer_border).
+// (0xRRGGBB), settable through [window.border] (normal / selected).
 
 Wm :: struct {
     conn:     ^x11.Connection,

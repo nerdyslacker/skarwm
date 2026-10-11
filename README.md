@@ -14,7 +14,7 @@ workspace and scheduled script blocks; external desktop UI such as
 
 Features include dynamic workspaces, stacked and tabbed columns, RandR
 multi-monitor support, independent workspaces per monitor, floating and
-fullscreen windows, native scratchpads, atomic rc reloads, window rules,
+fullscreen windows, native scratchpads, atomic configuration reloads, window rules,
 edge previews with hover-to-reveal, EWMH/ICCCM interoperability, dock struts,
 and nonblocking Unix-socket IPC.
 
@@ -36,7 +36,7 @@ Required to build:
 Required at runtime:
 
 - an X11 server and `libxcb` with RandR support;
-- a terminal or launcher configured in the rc file. `$TERMINAL` is preferred,
+- a terminal or launcher configured in the configuration file. `$TERMINAL` is preferred,
   with `xterm` as the fallback.
 
 Odin is available for Void Linux from the LazyLinux repository:
@@ -94,8 +94,8 @@ sudo make install
 ```
 
 The install target adds `skarwm`, `skarwm-msg`, `skarwm-session`, the display
-manager entry, the modular default configuration, and its legacy compatibility
-example. Session integration files are kept under `assets/`.
+manager entry, and the modular default configuration. Session integration files
+are kept under `assets/`.
 
 Run a standalone nested session with `make xephyr`. It loads
 `assets/default.conf`, including its `assets/config.d/` imports, so edits to the
@@ -132,8 +132,8 @@ bindings, scrolling, workspaces, scratchpads, visuals, and X11 integration.
 ## Configuration
 
 The configuration search order is `skarwm -c FILE`, `$SKARWM_CONFIG`, the user
-`skarwm/default.conf`, `/etc/skarwm/default.conf`, and transitional legacy
-`config.rc` locations. If no file is found, built-in defaults are used.
+`skarwm/default.conf`, and `/etc/skarwm/default.conf`. If no file is found,
+built-in defaults are used.
 Reloading the complete import graph is atomic: an invalid file is reported
 while the previous configuration stays active.
 
@@ -148,8 +148,7 @@ skarwm
 Client corners can be rounded with `[window] corner_radius = N`; `0` keeps them
 square, and fullscreen windows and bars are never clipped. Layout transitions
 are configured under `[animation]`. See `assets/default.conf` and
-`assets/config.d/` for the complete modular configuration. Explicit `.rc`
-files remain supported during migration.
+`assets/config.d/` for the complete modular configuration.
 
 For `startx`, copy `assets/xinitrc.example` to `~/.xinitrc`. Display managers
 can use the installed `skarwm.desktop` entry. 
@@ -190,9 +189,8 @@ Tabbed mode affects only the focused column. Move windows into it with
 `Super+Shift+h/l`, select tabs with `Super+k/j`, and reorder them with
 `Super+Shift+k/j`. Press `Super+t` again to split the group back into columns.
 
-The modular files under [assets/config.d](assets/config.d) are the current
-examples. The fully commented [assets/example.rc](assets/example.rc) remains as
-a legacy-format reference during migration.
+The modular files under [assets/config.d](assets/config.d) are the complete
+annotated examples.
 
 ### Jumping to matching windows
 
@@ -201,13 +199,14 @@ switching to its output and workspace. Criteria are case-sensitive substring
 matches, use AND semantics when combined, and repeated presses cycle through
 the matches in stable management order:
 
-```text
+```ini
+[call]
 # Jump between URxvt windows whose title contains VIM.
-call : mod + a : focus class URxvt title VIM
+"mod + a" = focus class URxvt title VIM
 
 # Quotes preserve spaces in a criterion value.
-call : mod + m : focus title "Music Player"
-call : mod + i : focus instance thunderbird
+"mod + m" = focus title "Music Player"
+"mod + i" = focus instance thunderbird
 ```
 
 Supported fields are `class`, `instance`, and `title`. Dock windows and hidden
@@ -220,10 +219,11 @@ managed but leave the tiled layout and are parked off-screen. The first toggle
 assigns the focused window; later toggles hide it or summon it on the currently
 focused workspace and monitor:
 
-```text
-call : mod + grave : scratchpad_toggle 1
-call : mod + Shift + grave : scratchpad_toggle_float 2
-call : mod + Control + grave : scratchpad_remove 1
+```ini
+[call]
+"mod + grave" = scratchpad_toggle 1
+"mod + Shift + grave" = scratchpad_toggle_float 2
+"mod + Control + grave" = scratchpad_remove 1
 ```
 
 Registers disappear when skarwm exits, and closing an application clears its

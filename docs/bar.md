@@ -4,16 +4,17 @@
 external docks and desktop shells continue to work without any built-in bar
 process or reserved space.
 
-Enable the managed bar in `config.rc`:
+Enable the managed bar in `config.d/bar.conf`:
 
-```rc
-bar_enabled : true
-bar_position : top
-bar_height : 26
-bar_font : monospace
-bar_font_size : 11
-bar_font_weight : normal
-bar_tag_count : 8
+```ini
+[bar]
+enabled = true
+position = top
+height = 26
+font = monospace
+font_size = 11
+font_weight = normal
+tag_count = 8
 ```
 
 The WM launches `skarwm-bar`, or the executable named by `$SKARWM_BAR`. During
@@ -48,13 +49,18 @@ reconnects after WM restarts.
 
 Foreground and background are configurable:
 
-```rc
-bar_foreground : #E6E6E6
-bar_background : #1E1E2E
-bar_tag_foreground : #262626
-bar_tag_background : #5F87AF
-bar_block_foreground : #262626
-bar_block_background : #AF5F5F
+```ini
+[bar]
+foreground = #E6E6E6
+background = #1E1E2E
+
+[bar.tag]
+foreground = #262626
+background = #5F87AF
+
+[bar.block]
+foreground = #262626
+background = #AF5F5F
 ```
 
 Workspace cells, script blocks, and button blocks use their own
@@ -63,8 +69,8 @@ aligned blocks.
 
 ## Blocks and scripts
 
-Block order is the order of repeated `bar_block` directives. Alignment may be
-`left`, `center`, or `right`. If there are no `bar_block` directives, the bar
+Block order is the order of named `[bar.block.NAME]` sections. Position may be
+`left`, `center`, or `right`. If there are no named block sections, the bar
 shows left-aligned workspace and current-layout blocks plus the focused window
 title in the centre.
 
@@ -75,20 +81,35 @@ The title block fits short titles and caps its width at 240 pixels. Long titles
 are ellipsized;
 hover the title to see the complete text. Hover a layout glyph to see its name.
 
-```rc
-bar_block : workspaces : left
-workspace-1 : scrolling-tile : 󰈹 : Web
-workspace-2 : dwindle : 󰆍 : Code
-bar_block : layout : left
-bar_block : title : center
-bar_block : button : left : 󰀻 : "rofi -show drun"
-bar_block : script : right : _ : 2 : 1 : "cut -d ' ' -f 1 /proc/loadavg"
-bar_block : network : right : 󰤨
-bar_block : bluetooth : right : 󰂯
-bar_block : audio : right : 󰕾
-bar_block : systray : right
-bar_block : button : right : ⏻ : "rofi -show power-menu -modi power-menu:rofi-power-menu"
-bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
+```ini
+[bar.block.workspaces]
+type = workspaces
+position = left
+
+[bar.block.layout]
+type = layout
+position = left
+
+[bar.block.title]
+type = title
+position = center
+
+[bar.block.clock]
+type = script
+position = right
+icon = 󰃭
+interval = 1
+timeout = 1
+command = date '+%H:%M'
+
+[bar.block.audio]
+type = audio
+position = right
+icon = 󰕾
+
+[bar.block.systray]
+type = systray
+position = right
 ```
 
 The `audio` block reads the default PipeWire/PulseAudio sink, toggles mute on
@@ -111,23 +132,42 @@ Audio, Network, and Bluetooth accept an optional final shell command for left
 click. It replaces the Network/Bluetooth settings application; Audio has no
 default left-click action. Commands may contain colons and should be quoted:
 
-```rc
-bar_block : audio : right : 󰕾 : "pavucontrol"
-bar_block : network : right : 󰤨 : "rofi -show network"
-bar_block : bluetooth : right : 󰂯 : "blueman-manager"
+```ini
+[bar.block.audio]
+type = audio
+position = right
+icon = 󰕾
+command = pavucontrol
+
+[bar.block.network]
+type = network
+position = right
+icon = 󰤨
+command = rofi -show network
+
+[bar.block.bluetooth]
+type = bluetooth
+position = right
+icon = 󰂯
+command = blueman-manager
 ```
 
-Every block can override its foreground and background. Use `_` to inherit one
-of the global `bar_block_*` colours:
+Every block can override its foreground and background. Omit a color, or set it
+to `_`, to inherit that color from `[bar.block]`:
 
-```rc
-bar_block : workspaces : left : #0E0D0C : #917E6B
-bar_block : network : right : 󰤨 : #FCE8C3 : #3C3836
-bar_block : bluetooth : right : 󰂯 : #FCE8C3 : #3C3836
-bar_block : audio : right : 󰕾 : #121110 : #D79921 : "pavucontrol"
-bar_block : button : right : ⏻ : #FCE8C3 : #9D0006 : "rofi -show power-menu"
-bar_block : script : right : clock : 1 : 1 : _ : #3C3836 : "date '+%H:%M'"
-bar_block : systray : right : _ : #282828
+```ini
+[bar.block.network]
+type = network
+position = right
+icon = 󰤨
+foreground = #FCE8C3
+background = #3C3836
+
+[bar.block.systray]
+type = systray
+position = right
+foreground = _
+background = #282828
 ```
 
 Button fields after the alignment are `label` and command. The label may be
@@ -177,6 +217,6 @@ protocol require an SNI-to-XEmbed bridge.
 
 ## External bars
 
-Keep `bar_enabled : false` and start the external bar normally. skarwm still
+Keep `[bar] enabled = false` and start the external bar normally. skarwm still
 manages EWMH dock windows and honors their struts; workspace/output IPC and EWMH
 desktop state remain available.

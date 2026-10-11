@@ -50,7 +50,7 @@ test_bindings_commands_and_unicode :: proc() {
     document := parse_ok(`
 [bind]
 "mod + Return" = "sh -c \"printf '%s=%s:100%%' '$A' 'x\\y'\""
-[bar.blocks.clock]
+[bar.block.clock]
 icon = 󰃭
 command = date '+%a, %b %d - %H:%M:%S' # literal shell text
 `)

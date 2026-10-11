@@ -2714,10 +2714,10 @@ test_ipc_ws_event_payload :: proc() {
 }
 
 test_ipc_version_payload :: proc() {
-    pl := c.ipc_version_payload(`/tmp/skarwm "active".rc`)
+    pl := c.ipc_version_payload(`/tmp/skarwm "active".conf`)
     defer delete(pl)
     ok(strings.contains(string(pl),
-       `"loaded_config_file_name":"/tmp/skarwm \"active\".rc"`),
+       `"loaded_config_file_name":"/tmp/skarwm \"active\".conf"`),
        "GET_VERSION reports and JSON-escapes the active config path")
     empty := c.ipc_version_payload("")
     defer delete(empty)

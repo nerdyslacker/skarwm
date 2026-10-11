@@ -4,7 +4,7 @@ import logger "../log"
 
 // Child-process launching + terminal detection.
 //
-// Everything skarwm spawns goes through `/bin/sh -c`, so bindings and the rc
+// Everything skarwm spawns goes through `/bin/sh -c`, so bindings and config
 // config can use ordinary shell syntax ("kitty", "foot &", "notify-send …").
 //
 // Process handling uses core's posix package. A double fork is used:

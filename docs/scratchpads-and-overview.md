@@ -24,9 +24,10 @@ spawn a command when no match exists. See [IPC.md](IPC.md).
 The overview action is a controller for an external shell UI such as anush. It
 grabs the keyboard and emits window events; it does not draw thumbnails itself.
 
-```rc
-call : Alt + Tab : overview_next
-call : Alt + Shift + Tab : overview_prev
+```ini
+[call]
+"Alt + Tab" = overview_next
+"Alt + Shift + Tab" = overview_prev
 ```
 
 While active: Tab/Shift+Tab cycles, arrows emit workspace/window navigation,

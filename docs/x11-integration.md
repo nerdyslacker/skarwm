@@ -31,8 +31,9 @@ for tiled clients are ignored, and re-tiling an above client clears the state.
 
 Focus follows the pointer by default:
 
-```rc
-focus_follows_mouse : true
+```ini
+[window]
+focus_follows_mouse = true
 ```
 
 Set it to `false` for keyboard/click-directed focus. Dock windows never receive
@@ -40,10 +41,19 @@ normal client focus.
 
 Window rules run when a client is managed:
 
-```rc
-rule : class : Pavucontrol : floating
-rule : instance : firefox : workspace 3
-rule : title : "Picture in picture" : workspace 2 floating
+```ini
+[rule.audio-control]
+class = Pavucontrol
+floating = true
+
+[rule.firefox]
+instance = firefox
+workspace = 3
+
+[rule.picture-in-picture]
+title = "Picture in picture"
+workspace = 2
+floating = true
 ```
 
 For automation and bars, use the nonblocking i3-compatible socket documented in

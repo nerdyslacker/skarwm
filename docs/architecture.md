@@ -44,7 +44,7 @@ src/
 └── wm/
     ├── runtime.odin            startup, teardown, adoption, event loop
     ├── manager.odin            actions and core-to-X reflow bridge
-    ├── config.odin             rc parsing, validation, atomic reload
+    ├── config.odin             configuration validation and atomic reload
     ├── ipc_server.odin         nonblocking Unix-socket IPC transport
     ├── ewmh.odin               EWMH and ICCCM policy coordination
     └── outputs.odin            monitor discovery and reconciliation

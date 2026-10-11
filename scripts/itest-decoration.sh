@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Focused native-decoration smoke test. Uses a private Xvnc, one xterm, and the
-# minimal tests/decoration.rc fixture. Run with `make itest-decoration`.
+# minimal tests/decoration.conf fixture. Run with `make itest-decoration`.
 
 set -u
 cd "$(dirname "$0")/.." || exit 2
@@ -30,7 +30,7 @@ Xvnc "$DISP" -geometry 1280x800 -depth 24 -localhost -SecurityTypes None >"${TMP
 XVNC_PID=$!
 for _ in $(seq 1 30); do xdpyinfo -display "$DISP" >/dev/null 2>&1 && break; sleep 0.1; done
 
-./build/skarwm -c tests/decoration.rc >"$WM_LOG" 2>&1 &
+./build/skarwm -c tests/decoration.conf >"$WM_LOG" 2>&1 &
 WM_PID=$!
 for _ in $(seq 1 30); do ./build/skarwm-msg get-windows >/dev/null 2>&1 && break; sleep 0.1; done
 
@@ -160,7 +160,7 @@ if [ "$client_floating" = "true" ]; then pass "ordinary floating drag near edge 
 # first-column target and tiles the lone floating window on release.
 read -r solo_x solo_y solo_w solo_h < <(xwininfo -id "$frame" 2>/dev/null | awk '/Absolute upper-left X:/{x=$4}/Absolute upper-left Y:/{y=$4}/Width:/{w=$2}/Height:/{h=$2}END{print x,y,w,h}')
 xdotool windowactivate --sync "$client" >/dev/null 2>&1
-xdotool mousemove $((solo_x+120)) $((solo_y+12)) keydown Alt_L mousedown 1 mousemove 20 400 mouseup 1 keyup Alt_L >/dev/null 2>&1
+xdotool mousemove $((solo_x+120)) $((solo_y+12)) keydown Alt_L mousedown 1 mousemove 1260 400 mouseup 1 keyup Alt_L >/dev/null 2>&1
 sleep 0.2
 windows=$(./build/skarwm-msg get-windows 2>/dev/null)
 client_floating=$(printf '%s\n' "$windows" | sed -nE 's/.*"id":'"$client"'[^}]*"floating":(true|false).*/\1/p')

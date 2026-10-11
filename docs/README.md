@@ -1,7 +1,6 @@
 # skarwm documentation
 
-- [Configuration](configuration.md) — modular `.conf` discovery, imports, settings, and legacy reference.
-- [Configuration migration](config-migration.md) — complete old-to-new mapping and compatibility status.
+- [Configuration](configuration.md) — modular `.conf` discovery, imports, settings, and named objects.
 - [Built-in bar](bar.md) — optional dock process, workspace/script blocks, XEmbed tray, and lifecycle.
 - [Layouts and windows](layouts-and-windows.md) — columns, stacks, tabs, floating, maximize, fullscreen, and resizing.
 - [Scrolling and drag/drop](scrolling-and-drag-drop.md) — the horizontal strip, edge previews, and pointer controls.

@@ -43,7 +43,7 @@ export XDG_CONFIG_HOME="$XDGC"
 # The resolver intentionally falls back to ~/.config when XDG_CONFIG_HOME has
 # no file. A deliberately absent explicit path stops that fallback and selects
 # built-in defaults; tests that pass `-c FILE` still take precedence.
-export SKARWM_CONFIG="$XDGC/no-config.rc"
+export SKARWM_CONFIG="$XDGC/missing-default.conf"
 PICOM_PID=""
 
 say() { printf '%s\n' "$*"; }
@@ -548,104 +548,155 @@ else
 fi
 
 # ------------------------------------------------------------------------------
-# ---- 12. rc config: load, atomic reload, keep-previous-on-error ----------------
-# The WM is restarted with an explicit -c rc file. A spawn
+# ---- 12. config: load, atomic reload, keep-previous-on-error -------------------
+# The WM is restarted with an explicit modular configuration. A spawn
 # must tile exactly like the built-in defaults; editing outer_gap/border_width and
-# pressing super+shift+r (bound in the rc as `call : mod + Shift + r : reload`)
-# must reflow the existing window to the new geometry. A deliberately malformed rc
+# pressing super+shift+r must reflow the existing window. A malformed config
 # (unknown action token) must leave the previous settings in force and the WM alive.
-say "== rc config: load / reload / keep-previous-on-error =="
+say "== config: load / reload / keep-previous-on-error =="
 rm -rf "$XDGC"; mkdir -p "$XDGC"
-RC=/tmp/skarwm_itest.rc
-cat > "$RC" <<'RC'
-mod_key : super
-inner_gap : 8
-outer_gap : 8
-border_width : 2
-corner_radius : 0
-focus_follows_mouse : true
-animations : false
-animation_duration_ms : 180
-animation_fps : 60
-animation_easing : ease_out_cubic
-bind : mod + Return : "xterm"
-call : mod + Shift + r : reload_config
-call : mod + Shift + q : close_window
-call : mod + f     : togglefullscreen
-call : mod + space : togglefloating
-call : mod + h : focusleft
-call : mod + l : focusright
-call : mod + a : focus class XTerm title "VIM Target"
-workspace : mod + 1 : view 1
-workspace : mod + 2 : view 2
-bar_block : workspaces : left : #101010 : #e0e0e0
-bar_block : script : center : clock : 1 : 1 : _ : #202020 : "date '+%H:%M'"
-bar_block : network : right : network : #ffffff : #282828 : "printf 'network:click'"
-bar_block : bluetooth : right : bluetooth : #ffffff : #292929 : "printf 'bluetooth:click'"
-bar_block : audio : right : volume : #ffffff : #303030 : "printf 'audio:click'"
-bar_block : systray : right : _ : #404040
-bar_block : button : right : menu : #ffffff : #505050 : "printf 'menu:open'"
-RC
+CONFIG_FILE=/tmp/skarwm_itest.conf
+cat > "$CONFIG_FILE" <<'CONF'
+[general]
+mod_key = super
+[window]
+inner_gap = 8
+outer_gap = 8
+border_width = 2
+corner_radius = 0
+focus_follows_mouse = true
+[animation]
+enabled = false
+duration_ms = 180
+fps = 60
+easing = ease_out_cubic
+[bind]
+"mod + Return" = xterm
+[call]
+"mod + Shift + r" = reload_config
+"mod + Shift + q" = close_window
+"mod + f" = togglefullscreen
+"mod + space" = togglefloating
+"mod + h" = focusleft
+"mod + l" = focusright
+"mod + a" = focus class XTerm title "VIM Target"
+[workspace.bindings]
+"mod + 1" = view 1
+"mod + 2" = view 2
+[bar.block.workspaces]
+type = workspaces
+position = left
+foreground = #101010
+background = #E0E0E0
+[bar.block.clock]
+type = script
+position = center
+icon = clock
+interval = 1
+timeout = 1
+foreground = _
+background = #202020
+command = date '+%H:%M'
+[bar.block.network]
+type = network
+position = right
+icon = network
+foreground = #FFFFFF
+background = #282828
+command = printf 'network:click'
+[bar.block.bluetooth]
+type = bluetooth
+position = right
+icon = bluetooth
+foreground = #FFFFFF
+background = #292929
+command = printf 'bluetooth:click'
+[bar.block.audio]
+type = audio
+position = right
+icon = volume
+foreground = #FFFFFF
+background = #303030
+command = printf 'audio:click'
+[bar.block.systray]
+type = systray
+position = right
+foreground = _
+background = #404040
+[bar.block.menu]
+type = button
+position = right
+label = menu
+foreground = #FFFFFF
+background = #505050
+command = printf 'menu:open'
+CONF
 
 pkill -x skarwm; pkill -x xterm; sleep 0.7
 rm -f "$WM_LOG"
-TERMINAL=xterm nohup ./build/skarwm -c "$RC" >"$WM_LOG" 2>&1 &
+TERMINAL=xterm nohup ./build/skarwm -c "$CONFIG_FILE" >"$WM_LOG" 2>&1 &
 sleep 1.2
 pgrep -x skarwm >/dev/null || die_display
 xdotool mousemove 640 795 >/dev/null 2>&1; sleep 0.3
 
-# rc defaults mirror the built-ins, so a first spawn tiles single full-width
+# The test config mirrors the built-ins, so a first spawn tiles full-width.
 key super+Return
-if wait_tiled_n 1; then pass "rc config: spawn tiles under -c file"; else fail "rc spawn"; fi
+if wait_tiled_n 1; then pass "config: spawn tiles under -c file"; else fail "config spawn"; fi
 rcwin=$(first_tiled_id)
-if wait_geom "$rcwin" "1260x780+10+10"; then pass "rc config: single window geometry (outer 8 / border 2)"; else fail "rc geometry"; fi
+if wait_geom "$rcwin" "1260x780+10+10"; then pass "config: single window geometry (outer 8 / border 2)"; else fail "config geometry"; fi
 if xwininfo -id "$rcwin" -shape 2>/dev/null | grep -q "No window shape defined"; then
-  pass "rc config: corner_radius 0 keeps windows square"
+  pass "config: corner_radius 0 keeps windows square"
 else
-  fail "rc config: zero-radius window unexpectedly shaped"
+  fail "config: zero-radius window unexpectedly shaped"
 fi
 
 # reload with a changed outer_gap/border_width reflows the *existing* window
-cat > "$RC" <<'RC'
-mod_key : super
-outer_gap : 20
-inner_gap : 8
-border_width : 4
-corner_radius : 12
-animations : true
-animation_duration_ms : 120
-animation_fps : 75
-animation_easing : linear
-bind : mod + Return : "xterm"
-call : mod + Shift + r : reload_config
-call : mod + Shift + q : close_window
-call : mod + f     : togglefullscreen
-call : mod + space : togglefloating
-call : mod + h : focusleft
-call : mod + l : focusright
-call : mod + a : focus class XTerm title "VIM Target"
-workspace : mod + 1 : view 1
-workspace : mod + 2 : view 2
-RC
+cat > "$CONFIG_FILE" <<'CONF'
+[general]
+mod_key = super
+[window]
+outer_gap = 20
+inner_gap = 8
+border_width = 4
+corner_radius = 12
+[animation]
+enabled = true
+duration_ms = 120
+fps = 75
+easing = linear
+[bind]
+"mod + Return" = xterm
+[call]
+"mod + Shift + r" = reload_config
+"mod + Shift + q" = close_window
+"mod + f" = togglefullscreen
+"mod + space" = togglefloating
+"mod + h" = focusleft
+"mod + l" = focusright
+"mod + a" = focus class XTerm title "VIM Target"
+[workspace.bindings]
+"mod + 1" = view 1
+"mod + 2" = view 2
+CONF
 key super+shift+r
-if wait_geom "$rcwin" "1232x752+24+24"; then pass "rc config: atomic reload reflows to outer 20 / border 4"; else fail "rc reload geometry"; fi
+if wait_geom "$rcwin" "1232x752+24+24"; then pass "config: atomic reload reflows to outer 20 / border 4"; else fail "config reload geometry"; fi
 if wait_for sh -c "xwininfo -id '$rcwin' -shape 2>/dev/null | grep -q 'Window shape extents'"; then
-  pass "rc config: positive corner_radius reshapes existing window"
+  pass "config: positive corner_radius reshapes existing window"
 else
-  fail "rc config: rounded shape not applied after reload"
+  fail "config: rounded shape not applied after reload"
 fi
 
-# malformed rc (unknown action token) -> previous config kept, WM alive
-printf 'call : mod + x : no_such_action\n' >> "$RC"
+# Malformed config (unknown action token) keeps the previous config active.
+printf '\n[call]\n"mod + x" = no_such_action\n' >> "$CONFIG_FILE"
 pid_before=$(pgrep -x skarwm | head -1)
 key super+shift+r
 sleep 1
 pid_after=$(pgrep -x skarwm | head -1)
 if [ -n "$pid_after" ] && [ "$pid_after" = "$pid_before" ] \
    && [ "$(geom_of "$rcwin")" = "1232x752+24+24" ]; then
-  pass "rc config: malformed reload keeps previous config and stays alive"
+  pass "config: malformed reload keeps previous config and stays alive"
 else
-  fail "rc config keep-previous-on-error (before=$pid_before after=$pid_after)"
+  fail "config keep-previous-on-error (before=$pid_before after=$pid_after)"
 fi
 
 # A metadata focus binding reveals its target across workspaces and focuses it.
@@ -658,9 +709,9 @@ focus_decoy=$(first_tiled_id)
 key super+a
 if wait_geom "$rcwin" "1232x752+24+24" \
    && [ "$(xdotool getactivewindow 2>/dev/null)" -eq "$((rcwin))" ]; then
-  pass "rc focus criteria reveal and focus a matching window"
+  pass "config focus criteria reveal and focus a matching window"
 else
-  fail "rc focus criteria window jump"
+  fail "config focus criteria window jump"
 fi
 
 # ------------------------------------------------------------------------------
