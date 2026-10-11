@@ -152,3 +152,5 @@ rule : class : XTerm : floating
 rule : title : Network : floating
 rule : instance : firefox : workspace 3
 rule : title : "Mozilla Firefox" : floating
+
+# import : config.d/keybindings.rc

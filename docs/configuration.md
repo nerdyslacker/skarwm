@@ -5,12 +5,35 @@ skarwm loads the first existing configuration in this order:
 1. `skarwm -c FILE`
 2. `$SKARWM_CONFIG`
 3. `$XDG_CONFIG_HOME/skarwm/skarwm.rc`
-4. `~/.config/skarwm/skarwm.rc`
-5. `/etc/skarwm/skarwm.rc`
+4. `$XDG_CONFIG_HOME/skarwm/config.rc` (legacy fallback)
+5. `~/.config/skarwm/skarwm.rc`
+6. `~/.config/skarwm/config.rc` (legacy fallback)
+7. `/etc/skarwm/skarwm.rc`
+8. `/etc/skarwm/config.rc` (legacy fallback)
 
 Without a file, built-in settings and bindings are used. Copy
 [`assets/example.rc`](../assets/example.rc) for a complete starting point.
 Lines beginning with `#` are comments.
+
+## Imports
+
+The main configuration can optionally include other rc files at any point:
+
+```text
+import : config.d/keybindings.rc
+import : config.d/rules.rc
+```
+
+Relative paths are resolved from the directory containing the file with the
+`import` directive, including inside nested imports. Absolute paths and quoted
+paths are also accepted. Imported content is processed in place as though it
+appeared directly in the containing file, so later settings override earlier
+settings in the usual way.
+
+Imports are recursive, but cycles and unreadable files reject the complete
+reload and leave the running configuration unchanged. The main file and every
+imported file are watched for automatic reloads. Imports are entirely optional;
+a single `skarwm.rc` continues to work as before.
 
 ## Settings
 
@@ -169,7 +192,7 @@ Rules use a substring match against `class`, `instance`, or `title`. Effects are
 `decorate true|false`; the first matching rule is used. A decoration rule
 overrides the global `decorations_enabled` value for that client.
 
-The active configuration file is watched and reloaded automatically after it
-changes (including editor saves that replace the file). `Super+Shift+r` also
-runs `reload_config` on demand. Reload is atomic: malformed input leaves the
-active configuration unchanged.
+The main configuration and its imports are watched and reloaded automatically
+after they change (including editor saves that replace a file).
+`Super+Shift+r` also runs `reload_config` on demand. Reload is atomic: malformed
+input leaves the active configuration unchanged.

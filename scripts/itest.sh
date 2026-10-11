@@ -150,20 +150,69 @@ sleep 1.2
 export DISPLAY="$DISP"
 xwininfo -root >/dev/null 2>&1 || die_display
 
-# The shipped example must load from the default skarwm.rc discovery path.
+# The shipped example must load from the preferred skarwm.rc discovery path,
+# even when the legacy filename is present beside it.
 mkdir -p "$XDGC/skarwm"
 cp assets/example.rc "$XDGC/skarwm/skarwm.rc"
+cp assets/example.rc "$XDGC/skarwm/config.rc"
 rm -f "$WM_LOG"
 env -u SKARWM_CONFIG TERMINAL=xterm SKARWM_BAR=/bin/true ./build/skarwm >"$WM_LOG" 2>&1 &
 example_wm_pid=$!
 for _ in $(seq 1 30); do ./build/skarwm-msg get-windows >/dev/null 2>&1 && break; sleep 0.1; done
 if grep -q "config applied: load from $XDGC/skarwm/skarwm.rc" "$WM_LOG"; then
-  pass "example configuration loads from skarwm.rc"
+  pass "skarwm.rc is preferred over legacy config.rc"
 else
   fail "skarwm.rc example discovery/load"
 fi
 kill "$example_wm_pid" 2>/dev/null || true
 wait "$example_wm_pid" 2>/dev/null || true
+rm -f "$SKARWM_SOCKET"
+
+# The former config.rc name remains usable when skarwm.rc is absent.
+rm "$XDGC/skarwm/skarwm.rc"
+rm -f "$WM_LOG"
+env -u SKARWM_CONFIG TERMINAL=xterm SKARWM_BAR=/bin/true ./build/skarwm >"$WM_LOG" 2>&1 &
+legacy_wm_pid=$!
+for _ in $(seq 1 30); do ./build/skarwm-msg get-windows >/dev/null 2>&1 && break; sleep 0.1; done
+if grep -q "config applied: load from $XDGC/skarwm/config.rc" "$WM_LOG"; then
+  pass "legacy config.rc remains a fallback"
+else
+  fail "config.rc fallback discovery/load"
+fi
+kill "$legacy_wm_pid" 2>/dev/null || true
+wait "$legacy_wm_pid" 2>/dev/null || true
+rm -f "$SKARWM_SOCKET"
+
+# Imports resolve relative to their containing file, including recursively, and
+# every imported source participates in automatic reloads.
+mkdir -p "$XDGC/skarwm/config.d"
+printf 'import : config.d/base.rc\n' > "$XDGC/skarwm/skarwm.rc"
+printf 'import : keybindings.rc\n' > "$XDGC/skarwm/config.d/base.rc"
+cp assets/example.rc "$XDGC/skarwm/config.d/keybindings.rc"
+rm -f "$WM_LOG"
+env -u SKARWM_CONFIG TERMINAL=xterm SKARWM_BAR=/bin/true ./build/skarwm >"$WM_LOG" 2>&1 &
+import_wm_pid=$!
+for _ in $(seq 1 30); do ./build/skarwm-msg get-windows >/dev/null 2>&1 && break; sleep 0.1; done
+if grep -q "config applied: load from $XDGC/skarwm/skarwm.rc" "$WM_LOG"; then
+  pass "nested relative config imports load"
+else
+  fail "nested relative config import"
+fi
+printf '\n# trigger imported-file reload\n' >> "$XDGC/skarwm/config.d/keybindings.rc"
+if wait_for grep -q "config applied: reload from $XDGC/skarwm/skarwm.rc" "$WM_LOG"; then
+  pass "imported config files trigger hot reload"
+else
+  fail "imported config hot reload"
+fi
+printf 'import : ../skarwm.rc\n' > "$XDGC/skarwm/config.d/base.rc"
+if wait_for grep -q "config import cycle:" "$WM_LOG" \
+   && kill -0 "$import_wm_pid" 2>/dev/null; then
+  pass "config import cycles are rejected atomically"
+else
+  fail "config import cycle rejection"
+fi
+kill "$import_wm_pid" 2>/dev/null || true
+wait "$import_wm_pid" 2>/dev/null || true
 rm -f "$SKARWM_SOCKET"
 rm -rf "$XDGC"
 

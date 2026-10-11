@@ -128,9 +128,10 @@ bindings, scrolling, workspaces, scratchpads, visuals, and X11 integration.
 
 ## Configuration
 
-The configuration search order is `skarwm -c FILE`, `$SKARWM_CONFIG`,
-`$XDG_CONFIG_HOME/skarwm/skarwm.rc`, `~/.config/skarwm/skarwm.rc`, and finally
-`/etc/skarwm/skarwm.rc`. If no file is found, built-in defaults are used.
+The configuration search order is `skarwm -c FILE`, `$SKARWM_CONFIG`, then
+`skarwm.rc` in `$XDG_CONFIG_HOME/skarwm`, `~/.config/skarwm`, and
+`/etc/skarwm`. At each location the legacy `config.rc` name is used only when
+`skarwm.rc` is absent. If no file is found, built-in defaults are used.
 Reloading is atomic: an invalid file is reported while the previous
 configuration stays active.
 
@@ -140,6 +141,15 @@ Start with the documented example:
 mkdir -p ~/.config/skarwm
 cp assets/example.rc ~/.config/skarwm/skarwm.rc
 skarwm
+```
+
+Large configurations may be split into optional imports. Relative paths are
+resolved from the file containing the directive, and imported files participate
+in atomic hot reloads:
+
+```text
+import : config.d/keybindings.rc
+import : config.d/rules.rc
 ```
 
 Client corners can be rounded with `corner_radius : N`; `0` keeps them square,
