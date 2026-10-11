@@ -27,11 +27,124 @@ and nonblocking Unix-socket IPC.
 
 ## Dependencies
 
-Required to build:
+skarwm requires:
 
 - Odin 2026.07 or newer;
-- libxcb and its RandR development files;
-- GNU Make and a C toolchain/linker.
+- libxcb with the RandR and Shape extensions;
+- GNU Make and Clang (used by Odin for linking).
+
+The default build also produces the optional `skarwm-bar`, which requires
+libX11, libXft, and fontconfig. The commands below install dependencies for the
+complete default build. If your distribution does not package the Odin
+language compiler, install it from the
+[official Odin releases or source](https://odin-lang.org/docs/install/). On
+Debian and Ubuntu, the repository package named `odin` is an unrelated MRI
+application and must not be used.
+
+### Void Linux
+
+Odin is available from the LazyLinux repository:
+
+```sh
+printf '%s\n' 'repository=https://github.com/lazylinuxos/lazy-repo/releases/latest/download' \
+  | sudo tee /etc/xbps.d/99-repository-lazy.conf
+sudo xbps-install -S odin clang make libxcb-devel libX11-devel libXft-devel \
+  fontconfig-devel
+```
+
+### Debian / Ubuntu
+
+Install Odin separately using the official instructions linked above, then:
+
+```sh
+sudo apt update
+sudo apt install clang make libxcb1-dev libxcb-randr0-dev libxcb-shape0-dev \
+  libx11-dev libxft-dev libfontconfig1-dev
+```
+
+### Arch Linux
+
+```sh
+sudo pacman -S --needed odin clang base-devel libxcb libx11 libxft fontconfig
+```
+
+### Gentoo
+
+Install Odin separately using the official instructions linked above, then:
+
+```sh
+sudo emerge --ask dev-build/make llvm-core/clang x11-libs/libxcb \
+  x11-libs/libX11 x11-libs/libXft media-libs/fontconfig
+```
+
+### Fedora
+
+Install Odin separately using the official instructions linked above, then:
+
+```sh
+sudo dnf install clang make libxcb-devel libX11-devel libXft-devel \
+  fontconfig-devel
+```
+
+### openSUSE
+
+Install Odin separately using the official instructions linked above, then:
+
+```sh
+sudo zypper install clang make libxcb-devel libX11-devel libXft-devel \
+  fontconfig-devel
+```
+
+### Solus
+
+Install Odin separately using the official instructions linked above, then:
+
+```sh
+sudo eopkg install -c system.devel
+sudo eopkg install clang libxcb-devel libx11-devel libxft-devel \
+  fontconfig-devel
+```
+
+### NixOS
+
+Start a temporary development shell containing the compiler and libraries:
+
+```sh
+nix-shell -p odin gnumake clang xorg.libxcb xorg.libX11 xorg.libXft fontconfig
+```
+
+### BSDs
+
+Odin supports FreeBSD, OpenBSD, and NetBSD on their supported 64-bit
+architectures. Install Odin from the official releases or build it from source.
+Use `gmake` instead of the BSD `make` when building skarwm.
+
+#### FreeBSD
+
+Clang is included in the base system:
+
+```sh
+sudo pkg install gmake libxcb libX11 libXft fontconfig
+```
+
+#### OpenBSD
+
+Install the X11 file sets (`xbase`, `xshare`, and `xfont`) with the operating
+system, then install GNU Make. Clang is included in the base system:
+
+```sh
+doas pkg_add gmake
+```
+
+#### NetBSD
+
+With pkgin configured:
+
+```sh
+sudo pkgin install clang gmake libxcb libX11 libXft fontconfig
+```
+
+### Runtime and test dependencies
 
 Required at runtime:
 
@@ -39,18 +152,9 @@ Required at runtime:
 - a terminal or launcher configured in the rc file. `$TERMINAL` is preferred,
   with `xterm` as the fallback.
 
-Odin is available for Void Linux from the LazyLinux repository:
-
-```sh
-printf '%s\n' 'repository=https://github.com/lazylinuxos/lazy-repo/releases/latest/download' \
-  | sudo tee /etc/xbps.d/99-repository-lazy.conf
-```
-```sh
-sudo xbps-install -S odin libxcb-devel make gcc
-```
-
 Optional test dependencies are Xvnc, xterm, xdotool, xwininfo, xrandr, xprop,
-python-xlib, and wmctrl. Interactive nested testing additionally uses Xephyr:
+python-xlib, and wmctrl. Interactive nested testing additionally uses Xephyr.
+On Void Linux, install them with:
 
 ```sh
 sudo xbps-install -S tigervnc xterm xdotool xwininfo xrandr xprop \
