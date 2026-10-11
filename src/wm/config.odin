@@ -2087,6 +2087,7 @@ cfg_initial_load :: proc() {
 // appeared (or disappeared) since startup is honoured too.
 cfg_reload :: proc() {
     path := cfg_discover_path()
+    source_changed := cfg_watch_sources_changed(path)
     ok := true
     if path == "" {
         cfg_apply_default()
@@ -2096,7 +2097,9 @@ cfg_reload :: proc() {
         ok = load_config_path(path, "reload")
         cfg_watch_sync()
     }
-    notice_show("Configuration reloaded" if ok else "Configuration reload failed", false)
+    if source_changed {
+        notice_show("Configuration reloaded" if ok else "Configuration reload failed", false)
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -2113,16 +2116,19 @@ CONFIG_WATCH_INTERVAL :: 250 * time.Millisecond
 CONFIG_WATCH_SETTLE   :: 100 * time.Millisecond
 
 Config_File_Snapshot :: struct {
-    exists: bool,
-    inode:  u128,
-    device: u64,
-    size:   i64,
-    mtime:  i64,
+    exists:      bool,
+    readable:    bool,
+    inode:       u128,
+    device:      u64,
+    size:        i64,
+    mtime:       i64,
+    content_hash: u64,
 }
 
 Config_Watched_File :: struct {
     path: string,
     observed: Config_File_Snapshot,
+    loaded:   Config_File_Snapshot,
 }
 
 Config_Watch :: struct {
@@ -2134,24 +2140,64 @@ Config_Watch :: struct {
 
 g_config_watch: Config_Watch
 
-cfg_file_snapshot :: proc(path: string) -> Config_File_Snapshot {
+cfg_file_snapshot :: proc(path: string, include_contents := false) -> Config_File_Snapshot {
     if path == "" { return {} }
     info, err := os.stat(path, context.allocator)
     if err != nil { return {} }
     defer os.file_info_delete(info, context.allocator)
-    return Config_File_Snapshot{
+
+    snapshot := Config_File_Snapshot{
         exists = true,
         inode  = info.inode,
         device = info.device,
         size   = info.size,
         mtime  = time.to_unix_nanoseconds(info.modification_time),
     }
+    if include_contents {
+        data, read_error := os.read_entire_file_from_path(path, context.allocator)
+        if read_error == nil {
+            defer delete(data)
+            snapshot.readable = true
+            snapshot.content_hash = 0xcbf29ce484222325
+            for byte in data {
+                snapshot.content_hash ~= u64(byte)
+                snapshot.content_hash *= 0x100000001b3
+            }
+        }
+    }
+    return snapshot
 }
 
 cfg_snapshots_equal :: proc(a, b: Config_File_Snapshot) -> bool {
     return a.exists == b.exists &&
            a.inode == b.inode && a.device == b.device &&
            a.size == b.size && a.mtime == b.mtime
+}
+
+cfg_snapshot_contents_equal :: proc(a, b: Config_File_Snapshot) -> bool {
+    return a.exists == b.exists && a.readable == b.readable &&
+           a.size == b.size && a.content_hash == b.content_hash
+}
+
+// Notices describe a real source change, not merely receipt of a reload
+// command. This also keeps unrelated clients that accidentally request a
+// reload from producing a false "Configuration reloaded" message.
+cfg_watch_sources_changed :: proc(discovered_path: string) -> bool {
+    if discovered_path == "" {
+        if len(g_active_config_sources) == 0 { return false }
+    } else if len(g_active_config_sources) == 0 ||
+              discovered_path != g_active_config_sources[0] {
+        return true
+    }
+
+    if len(g_config_watch.files) == 0 {
+        return len(g_active_config_sources) > 0
+    }
+    for &file in g_config_watch.files {
+        current := cfg_file_snapshot(file.path, true)
+        if !cfg_snapshot_contents_equal(current, file.loaded) { return true }
+    }
+    return false
 }
 
 cfg_watch_clear_files :: proc() {
@@ -2172,15 +2218,18 @@ cfg_watch_sync :: proc() {
             [dynamic]Config_Watched_File, 0, len(g_active_config_sources),
         )
         for path in g_active_config_sources {
+            snapshot := cfg_file_snapshot(path, true)
             append(&g_config_watch.files, Config_Watched_File{
                 path = strings.clone(path),
-                observed = cfg_file_snapshot(path),
+                observed = snapshot,
+                loaded = snapshot,
             })
         }
     }
     if len(g_config_watch.files) == 0 { return }
     for &file in g_config_watch.files {
-        file.observed = cfg_file_snapshot(file.path)
+        file.observed = cfg_file_snapshot(file.path, true)
+        file.loaded = file.observed
     }
     g_config_watch.pending = false
     g_config_watch.next_check = time.tick_add(time.tick_now(), CONFIG_WATCH_INTERVAL)
@@ -2215,6 +2264,7 @@ cfg_watch_run_due :: proc() {
         for &file in g_config_watch.files {
             current := cfg_file_snapshot(file.path)
             if !cfg_snapshots_equal(current, file.observed) {
+                current = cfg_file_snapshot(file.path, true)
                 file.observed = current
                 g_config_watch.pending = true
                 g_config_watch.reload_due = time.tick_add(now, CONFIG_WATCH_SETTLE)
@@ -2225,20 +2275,35 @@ cfg_watch_run_due :: proc() {
 
     if g_config_watch.pending && time.tick_diff(g_config_watch.reload_due, now) >= 0 {
         // Confirm that every source remained unchanged throughout the settle window.
-        changed := false
+        unstable := false
         for &file in g_config_watch.files {
             current := cfg_file_snapshot(file.path)
             if !cfg_snapshots_equal(current, file.observed) {
+                current = cfg_file_snapshot(file.path, true)
                 file.observed = current
-                changed = true
+                unstable = true
             }
         }
-        if changed {
+        if unstable {
             g_config_watch.reload_due = time.tick_add(now, CONFIG_WATCH_SETTLE)
             return
         }
+
+        content_changed := false
+        for &file in g_config_watch.files {
+            if !cfg_snapshot_contents_equal(file.observed, file.loaded) {
+                content_changed = true
+                break
+            }
+        }
         g_config_watch.pending = false
-        cfg_reload()
+        if content_changed {
+            cfg_reload()
+        } else {
+            // Some editors replace a file even when its contents are unchanged.
+            // Accept the new metadata without announcing a configuration reload.
+            for &file in g_config_watch.files { file.loaded = file.observed }
+        }
     }
 }
 
