@@ -143,7 +143,7 @@ refresh_hover_tooltip :: proc(state: ^State) {
     for &window in state.Windows {
         if window.HoverBlock < 0 || window.HoverBlock >= len(state.Blocks) { continue }
         block := &state.Blocks[window.HoverBlock]
-        if block.Kind == .Layout || block.Kind == .Title {
+        if block.Kind == .Layout {
             label := indicator_hover_text(block, state, &window)
             defer delete(label)
             if label != "" { tooltip_show(state, window.HoverRootX, window.HoverRootY, label) }
@@ -154,7 +154,7 @@ refresh_hover_tooltip :: proc(state: ^State) {
                 defer delete(label)
                 if label != "" { tooltip_show(state, window.HoverRootX, window.HoverRootY, label) }
             }
-        } else if block.Kind == .Bluetooth {
+        } else if block.Kind == .Bluetooth || block.Kind == .Network {
             if data := script_data(block); data != nil && data.HoverText != "" {
                 tooltip_show(state, window.HoverRootX, window.HoverRootY, data.HoverText)
             }

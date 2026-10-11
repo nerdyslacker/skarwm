@@ -63,6 +63,28 @@ bar_publish_blocks :: proc() {
             strings.write_i64(&builder, i64(block.alignment))
             bar_write_block_colours(&builder, &block)
             strings.write_byte(&builder, '\n')
+        case .Clock:
+            strings.write_string(&builder, "clock\t")
+            strings.write_i64(&builder, i64(block.alignment))
+            bar_write_block_colours(&builder, &block)
+            strings.write_byte(&builder, '\t')
+            bar_write_escaped(&builder, block.name)
+            if block.click_command != "" {
+                strings.write_byte(&builder, '\t')
+                bar_write_escaped(&builder, block.click_command)
+            }
+            strings.write_byte(&builder, '\n')
+        case .Battery:
+            strings.write_string(&builder, "battery\t")
+            strings.write_i64(&builder, i64(block.alignment))
+            bar_write_block_colours(&builder, &block)
+            strings.write_byte(&builder, '\t')
+            bar_write_escaped(&builder, block.name)
+            if block.click_command != "" {
+                strings.write_byte(&builder, '\t')
+                bar_write_escaped(&builder, block.click_command)
+            }
+            strings.write_byte(&builder, '\n')
         case .Script:
             strings.write_string(&builder, "script\t")
             strings.write_i64(&builder, i64(block.alignment))

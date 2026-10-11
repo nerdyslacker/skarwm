@@ -12,10 +12,12 @@ import "core:time"
 
 SCRIPT_OUTPUT_MAX :: 4096
 SCRIPT_VISIBLE_MAX :: 220
+SCRIPT_COMMAND_MAX :: 2048
 
 Script_Block_Data :: struct {
     Name: string,
-    Command: [1024]byte,
+    Command: [SCRIPT_COMMAND_MAX]byte,
+    AlternateCommand: [SCRIPT_COMMAND_MAX]byte,
     ClickCommand: [1024]byte,
     ClickCommandLen: int,
     Text: string,
@@ -45,9 +47,85 @@ script_click_command :: proc(block: ^Block) -> string {
 
 script_data :: proc(block: ^Block) -> ^Script_Block_Data {
     if block == nil || block.Data == nil { return nil }
-    if block.Kind != .Script && block.Kind != .Audio &&
+    if block.Kind != .Clock && block.Kind != .Battery && block.Kind != .Script && block.Kind != .Audio &&
        block.Kind != .Bluetooth && block.Kind != .Network { return nil }
     return (^Script_Block_Data)(block.Data)
+}
+
+CLOCK_SHORT_COMMAND :: `date '+%H:%M'`
+CLOCK_LONG_COMMAND :: `date '+%a, %b %d - %H:%M:%S'`
+BATTERY_READ_COMMAND :: `found=0; total=0; count=0; charging=0; for supply in /sys/class/power_supply/*; do [ -r "$supply/type" ] || continue; [ "$(cat "$supply/type" 2>/dev/null)" = Battery ] || continue; capacity=$(cat "$supply/capacity" 2>/dev/null); case "$capacity" in ''|*[!0-9]*) continue;; esac; found=1; total=$((total + capacity)); count=$((count + 1)); [ "$(cat "$supply/status" 2>/dev/null)" = Charging ] && charging=1; done; if [ "$found" -eq 1 ] && [ "$count" -gt 0 ]; then printf '%d%%' "$((total / count))"; [ "$charging" -eq 1 ] && printf ' charging'; elif command -v upower >/dev/null 2>&1 && device=$(upower -e 2>/dev/null | awk '/battery|BAT/ {print; exit}') && [ -n "$device" ]; then LC_ALL=C upower -i "$device" 2>/dev/null | awk -F: '/percentage/ {gsub(/[[:space:]]/, "", $2); percent=$2} /state/ {gsub(/^[[:space:]]+/, "", $2); state=$2} END {if (percent != "") {printf "%s", percent; if (state == "charging" || state == "pending-charge") printf " charging"}}'; elif command -v sysctl >/dev/null 2>&1 && life=$(sysctl -n hw.acpi.battery.life 2>/dev/null); then printf '%s%%' "$life"; state=$(sysctl -n hw.acpi.battery.state 2>/dev/null); [ "$state" = 2 ] && printf ' charging'; elif command -v apm >/dev/null 2>&1 && life=$(apm -l 2>/dev/null); then printf '%s%%' "$life"; [ "$(apm -b 2>/dev/null)" = 3 ] && printf ' charging'; else printf 'unavailable'; fi; true`
+
+CLOCK_ICON :: "󰃭"
+BATTERY_ICON :: "󰁹"
+
+append_clock_block :: proc(
+    state: ^State,
+    alignment: Block_Alignment,
+    label: string,
+    foreground: u32 = 0, background: u32 = 0,
+    foreground_set: bool = false, background_set: bool = false,
+    click_command: string = "",
+) {
+    effective_label := label
+    if effective_label == "" { effective_label = CLOCK_ICON }
+    before := len(state.Blocks)
+    append_script_block(state, alignment, effective_label, CLOCK_SHORT_COMMAND, 1000, 1000,
+        foreground, background, foreground_set, background_set)
+    if len(state.Blocks) == before { return }
+    block := &state.Blocks[len(state.Blocks) - 1]
+    block.Kind = .Clock
+    block.Ops.Click = clock_click
+    script_set_click_command(block, click_command)
+    data := script_data(block)
+    copy(data.AlternateCommand[:len(CLOCK_LONG_COMMAND)], CLOCK_LONG_COMMAND)
+    data.AlternateCommand[len(CLOCK_LONG_COMMAND)] = 0
+}
+
+clock_click :: proc(block: ^Block, state: ^State, window: ^Bar_Window, payload: int, button: u8) {
+    _ = state
+    _ = window
+    _ = payload
+    data := script_data(block)
+    if data == nil { return }
+    if button == 1 {
+        if command := script_click_command(block); command != "" { process.Spawn(command) }
+        return
+    }
+    if button != 2 { return }
+    script_stop(data)
+    command := data.Command
+    data.Command = data.AlternateCommand
+    data.AlternateCommand = command
+    data.NextRun = time.tick_now()
+}
+
+append_battery_block :: proc(
+    state: ^State,
+    alignment: Block_Alignment,
+    label: string,
+    foreground: u32 = 0, background: u32 = 0,
+    foreground_set: bool = false, background_set: bool = false,
+    click_command: string = "",
+) {
+    effective_label := label
+    if effective_label == "" { effective_label = BATTERY_ICON }
+    before := len(state.Blocks)
+    append_script_block(state, alignment, effective_label, BATTERY_READ_COMMAND, 10000, 2000,
+        foreground, background, foreground_set, background_set)
+    if len(state.Blocks) == before { return }
+    block := &state.Blocks[len(state.Blocks) - 1]
+    block.Kind = .Battery
+    block.Ops.Click = script_command_click
+    script_set_click_command(block, click_command)
+}
+
+script_command_click :: proc(block: ^Block, state: ^State, window: ^Bar_Window, payload: int, button: u8) {
+    _ = state
+    _ = window
+    _ = payload
+    if button != 1 { return }
+    if command := script_click_command(block); command != "" { process.Spawn(command) }
 }
 
 append_script_block :: proc(
@@ -58,7 +136,7 @@ append_script_block :: proc(
     foreground: u32 = 0, background: u32 = 0,
     foreground_set: bool = false, background_set: bool = false,
 ) {
-    if command == "" || len(command) >= 1024 { return }
+    if command == "" || len(command) >= SCRIPT_COMMAND_MAX { return }
     data := new(Script_Block_Data)
     data.Name = strings.clone(name)
     copy(data.Command[:len(command)], transmute([]u8)command)
@@ -84,18 +162,39 @@ append_script_block :: proc(
 }
 
 BLUETOOTH_OFF_ICON :: "󰂲"
+BLUETOOTH_ON_ICON :: "󰂯"
 AUDIO_OFF_ICON :: "󰝟"
+AUDIO_ON_ICON :: "󰕾"
 NETWORK_OFF_ICON :: "󰤭"
+NETWORK_WIFI_ICON :: "󰤨"
+NETWORK_ETHERNET_ICON :: "󰈀"
 
 script_label :: proc(block: ^Block) -> string {
     data := script_data(block)
     if data == nil { return fmt.aprintf("") }
     if block.Kind == .Bluetooth {
-        if data.Text != "off" && data.Text != "unavailable" { return fmt.aprintf("%s on", data.Name) }
+        if data.Text != "off" && data.Text != "unavailable" {
+            icon := data.Name
+            if icon == "" || icon == "_" { icon = BLUETOOTH_ON_ICON }
+            return fmt.aprintf("%s on", icon)
+        }
         return fmt.aprintf("%s off", BLUETOOTH_OFF_ICON)
     }
     if block.Kind == .Network && (data.Text == "offline" || data.Text == "unavailable") {
         return fmt.aprintf("%s off", NETWORK_OFF_ICON)
+    }
+    if block.Kind == .Network {
+        icon := data.Name
+        value := data.Text
+        if len(value) > len("wifi:") && value[:len("wifi:")] == "wifi:" {
+            if icon == "" || icon == "_" { icon = NETWORK_WIFI_ICON }
+            value = value[len("wifi:"):]
+        } else if len(value) > len("ethernet:") && value[:len("ethernet:")] == "ethernet:" {
+            if icon == "" || icon == "_" { icon = NETWORK_ETHERNET_ICON }
+            value = value[len("ethernet:"):]
+        }
+        if icon == "" || icon == "_" { icon = NETWORK_ETHERNET_ICON }
+        return fmt.aprintf("%s %s", icon, value)
     }
     if block.Kind == .Audio && data.Text == "muted" {
         return fmt.aprintf("%s muted", AUDIO_OFF_ICON)
@@ -142,8 +241,10 @@ append_audio_block :: proc(
     foreground_set: bool = false, background_set: bool = false,
     click_command: string = "",
 ) {
+    effective_label := label
+    if effective_label == "" { effective_label = AUDIO_ON_ICON }
     before := len(state.Blocks)
-    append_script_block(state, alignment, label, AUDIO_READ_COMMAND, 1000, 1000,
+    append_script_block(state, alignment, effective_label, AUDIO_READ_COMMAND, 1000, 1000,
         foreground, background, foreground_set, background_set)
     if len(state.Blocks) == before { return }
     block := &state.Blocks[len(state.Blocks) - 1]
@@ -168,7 +269,7 @@ audio_click :: proc(block: ^Block, state: ^State, window: ^Bar_Window, payload: 
     }
 }
 
-NETWORK_READ_COMMAND :: `if command -v nmcli >/dev/null 2>&1; then LC_ALL=C nmcli -t -f DEVICE,STATE device status | awk -F: '$2 == "connected" && $1 != "lo" {print $1; found=1; exit} END {if (!found) print "offline"}'; else printf 'unavailable'; fi`
+NETWORK_READ_COMMAND :: `result=''; info=''; if command -v nmcli >/dev/null 2>&1; then result=$(LC_ALL=C nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | awk -F: '$3 == "connected" && $1 != "lo" {if ($2 == "wifi") printf "wifi:%s", $1; else printf "ethernet:%s", $1; exit}'); fi; if [ -z "$result" ] && [ -d /sys/class/net ]; then for path in /sys/class/net/*; do interface=${path##*/}; [ "$interface" = lo ] && continue; [ "$(cat "$path/operstate" 2>/dev/null)" = up ] || continue; if [ -d "$path/wireless" ]; then result="wifi:$interface"; else result="ethernet:$interface"; fi; break; done; fi; if [ -z "$result" ] && command -v ifconfig >/dev/null 2>&1; then for interface in $(ifconfig -l 2>/dev/null); do [ "$interface" = lo0 ] && continue; info=$(ifconfig "$interface" 2>/dev/null); printf '%s' "$info" | grep -q 'status: active' || continue; if printf '%s' "$info" | grep -Eqi 'ssid|ieee80211'; then result="wifi:$interface"; else result="ethernet:$interface"; fi; break; done; fi; if [ -z "$result" ]; then printf 'offline'; exit 0; fi; printf '%s' "$result"; interface=${result#*:}; if [ "${result%%:*}" = wifi ]; then ssid=''; command -v iwgetid >/dev/null 2>&1 && ssid=$(iwgetid "$interface" -r 2>/dev/null); [ -z "$ssid" ] && command -v iw >/dev/null 2>&1 && ssid=$(iw dev "$interface" link 2>/dev/null | sed -n 's/^[[:space:]]*SSID: //p' | head -1); [ -z "$ssid" ] && command -v nmcli >/dev/null 2>&1 && ssid=$(LC_ALL=C nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null | sed -n 's/^yes://p' | head -1); [ -z "$ssid" ] && [ -n "$info" ] && ssid=$(printf '%s' "$info" | sed -n 's/.*ssid \([^ ]*\).*/\1/p' | head -1); [ -n "$ssid" ] && printf '\nSSID: %s' "$ssid"; fi; ipaddr=''; command -v ip >/dev/null 2>&1 && ipaddr=$(ip -o -4 addr show dev "$interface" 2>/dev/null | awk '{print $4; exit}'); [ -z "$ipaddr" ] && command -v ifconfig >/dev/null 2>&1 && ipaddr=$(ifconfig "$interface" 2>/dev/null | awk '/inet / {print $2; exit}'); [ -n "$ipaddr" ] && printf '\nIP: %s' "$ipaddr"; true`
 NETWORK_CLICK_COMMAND :: `command -v nm-connection-editor >/dev/null 2>&1 && exec nm-connection-editor`
 NETWORK_TOGGLE_COMMAND :: `if command -v nmcli >/dev/null 2>&1; then if [ "$(nmcli radio wifi)" = "enabled" ]; then nmcli radio wifi off; else nmcli radio wifi on; fi; fi`
 BLUETOOTH_READ_COMMAND :: `if command -v bluetoothctl >/dev/null 2>&1 && bluetoothctl show 2>/dev/null | grep -q 'Powered: yes'; then printf 'on'; bluetoothctl devices Connected 2>/dev/null | while read -r _ mac name; do battery=$(bluetoothctl info "$mac" 2>/dev/null | sed -n 's/.*Battery Percentage:.*(\([0-9][0-9]*\)).*/\1/p; s/.*Battery Percentage: *\([0-9][0-9]*\)%.*/\1/p'); if [ -n "$battery" ]; then printf '\n%s — %s%%' "$name" "$battery"; else printf '\n%s' "$name"; fi; done; else printf 'off'; fi`
@@ -182,9 +283,13 @@ append_status_block :: proc(
     click_command: string = "",
 ) {
     if kind != .Bluetooth && kind != .Network { return }
+    effective_label := label
+    if effective_label == "" {
+        effective_label = BLUETOOTH_ON_ICON if kind == .Bluetooth else ""
+    }
     read_command := kind == .Bluetooth ? BLUETOOTH_READ_COMMAND : NETWORK_READ_COMMAND
     before := len(state.Blocks)
-    append_script_block(state, alignment, label, read_command, 3000, 2000,
+    append_script_block(state, alignment, effective_label, read_command, 3000, 2000,
         foreground, background, foreground_set, background_set)
     if len(state.Blocks) == before { return }
     block := &state.Blocks[len(state.Blocks) - 1]
@@ -365,7 +470,7 @@ script_service_one :: proc(block: ^Block, data: ^Script_Block_Data, now: time.Ti
     // A shell command that backgrounds work must not leave that work attached
     // to the bar after the shell itself exits.
     posix.killpg(data.Pid, .SIGKILL)
-    script_set_result(data, success, block.Kind == .Bluetooth)
+    script_set_result(data, success, block.Kind == .Bluetooth || block.Kind == .Network)
     if data.Fd >= 0 { posix.close(data.Fd) }
     data.Fd = -1
     data.Pid = 0

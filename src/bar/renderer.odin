@@ -9,8 +9,6 @@ import "core:strings"
 BAR_PAD :: i32(6)
 BLOCK_GAP :: i32(4)
 
-ELLIPSIS :: "…"
-
 renderer_init :: proc(state: ^State) {
     state.Display = XOpenDisplay(nil)
     if state.Display == nil {
@@ -40,21 +38,6 @@ renderer_shutdown :: proc(state: ^State) {
     state.GC = nil
     state.Display, state.Visual = nil, nil
     state.NormalFont, state.BoldFont = nil, nil
-}
-
-draw_text_ellipsized :: proc(state: ^State, window: ^Bar_Window, x: i32, label: string, max_width: i32, foreground: u32) {
-    if text_width(state, label) <= max_width { draw_text(state, window, x, label, foreground); return }
-    ellipsis_width := text_width(state, ELLIPSIS)
-    end := 0
-    for end < len(label) {
-        next := end + 1
-        for next < len(label) && (u8(label[next]) & 0xc0) == 0x80 { next += 1 }
-        if text_width(state, label[:next]) + ellipsis_width > max_width { break }
-        end = next
-    }
-    shortened := fmt.aprintf("%s%s", label[:end], ELLIPSIS)
-    defer delete(shortened)
-    draw_text(state, window, x, shortened, foreground)
 }
 
 tooltip_show :: proc(state: ^State, mouse_x, mouse_y: i32, label: string) {

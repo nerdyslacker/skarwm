@@ -51,10 +51,12 @@ import x11 "../x11"
 //       bar_block  : title : <left|center|right>
 //       bar_block  : systray : <left|center|right>
 //       bar_block  : button : <left|center|right> : <label> : "<command>"
+//       bar_block  : clock : <left|center|right> [: <label>] [: "<click command>"]
+//       bar_block  : battery : <left|center|right> [: <label>] [: "<click command>"]
 //       bar_block  : script : <left|center|right> : <name> : <interval seconds> :
 //                    <timeout seconds> : "<command>"
-//       bar_block  : audio : <left|center|right> : <label> [: "<click command>"]
-//       bar_block  : network|bluetooth : <left|center|right> : <label> [: "<click command>"]
+//       bar_block  : audio : <left|center|right> [: <label>] [: "<click command>"]
+//       bar_block  : network|bluetooth : <left|center|right> [: <label>] [: "<click command>"]
 //     Any block may append foreground/background colours (`_` inherits). For
 //     script/button blocks the pair appears immediately before the command.
 //       virtual_screen : <output> : split : <percent> [: <pixel offset>]
@@ -101,7 +103,7 @@ Raw_Rule :: struct {
     decorate_set:       bool,
 }
 
-Bar_Block_Kind :: enum u8 { Workspaces, Workspace_Meta, Layout, Title, Script, Systray, Button, Audio, Bluetooth, Network }
+Bar_Block_Kind :: enum u8 { Workspaces, Workspace_Meta, Layout, Title, Clock, Battery, Script, Systray, Button, Audio, Bluetooth, Network }
 Bar_Block_Alignment :: enum u8 { Left, Center, Right }
 
 // Raw_Bar_Block is owned configuration data. The WM publishes it for the
@@ -1174,39 +1176,60 @@ parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string)
             foreground = foreground, background = background,
             foreground_set = foreground_set, background_set = background_set,
         })
-    case "audio", "bluetooth", "network":
+    case "audio", "bluetooth", "network", "battery", "clock":
         original := remaining
-        alignment_text, ok_alignment := next_directive_field(&remaining)
-        label := strings.trim_space(remaining)
-        extra := ""
-        if parsed_label, has_extra := next_directive_field(&remaining); has_extra {
-            label = parsed_label
-            extra = remaining
+        alignment_text := strings.trim_space(remaining)
+        tail := ""
+        if parsed_alignment, has_tail := next_directive_field(&remaining); has_tail {
+            alignment_text = parsed_alignment
+            tail = strings.trim_space(remaining)
         }
         alignment, valid_alignment := parse_bar_alignment(alignment_text)
+        label := ""
         foreground, background: u32
         foreground_set, background_set := false, false
         click_command := ""
         valid_tail := true
-        if extra != "" {
-            colours_only: bool
-            foreground, background, foreground_set, background_set, colours_only =
-                parse_bar_colours(extra)
-            if !colours_only {
-                tail := extra
-                foreground, background, foreground_set, background_set =
-                    take_leading_bar_colours(&tail)
-                if tail != extra {
-                    click_command = quoted_trim(tail)
-                } else {
-                    click_command = quoted_trim(extra)
-                }
+        if tail != "" {
+            foreground, background, foreground_set, background_set, colours_only :=
+                parse_bar_colours(tail)
+            if !colours_only && tail[0] == '"' {
+                click_command = quoted_trim(tail)
                 valid_tail = click_command != "" && len(click_command) < 1024
+            } else if !colours_only {
+                colours_and_command := tail
+                foreground, background, foreground_set, background_set =
+                    take_leading_bar_colours(&colours_and_command)
+                if colours_and_command != tail {
+                    click_command = quoted_trim(colours_and_command)
+                    valid_tail = click_command != "" && len(click_command) < 1024
+                } else {
+                    legacy := tail
+                    parsed_label, has_extra := next_directive_field(&legacy)
+                    if has_extra {
+                        label = parsed_label
+                        foreground, background, foreground_set, background_set, colours_only =
+                            parse_bar_colours(legacy)
+                        if !colours_only {
+                            colour_tail := legacy
+                            foreground, background, foreground_set, background_set =
+                                take_leading_bar_colours(&colour_tail)
+                            if colour_tail != legacy {
+                                click_command = quoted_trim(colour_tail)
+                            } else {
+                                click_command = quoted_trim(legacy)
+                            }
+                            valid_tail = click_command != "" && len(click_command) < 1024
+                        }
+                    } else {
+                        label = tail
+                    }
+                }
             }
         }
-        if !ok_alignment || !valid_alignment || label == "" || len(label) > 64 || !valid_tail {
+        if !valid_alignment || len(label) > 64 || !valid_tail {
             append(errs, fmt.aprintf(
-                "bar_block(%s): expected alignment : label [: foreground : background] [: click command], got %q",
+                "bar_block(%s): expected alignment [: label] [: foreground : background] [: click command], got %q",
                 kind, original,
             ))
             return false
@@ -1214,6 +1237,8 @@ parse_bar_block :: proc(sc: ^Load_Scratch, rest: string, errs: ^[dynamic]string)
         block_kind := Bar_Block_Kind.Audio
         if kind == "bluetooth" { block_kind = .Bluetooth }
         if kind == "network" { block_kind = .Network }
+        if kind == "battery" { block_kind = .Battery }
+        if kind == "clock" { block_kind = .Clock }
         append(&sc.bar_blocks, Raw_Bar_Block{
             kind = block_kind, alignment = alignment, name = strings.clone(label),
             click_command = strings.clone(click_command),

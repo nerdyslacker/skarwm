@@ -104,34 +104,39 @@ workspace-1 : scrolling-tile : 󰈹 : Web
 bar_block : layout : left
 bar_block : title : center
 bar_block : systray : right
-bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
-bar_block : network : right : 󰤨
-bar_block : bluetooth : right : 󰂯
-bar_block : audio : right : 󰕾
+bar_block : clock : right
+bar_block : network : right
+bar_block : bluetooth : right
+bar_block : audio : right
+bar_block : battery : right
 virtual_screen : DP-1 : split : 75 : -30
 rule : class : Firefox : workspace 3 floating decorate false
 ```
 
-Append `foreground : background` to workspace, audio, or systray blocks. Put
-the same pair immediately before the final command for script and button
-blocks. Either value may be `_` to inherit the global block colour. The audio
+Append `foreground : background` to workspace, clock, battery, audio, network,
+Bluetooth, or systray blocks. Put the same pair immediately before the final
+command for script and button blocks. Either value may be `_` to inherit the
+global block colour. The audio
 block toggles mute on middle click and changes the default sink volume by five
 percent when scrolled. Network shows its active non-loopback interface name,
-or `󰤭 off` when disconnected; middle click toggles the Wi-Fi radio.
+or `󰤭 off` when disconnected; hover shows the available SSID and IP address on
+separate lines, and middle click toggles the Wi-Fi radio.
 Bluetooth shows its configured icon while connected and `󰂲` while
 disconnected, followed by `on` or `off`. Muted audio uses the `󰝟` icon and
 displays `muted`. Bluetooth middle click toggles adapter power. Network and
 Bluetooth open `nm-connection-editor` or `blueman-manager` on left click.
 
-Audio, Network, and Bluetooth blocks accept an optional final quoted shell
-command for left click. Put it after the label, or after the optional colour
-pair. It overrides the Network/Bluetooth default application; Audio otherwise
-has no left-click action:
+Audio, Battery, Clock, Network, and Bluetooth blocks accept an optional final
+quoted shell command for left click. Put it after the optional label or colour
+pair. It overrides the Network/Bluetooth default application; Audio, Battery,
+and Clock otherwise have no left-click action:
 
 ```rc
-bar_block : audio : right : 󰕾 : "pavucontrol"
-bar_block : network : right : 󰤨 : _ : _ : "rofi -show network"
-bar_block : bluetooth : right : 󰂯 : "blueman-manager"
+bar_block : audio : right : "pavucontrol"
+bar_block : battery : right : "xterm -e upower -d"
+bar_block : clock : center : "gsimplecal"
+bar_block : network : right : _ : _ : "rofi -show network"
+bar_block : bluetooth : right : "blueman-manager"
 ```
 
 `bind` launches a shell command. `call` invokes a WM action. `workspace view`
@@ -194,8 +199,15 @@ declaration uses `workspace-ID : LAYOUT : ICON [: NAME]` (or `workspace_ID`):
 it sets the workspace layout and changes the corresponding workspace cell
 without rendering its own block. Button blocks take an
 alignment, display label, and left-click shell command. Audio, network, and
-Bluetooth blocks take an alignment and label, provide built-in actions, and
-optionally take a final left-click shell command.
+Bluetooth blocks take an alignment, provide their own icons and built-in
+actions, and optionally take a final left-click shell command. Battery also
+accepts an optional left-click command. The `network`
+icon distinguishes Wi-Fi from Ethernet automatically. Explicit labels remain
+accepted as compatibility overrides.
+The `clock` block displays `%H:%M` and toggles to
+`%a, %b %d - %H:%M:%S` on middle click; left click runs its optional command.
+The `battery` block uses the same compact
+syntax and auto-detects Linux power-supply/UPower and BSD battery interfaces.
 Script blocks additionally
 take a name, interval in seconds, timeout in seconds, and a shell command. See
 [Built-in bar](bar.md) for limits, failure handling, and security details.

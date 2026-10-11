@@ -74,9 +74,9 @@ title in the centre.
 The layout block uses Nerd Font glyphs for Scrolling Tile, Vertical Scroller,
 Tabbed, Dwindle, Monocle, and Floating.
 
-The title block fits short titles and caps its width at 240 pixels. Long titles
-are ellipsized;
-hover the title to see the complete text. Hover a layout glyph to see its name.
+The title block always fits and displays the complete focused-window title.
+It does not ellipsize the title or show a title tooltip. Hover a layout glyph
+to see its name.
 
 ```rc
 bar_block : workspaces : left
@@ -84,14 +84,16 @@ workspace-1 : scrolling-tile : 󰈹 : Web
 workspace-2 : dwindle : 󰆍 : Code
 bar_block : layout : left
 bar_block : title : center
+bar_block : clock : center
 bar_block : button : left : 󰀻 : "rofi -show drun"
 bar_block : script : right : _ : 2 : 1 : "cut -d ' ' -f 1 /proc/loadavg"
-bar_block : network : right : 󰤨
-bar_block : bluetooth : right : 󰂯
-bar_block : audio : right : 󰕾
+bar_block : network : right
+bar_block : bluetooth : right
+bar_block : audio : right
+bar_block : battery : right
 bar_block : systray : right
 bar_block : button : right : ⏻ : "rofi -show power-menu -modi power-menu:rofi-power-menu"
-bar_block : script : right : clock : 1 : 1 : "date '+%H:%M'"
+bar_block : clock : right
 ```
 
 The `audio` block reads the default PipeWire/PulseAudio sink, toggles mute on
@@ -99,25 +101,44 @@ middle click, and changes volume in five-percent steps when the pointer is over
 the block and the mouse wheel is scrolled. It uses `wpctl` when available and
 falls back to `pactl`.
 
-The `network` block reports the first active non-loopback interface name, uses
-`󰤭 off` when disconnected, and opens `nm-connection-editor` on left click.
+The `network` block reports the first active non-loopback interface name. It
+uses `󰤨` for Wi-Fi, `󰈀` for Ethernet or another wired interface, and
+`󰤭 off` when disconnected. Detection uses NetworkManager when available,
+then Linux network devices or BSD `ifconfig`. Left click opens
+`nm-connection-editor`. Hovering the block shows the connected Wi-Fi SSID and
+IPv4 address on separate lines when the platform exposes them; wired networks
+show the available IP address.
 Middle click toggles the Wi-Fi radio. The `bluetooth` block reports adapter
-power using its configured icon when enabled and `󰂲` when disabled. The icon
+power using the built-in `󰂯` icon when enabled and `󰂲` when disabled. The icon
 is followed by `on` or `off`; hover it to see each connected device and its
 battery percentage when available. It opens
 `blueman-manager` on left click, and middle click toggles Bluetooth power.
-Muted audio replaces its configured icon with `󰝟` and displays `muted`.
-Missing NetworkManager tooling uses the network-off state without blocking the
-bar.
+Muted audio replaces the built-in `󰕾` icon with `󰝟` and displays `muted`.
+When NetworkManager is unavailable, interface detection falls back without
+blocking the bar.
 
-Audio, Network, and Bluetooth accept an optional final shell command for left
-click. It replaces the Network/Bluetooth settings application; Audio has no
-default left-click action. Commands may contain colons and should be quoted:
+The `battery` block auto-detects Linux power-supply devices and falls back to
+UPower, FreeBSD ACPI `sysctl`, or BSD `apm`. It combines multiple Linux battery
+percentages, marks a charging battery with `charging`, and displays
+`unavailable` when no supported battery interface is present. It needs only an
+alignment, with optional foreground/background colours:
 
 ```rc
-bar_block : audio : right : 󰕾 : "pavucontrol"
-bar_block : network : right : 󰤨 : "rofi -show network"
-bar_block : bluetooth : right : 󰂯 : "blueman-manager"
+bar_block : battery : right
+bar_block : battery : right : #FCE8C3 : #3C3836
+```
+
+Audio, Battery, Clock, Network, and Bluetooth accept an optional final shell
+command for left click. It replaces the Network/Bluetooth settings application;
+Audio, Battery, and Clock have no default left-click action. Commands may
+contain colons and should be quoted:
+
+```rc
+bar_block : audio : right : "pavucontrol"
+bar_block : battery : right : "xterm -e upower -d"
+bar_block : clock : center : "gsimplecal"
+bar_block : network : right : "rofi -show network"
+bar_block : bluetooth : right : "blueman-manager"
 ```
 
 Every block can override its foreground and background. Use `_` to inherit one
@@ -125,11 +146,11 @@ of the global `bar_block_*` colours:
 
 ```rc
 bar_block : workspaces : left : #0E0D0C : #917E6B
-bar_block : network : right : 󰤨 : #FCE8C3 : #3C3836
-bar_block : bluetooth : right : 󰂯 : #FCE8C3 : #3C3836
-bar_block : audio : right : 󰕾 : #121110 : #D79921 : "pavucontrol"
+bar_block : network : right : #FCE8C3 : #3C3836
+bar_block : bluetooth : right : #FCE8C3 : #3C3836
+bar_block : audio : right : #121110 : #D79921 : "pavucontrol"
 bar_block : button : right : ⏻ : #FCE8C3 : #9D0006 : "rofi -show power-menu"
-bar_block : script : right : clock : 1 : 1 : _ : #3C3836 : "date '+%H:%M'"
+bar_block : clock : right : _ : #3C3836
 bar_block : systray : right : _ : #282828
 ```
 
@@ -138,6 +159,14 @@ text or an icon glyph. A left click starts the command detached from the bar,
 so launchers and long-running menus do not block status updates. For example,
 use `rofi -show drun` for an application launcher, or replace the power-menu
 example with any dmenu/rofi script installed on your system.
+
+Clock fields after the alignment are optional foreground/background colours.
+It displays the built-in `󰃭` icon and compact `%H:%M` time initially.
+Middle-click toggles the block to `%a, %b %d - %H:%M:%S`; another middle-click
+returns to the compact time. Left-click runs the optional configured command.
+
+Clock, battery, audio, network, and Bluetooth provide their own icons. The old
+explicit label field is still accepted as an override for compatibility.
 
 Script fields after the alignment are `name`, update interval in seconds,
 timeout in seconds, and command. Named blocks render as `name value`, so icon

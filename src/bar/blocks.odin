@@ -7,7 +7,7 @@ import "core:strconv"
 import "core:strings"
 
 Block_Alignment :: enum u8 { Left, Center, Right }
-Block_Kind :: enum u8 { Workspaces, Workspace_Meta, Layout, Title, Script, Systray, Button, Audio, Bluetooth, Network }
+Block_Kind :: enum u8 { Workspaces, Workspace_Meta, Layout, Title, Clock, Battery, Script, Systray, Button, Audio, Bluetooth, Network }
 
 Block_Measure_Proc :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32
 Block_Draw_Proc :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, block_index: int)
@@ -36,11 +36,6 @@ Hitbox :: struct {
     BlockIndex: int,
     Payload: int,
 }
-
-// Keep the title visually comparable to the example clock block while still
-// leaving enough room for a useful prefix before ellipsizing.
-TITLE_BLOCK_WIDTH :: i32(240)
-TITLE_BLOCK_TEXT_WIDTH :: TITLE_BLOCK_WIDTH - 16
 
 blocks_init :: proc(state: ^State) {
     state.Blocks = make([dynamic]Block, 0, 4)
@@ -263,15 +258,23 @@ blocks_read_managed :: proc(state: ^State) -> bool {
                 parsed_any = true
             }
         } else if version_two && (len(fields) == 7 || len(fields) == 8) &&
-                  (fields[0] == "audio" || fields[0] == "bluetooth" || fields[0] == "network") {
+                  (fields[0] == "audio" || fields[0] == "bluetooth" ||
+                   fields[0] == "network" || fields[0] == "battery" ||
+                   fields[0] == "clock") {
             alignment, alignment_ok := parse_block_alignment(fields[1])
             foreground, background, foreground_set, background_set, colours_ok :=
                 parse_managed_colours(fields[:], 2)
             click_command := ""
             if len(fields) == 8 { click_command = fields[7] }
-            if alignment_ok && colours_ok && fields[6] != "" && len(fields[6]) <= 64 &&
+            if alignment_ok && colours_ok && len(fields[6]) <= 64 &&
                len(click_command) < 1024 {
-                if fields[0] == "audio" {
+                if fields[0] == "clock" {
+                    append_clock_block(state, alignment, fields[6], foreground, background,
+                        foreground_set, background_set, click_command)
+                } else if fields[0] == "battery" {
+                    append_battery_block(state, alignment, fields[6], foreground, background,
+                        foreground_set, background_set, click_command)
+                } else if fields[0] == "audio" {
                     append_audio_block(state, alignment, fields[6], foreground, background,
                         foreground_set, background_set, click_command)
                 } else {
@@ -437,13 +440,6 @@ indicator_hover_text :: proc(block: ^Block, state: ^State, window: ^Bar_Window) 
         for ws in state.Workspaces {
             if ws.Output == window.Output && ws.Active { return layout_name(ws.Layout) }
         }
-    } else if block.Kind == .Title {
-        for client in state.WindowsState {
-            if client.Focused && client.Output == window.Output &&
-               text_width(state, client.Title) > TITLE_BLOCK_TEXT_WIDTH {
-                return fmt.aprintf("%s", client.Title)
-            }
-        }
     }
     return fmt.aprintf("")
 }
@@ -476,26 +472,27 @@ indicator_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> 
     label := indicator_label(block, state, window)
     defer delete(label)
     if label == "" { return 0 }
-    if block.Kind == .Title { return min(TITLE_BLOCK_WIDTH, text_width(state, label) + 16) }
+    if block.Kind == .Title { return text_width(state, label) + 16 }
     return text_width(state, label[:min(len(label), SCRIPT_VISIBLE_MAX)]) + 16
 }
 
 indicator_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, block_index: int) {
-    _ = block_index
     label := indicator_label(block, state, window)
     defer delete(label)
     if label == "" { return }
-    width := block.Kind == .Title ? min(TITLE_BLOCK_WIDTH, text_width(state, label) + 16) : text_width(state, label[:min(len(label), SCRIPT_VISIBLE_MAX)]) + 16
+    width := block.Kind == .Title ? text_width(state, label) + 16 : text_width(state, label[:min(len(label), SCRIPT_VISIBLE_MAX)]) + 16
     wrapper_y := min(i32(3), max(i32(0), window.Geom.H / 4))
     fill_rect(state, X_Drawable(window.Canvas), x, wrapper_y, width, window.Geom.H - wrapper_y * 2, block_background(block, state))
     if block.Kind == .Layout {
         draw_text_centered(state, window, x, wrapper_y, width, window.Geom.H - wrapper_y * 2,
             label, block_foreground(block, state))
     } else if block.Kind == .Title && label != "" {
-        draw_text_ellipsized(state, window, x + 8, label, TITLE_BLOCK_TEXT_WIDTH, block_foreground(block, state))
+        draw_text(state, window, x + 8, label, block_foreground(block, state))
     } else if label != "" {
         visible := label[:min(len(label), SCRIPT_VISIBLE_MAX)]
         draw_text(state, window, x + 8, visible, block_foreground(block, state))
     }
-    append(&window.Hits, Hitbox{X = x, Y = 0, W = width, H = window.Geom.H, BlockIndex = block_index})
+    if block.Ops.Click != nil {
+        append(&window.Hits, Hitbox{X = x, Y = 0, W = width, H = window.Geom.H, BlockIndex = block_index})
+    }
 }

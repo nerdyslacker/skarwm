@@ -171,6 +171,8 @@ These optional programs cover common session features:
 
 - [picom](https://picom.app/) — X11 compositing, shadows, fading, and true
   transparency for elements such as the drag/drop overlay
+- [rofi](https://github.com/davatorium/rofi) - window switcher, application launcher and not only
+- [maim](https://github.com/naelstrof/maim) - utility that takes screenshots of your desktop
 - [dunst](https://dunst-project.org/) — lightweight notification daemon
 - [kitty](https://sw.kovidgoyal.net/kitty/) — GPU-accelerated terminal
 - [feh](https://feh.finalrewind.org/) — image viewer commonly used to set the
