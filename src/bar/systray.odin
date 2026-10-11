@@ -17,6 +17,7 @@ XEMBED_EMBEDDED_NOTIFY :: u32(0)
 XEMBED_WINDOW_ACTIVATE :: u32(1)
 XEMBED_FOCUS_IN :: u32(4)
 TRAY_ICON_GAP :: i32(2)
+TRAY_PAD_X :: i32(8)
 
 append_systray_block :: proc(
     state: ^State, alignment: Block_Alignment,
@@ -136,7 +137,14 @@ tray_update_owner :: proc(state: ^State) {
     owner := x11.xcb_generate_id(state.Conn)
     event_mask := x11.EVENT_MASK_STRUCTURE_NOTIFY | x11.EVENT_MASK_SUBSTRUCTURE_NOTIFY |
         x11.EVENT_MASK_SUBSTRUCTURE_REDIRECT | x11.EVENT_MASK_EXPOSURE
-    values := [3]u32{state.Config.BlockBackground, 1, event_mask}
+    background := state.Config.BlockBackground
+    for &block in state.Blocks {
+        if block.Kind == .Systray {
+            background = block_background(&block, state)
+            break
+        }
+    }
+    values := [3]u32{background, 1, event_mask}
     cookie := x11.xcb_create_window_checked(
         state.Conn, 0, owner, host, 0, 0, 1, u16(tray_icon_size(state)), 0,
         x11.WINDOW_CLASS_INPUT_OUTPUT, 0,
@@ -185,7 +193,8 @@ tray_detach_for_rebuild :: proc(state: ^State) {
 }
 
 tray_icon_size :: proc(state: ^State) -> i32 {
-    return max(i32(1), state.Config.Height - 4)
+    wrapper_y := min(i32(3), max(i32(0), state.Config.Height / 4))
+    return max(i32(1), state.Config.Height - wrapper_y * 2)
 }
 
 systray_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32 {
@@ -194,15 +203,19 @@ systray_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i3
         return 0
     }
     size := tray_icon_size(state)
-    return i32(len(state.Tray.Icons)) * size + i32(len(state.Tray.Icons) - 1) * TRAY_ICON_GAP
+    return TRAY_PAD_X * 2 + i32(len(state.Tray.Icons)) * size +
+        i32(len(state.Tray.Icons) - 1) * TRAY_ICON_GAP
 }
 
 tray_arrange :: proc(state: ^State, window: ^Bar_Window, start_x: i32) {
     if state.Tray.Owner == 0 || window.Xid != state.Tray.HostBar { return }
-    size := min(tray_icon_size(state), window.Geom.H)
-    y := max(i32(0), (window.Geom.H - size) / 2)
-    width := max(i32(1), systray_measure(nil, state, window))
-    owner_values := [4]u32{u32(start_x), u32(y), u32(width), u32(size)}
+    wrapper_y := min(i32(3), max(i32(0), window.Geom.H / 4))
+    size := min(tray_icon_size(state), max(i32(1), window.Geom.H - wrapper_y * 2))
+    icons_width := i32(len(state.Tray.Icons)) * size +
+        i32(len(state.Tray.Icons) - 1) * TRAY_ICON_GAP
+    owner_values := [4]u32{
+        u32(start_x + TRAY_PAD_X), u32(wrapper_y), u32(max(i32(1), icons_width)), u32(size),
+    }
     x11.xcb_configure_window(
         state.Conn, state.Tray.Owner,
         x11.CW_X | x11.CW_Y | x11.CW_WIDTH | x11.CW_HEIGHT, &owner_values[0],
@@ -224,9 +237,10 @@ systray_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, 
     _ = block_index
     width := systray_measure(block, state, window)
     if width <= 0 { return }
+    wrapper_y := min(i32(3), max(i32(0), window.Geom.H / 4))
     fill_rect(
-        state, X_Drawable(window.Canvas), x, 0, width, window.Geom.H,
-        block.BackgroundSet ? block.Background : state.Config.Background,
+        state, X_Drawable(window.Canvas), x, wrapper_y, width,
+        window.Geom.H - wrapper_y * 2, block_background(block, state),
     )
     tray_arrange(state, window, x)
 }

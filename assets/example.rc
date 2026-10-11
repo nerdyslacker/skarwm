@@ -73,7 +73,7 @@ bar_block : systray : right
 # Launching: bind runs commands; autostart runs once.
 bind : mod + Return : "st"
 # bind : mod + Return : "kitty"
-autostart : "xsetroot -solid '#202020'"
+autostart : "xsetroot -solid '#262522'"
 # autostart : "picom --config ~/.config/picom/picom.conf -b"
 # autostart : "dunst -config ~/.config/dunst/dunstrc"
 
