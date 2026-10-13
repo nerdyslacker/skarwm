@@ -64,7 +64,7 @@ Ipc_Action :: enum {
     Toggle_Floating, Toggle_Always_On_Top, Toggle_Fullscreen,
     Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
     Layout_Scroller, Layout_Vertical_Scroller, Layout_Dwindle, Layout_Monocle, Layout_Next,
-    Set_Gaps, Set_Decorations,
+    Set_Gaps, Set_Corner_Radius, Set_Decorations, Set_Theme_Colors,
     Scratchpad_Toggle, Scratchpad_Toggle_Float, Scratchpad_Remove,
     Scratchpad_Target_AppId, Scratchpad_Target_Class,
     Scratchpad_Target_Instance, Scratchpad_Target_Title,
@@ -84,6 +84,7 @@ Ipc_Command :: struct {
     text:   string, // non-owning view into the request payload during dispatch
     spawn:  string, // optional non-owning command for an unmatched target
     flag:   bool,   // optional command modifier (currently target as floating)
+    colors: [8]u32,
 }
 
 // A decoded request frame. payload is an owned copy (delete it after use, and
@@ -698,6 +699,25 @@ ipc_parse_subscribe :: proc(data: []byte) -> (workspace: bool, output: bool, win
     return false, false, false, false, false // never closed
 }
 
+ipc_parse_rgb :: proc(value: string) -> (u32, bool) {
+    text := value
+    if len(text) > 0 && text[0] == '#' { text = text[1:] }
+    if len(text) != 6 { return 0, false }
+
+    result: u32
+    for ch in text {
+        digit: u32
+        switch {
+        case ch >= '0' && ch <= '9': digit = u32(ch - '0')
+        case ch >= 'a' && ch <= 'f': digit = u32(ch - 'a') + 10
+        case ch >= 'A' && ch <= 'F': digit = u32(ch - 'A') + 10
+        case: return 0, false
+        }
+        result = result * 16 + digit
+    }
+    return result, true
+}
+
 // ipc_parse_command parses the compact command language shared by RUN_COMMAND
 // and skarwm-msg. It intentionally does not accept i3 criteria or command
 // chains; every request is one atomic action.
@@ -856,6 +876,18 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
         return {}, strings.clone("gaps: expected a value from 0 to 100"), false
     }
 
+    if len(tokens) == 2 && (tokens[0] == "corner-radius" || tokens[0] == "corner_radius") {
+        value := 0
+        valid := len(tokens[1]) > 0
+        for ch in tokens[1] {
+            if ch < '0' || ch > '9' { valid = false; break }
+            value = value * 10 + int(ch - '0')
+            if value > 4096 { valid = false; break }
+        }
+        if valid { return Ipc_Command{action = .Set_Corner_Radius, arg = value}, "", true }
+        return {}, strings.clone("corner-radius: expected a value from 0 to 4096"), false
+    }
+
     if len(tokens) == 2 && tokens[0] == "decorations" {
         switch tokens[1] {
         case "enable", "enabled", "on", "true":
@@ -866,6 +898,18 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
             return Ipc_Command{action = .Set_Decorations, arg = 2}, "", true
         }
         return {}, strings.clone("decorations: expected enable, disable, or toggle"), false
+    }
+
+    if len(tokens) == 9 && tokens[0] == "theme-colors" {
+        colors: [8]u32
+        for token, i in tokens[1:] {
+            color, valid := ipc_parse_rgb(token)
+            if !valid {
+                return {}, strings.clone("theme-colors: expected eight #RRGGBB values"), false
+            }
+            colors[i] = color
+        }
+        return Ipc_Command{action = .Set_Theme_Colors, colors = colors}, "", true
     }
 
     if len(tokens) >= 4 && tokens[0] == "reminder" && tokens[1] == "add" {

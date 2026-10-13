@@ -2298,7 +2298,11 @@ cfg_watch_run_due :: proc() {
         }
         g_config_watch.pending = false
         if content_changed {
-            cfg_reload()
+            if ipc_has_ui_subscriber() {
+                for &file in g_config_watch.files { file.loaded = file.observed }
+            } else {
+                cfg_reload()
+            }
         } else {
             // Some editors replace a file even when its contents are unchanged.
             // Accept the new metadata without announcing a configuration reload.

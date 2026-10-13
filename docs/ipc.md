@@ -22,7 +22,10 @@ skarwm-msg toggle-floating
 skarwm-msg toggle-always-on-top
 skarwm-msg toggle-fullscreen
 skarwm-msg layout scrolling-tile|vertical-scroller|dwindle|fibonacci|monocle|floating|next
+skarwm-msg gaps 0..100
+skarwm-msg corner-radius 0..4096
 skarwm-msg decorations enable|disable|toggle
+skarwm-msg theme-colors FOCUSED ACTIVE_BG INACTIVE_BG ACTIVE_FG INACTIVE_FG ACTIVE_BORDER INACTIVE_BORDER UNFOCUSED
 skarwm-msg layout tabbed|stacked|toggle
 skarwm-msg switch-layout
 skarwm-msg toggle-tabbed

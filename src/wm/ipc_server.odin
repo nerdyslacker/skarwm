@@ -407,6 +407,10 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
         reflow()
         ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, g_wm.m.Focused)
         return
+    case .Set_Corner_Radius:
+        g_wm.m.Cfg.CornerRadius = i32(cmd.arg)
+        reflow()
+        return
     case .Set_Decorations:
         enabled := cmd.arg == 1
         if cmd.arg == 2 { enabled = !g_wm.m.Cfg.Decoration.Enabled }
@@ -417,6 +421,21 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
         ui.Sync_Decorations(&g_wm.ui, g_wm.m)
         reflow()
         ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, g_wm.m.Focused)
+        return
+    case .Set_Theme_Colors:
+        g_wm.m.Cfg.FocusedBorder = cmd.colors[0]
+        g_wm.m.Cfg.UnfocusedBorder = cmd.colors[7]
+        g_wm.m.Cfg.Decoration.ColorSource = .Explicit
+        g_wm.m.Cfg.Decoration.Accent = cmd.colors[0]
+        g_wm.m.Cfg.Decoration.ActiveBackground = cmd.colors[1]
+        g_wm.m.Cfg.Decoration.InactiveBackground = cmd.colors[2]
+        g_wm.m.Cfg.Decoration.ActiveForeground = cmd.colors[3]
+        g_wm.m.Cfg.Decoration.InactiveForeground = cmd.colors[4]
+        g_wm.m.Cfg.Decoration.ActiveBorder = cmd.colors[5]
+        g_wm.m.Cfg.Decoration.InactiveBorder = cmd.colors[6]
+        render_focus()
+        ui.Render_Tabs(&g_wm.ui, g_wm.m)
+        x11.xcb_flush(g_wm.conn)
         return
     case .Show_Bindings:     b.action = .Show_Bindings
     case .Reminder_Add:
@@ -551,6 +570,13 @@ ipc_broadcast_ui_payload :: proc(payload: []byte) -> bool {
         }
     }
     return delivered
+}
+
+ipc_has_ui_subscriber :: proc() -> bool {
+    for peer in g_ipc.clients {
+        if peer.ui_sub { return true }
+    }
+    return false
 }
 
 ipc_notice_event :: proc(text: string, persistent: bool) -> bool {
