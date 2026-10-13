@@ -22,11 +22,15 @@ src/
 │   ├── ops.odin                focus, move, lifecycle, layout state changes
 │   ├── resize.odin             size constraints and paired split resizing
 │   ├── animation.odin          pure interpolation and easing math
+│   ├── screen_discovery.odin   normalized Xinerama snapshots and identity matching
+│   ├── randr_metadata.odin     optional connector metadata and refresh scheduler
+│   ├── topology.odin           logical/virtual screen operations
 │   └── ipc.odin                IPC protocol, commands, and JSON snapshots
 ├── x11/
 │   ├── base.odin               base XCB ABI declarations
 │   ├── properties.odin         atom and property helpers
-│   └── randr.odin              RandR ABI declarations
+│   ├── xinerama.odin           Xinerama discovery ABI declarations
+│   └── randr.odin              RandR notification/metadata ABI declarations
 ├── input/
 │   ├── bindings.odin           actions and resolved key bindings
 │   ├── keysym.odin             keyboard/modifier lookup
@@ -47,7 +51,7 @@ src/
     ├── config.odin             rc parsing, validation, atomic reload
     ├── ipc_server.odin         nonblocking Unix-socket IPC transport
     ├── ewmh.odin               EWMH and ICCCM policy coordination
-    └── outputs.odin            monitor discovery and reconciliation
+    └── outputs.odin            Xinerama discovery, refresh, and reconciliation
 ```
 
 Within `src/`, `bar/` is the optional standalone dock/bar process. Outside
@@ -112,7 +116,9 @@ receive the state they need explicitly instead of reaching into `wm` globals.
 - Key lookup or the action/binding vocabulary: `input/`.
 - X events and translating user actions into core operations: `wm/manager.odin`.
 - EWMH/ICCCM coordination: `wm/ewmh.odin`.
-- Monitor discovery/reconciliation: `wm/outputs.odin`; raw RandR ABI: `x11/randr.odin`.
+- Screen discovery/reconciliation: `wm/outputs.odin`; normalized snapshots:
+  `core/screen_discovery.odin`; raw Xinerama and RandR ABIs: `x11/xinerama.odin`
+  and `x11/randr.odin`.
 - Window animation and shaping: `rendering/`.
 - Tabs and overlays: `ui/`.
 - Configuration syntax: `wm/config.odin`; canonical defaults: `core/config.odin`.

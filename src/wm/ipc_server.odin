@@ -314,7 +314,7 @@ ipc_handle_frame :: proc(cl: ^Ipc_Client, f: c.Ipc_Frame) -> bool {
         delete(pl)
 
     case .Get_Topology:
-        pl := c.ipc_topology_payload(g_wm.m, &g_randr.topology,
+        pl := c.ipc_topology_payload(g_wm.m, &g_randr.topology, &g_xinerama.topology,
             g_randr.refresh_count, g_randr.transaction_count, g_randr.refresh.Phase)
         ipc_send(cl, msg, pl)
         delete(pl)
@@ -330,7 +330,24 @@ ipc_handle_frame :: proc(cl: ^Ipc_Client, f: c.Ipc_Frame) -> bool {
     return true
 }
 
+ipc_preserves_external_focus :: proc(action: c.Ipc_Action) -> bool {
+    #partial switch action {
+    case .Layout_Floating, .Layout_Tabbed, .Layout_Stacked, .Layout_Toggle,
+         .Layout_Scroller, .Layout_Vertical_Scroller, .Layout_Dwindle,
+         .Layout_Monocle, .Layout_Next, .Set_Gaps, .Set_Corner_Radius,
+         .Set_Decorations, .Set_Theme_Colors:
+        return true
+    case:
+        return false
+    }
+}
+
 ipc_run_command :: proc(cmd: c.Ipc_Command) {
+    previous_preserve_external_focus := g_wm.preserve_external_focus
+    g_wm.preserve_external_focus = previous_preserve_external_focus ||
+        (ipc_has_ui_subscriber() && ipc_preserves_external_focus(cmd.action))
+    defer { g_wm.preserve_external_focus = previous_preserve_external_focus }
+
     b: input.Binding
     b.arg = cmd.arg
     switch cmd.action {
@@ -446,8 +463,18 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
         return
     case .Focus_Output_Next: b.action = .Focus_Output_Next
     case .Focus_Output_Prev: b.action = .Focus_Output_Prev
+    case .Focus_Output_Left: b.action = .Focus_Output_Left
+    case .Focus_Output_Right: b.action = .Focus_Output_Right
+    case .Focus_Output_Up: b.action = .Focus_Output_Up
+    case .Focus_Output_Down: b.action = .Focus_Output_Down
+    case .Focus_Output_Order: b.action = .Focus_Output_Order
     case .Move_To_Output_Next: b.action = .Move_To_Output_Next
     case .Move_To_Output_Prev: b.action = .Move_To_Output_Prev
+    case .Move_To_Output_Left: b.action = .Move_To_Output_Left
+    case .Move_To_Output_Right: b.action = .Move_To_Output_Right
+    case .Move_To_Output_Up: b.action = .Move_To_Output_Up
+    case .Move_To_Output_Down: b.action = .Move_To_Output_Down
+    case .Move_To_Output_Order: b.action = .Move_To_Output_Order
     case .Screen_Split_Toggle: b.action = .Screen_Split_Toggle
     case .Screen_Split_Enable: b.action = .Screen_Split_Enable
     case .Screen_Split_Disable: b.action = .Screen_Split_Disable

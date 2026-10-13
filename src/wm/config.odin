@@ -515,8 +515,22 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
     case "tag_prev", "move_to_ws_prev": base.action = .Move_To_WS_Prev; return base, ""
     case "focus_output_next", "focusmonitor_next": base.action = .Focus_Output_Next; return base, ""
     case "focus_output_prev", "focusmonitor_prev": base.action = .Focus_Output_Prev; return base, ""
+    case "focus_output_left": base.action = .Focus_Output_Left; return base, ""
+    case "focus_output_right": base.action = .Focus_Output_Right; return base, ""
+    case "focus_output_up": base.action = .Focus_Output_Up; return base, ""
+    case "focus_output_down": base.action = .Focus_Output_Down; return base, ""
+    case "focus_output_order":
+        if rb.argk != .Num || rb.argi < 1 { return {}, fmt.aprintf("bind(%q): focus_output_order requires an index >= 1", rb.combo) }
+        base.action = .Focus_Output_Order; base.arg = rb.argi; return base, ""
     case "move_to_output_next", "tagmonitor_next": base.action = .Move_To_Output_Next; return base, ""
     case "move_to_output_prev", "tagmonitor_prev": base.action = .Move_To_Output_Prev; return base, ""
+    case "move_to_output_left": base.action = .Move_To_Output_Left; return base, ""
+    case "move_to_output_right": base.action = .Move_To_Output_Right; return base, ""
+    case "move_to_output_up": base.action = .Move_To_Output_Up; return base, ""
+    case "move_to_output_down": base.action = .Move_To_Output_Down; return base, ""
+    case "move_to_output_order":
+        if rb.argk != .Num || rb.argi < 1 { return {}, fmt.aprintf("bind(%q): move_to_output_order requires an index >= 1", rb.combo) }
+        base.action = .Move_To_Output_Order; base.arg = rb.argi; return base, ""
     case "screen_split_toggle":
         if rb.argk == .Num && (rb.argi < 10 || rb.argi > 90) {
             return {}, fmt.aprintf("bind(%q): split ratio percent must be 10..90", rb.combo)
@@ -1823,15 +1837,15 @@ apply_workspace_layout_rules :: proc() {
     saved_currents := make([]^c.Workspace, len(m.Outputs), context.temp_allocator)
     for o, i in m.Outputs { saved_currents[i] = o.Current }
 
-    for o, output_index in m.Outputs {
+    for rule in g_wm.workspace_layouts {
+        ws := c.Ensure_WS(m, rule.workspace)
+        o := c.Output_Of_WS(m, ws)
+        output_index := c.Output_Index(m, o)
+        if ws == nil || output_index < 0 { continue }
         m.Active = output_index
-        for rule in g_wm.workspace_layouts {
-            ws := c.Ensure_WS_On_Output(o, rule.workspace)
-            if ws == nil { continue }
-            o.Current = ws
-            m.Focused = ws.Focus
-            _ = c.Set_Workspace_Layout(m, rule.layout)
-        }
+        o.Current = ws
+        m.Focused = ws.Focus
+        _ = c.Set_Workspace_Layout(m, rule.layout)
     }
     for o, i in m.Outputs { o.Current = saved_currents[i] }
     m.Active = saved_active

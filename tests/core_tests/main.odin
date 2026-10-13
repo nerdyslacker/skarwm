@@ -64,7 +64,11 @@ main :: proc() {
     test_floating_reserved_right_edge()
     test_jump_to_matching_window()
     test_multi_output()
+    test_global_workspace_ownership()
+    test_output_spatial_navigation()
     test_virtual_screens()
+    test_xinerama_screen_discovery()
+    test_xinerama_topology_transitions()
     test_physical_topology()
     test_topology_refresh_scheduler()
     test_topology_transaction_and_nearest_migration()
@@ -99,6 +103,205 @@ main :: proc() {
         fmt.eprintln("UNIT TESTS FAILED")
         os.exit(1)
     }
+}
+
+test_output_spatial_navigation :: proc() {
+    m := c.New_Manager()
+    defer c.Destroy_Manager(m)
+    specs := []c.Output_Spec{
+        {Name = "left", Geom = c.Rect{X = -1200, W = 1200, H = 900}},
+        {Name = "up", Geom = c.Rect{Y = -900, W = 1200, H = 900}},
+        {Name = "center", Geom = c.Rect{W = 1200, H = 900}, Primary = true},
+        {Name = "right", Geom = c.Rect{X = 1200, W = 1200, H = 900}},
+        {Name = "lower-right", Geom = c.Rect{X = 1200, Y = 900, W = 1200, H = 900}},
+    }
+    ok(c.Reconcile_Outputs(m, specs), "L-shaped output topology commits")
+    center := c.Find_Output(m, "center")
+    left := c.Find_Output(m, "left")
+    up := c.Find_Output(m, "up")
+    right := c.Find_Output(m, "right")
+    lower_right := c.Find_Output(m, "lower-right")
+    c.Focus_Output(m, center)
+
+    eq(c.Output_In_Direction(m, center, .Left), left,
+       "directional navigation handles a negative-origin left screen")
+    eq(c.Output_In_Direction(m, center, .Up), up,
+       "directional navigation handles a vertically stacked screen")
+    eq(c.Output_In_Direction(m, center, .Right), right,
+       "directional navigation prefers an aligned screen over an L-shaped diagonal")
+    eq(c.Output_In_Direction(m, right, .Down), lower_right,
+       "directional navigation follows an L-shaped lower screen")
+    eq(c.Output_In_Direction(m, lower_right, .Right), nil,
+       "directional navigation fails safely when no target exists")
+    eq(c.Output_By_Order(m, 0), left, "screen order is independently addressable")
+    eq(c.Output_By_Order(m, 4), lower_right, "screen order supports three-plus screens")
+    eq(c.Output_By_Order(m, 5), nil, "out-of-range screen order fails safely")
+    for output, i in m.Outputs {
+        eq(output.Current.Id, i + 1,
+           "new screens receive distinct visible workspaces in spatial order")
+    }
+
+    moved := add_tiled(m, 8891)
+    ok(c.Move_Focused_To_Output_By_Direction(m, .Right),
+       "focused window moves to the visible workspace on the directional target")
+    eq(moved.Out, right, "directional window move selects the right screen")
+    eq(c.Active_Output(m), center, "moving a window does not change the active screen")
+
+    another := add_tiled(m, 8892)
+    ok(c.Move_Focused_To_Output_By_Order(m, 0), "focused window moves by spatial order")
+    eq(another.Out, left, "ordered window move selects the requested screen")
+    ok(c.Focus_Output_By_Order(m, 3), "focus screen by spatial order")
+    eq(c.Active_Output(m), right, "ordered focus selects the requested screen")
+    ok(c.Focus_Output_By_Direction(m, .Down), "focus screen by physical direction")
+    eq(c.Active_Output(m), lower_right, "directional focus selects the lower screen")
+}
+
+test_xinerama_screen_discovery :: proc() {
+    next_id: u64
+    single_id: u64
+    single, valid_single := c.Build_Xinerama_Snapshot(
+        GEOM, []c.Rect{{W = 1920, H = 1080}}, nil, &single_id)
+    ok(valid_single && len(single.Screens) == 1,
+       "one Xinerama rectangle builds one managed screen")
+    eq(single.Screens[0].Confidence, c.Screen_Identity_Confidence.New,
+       "first Xinerama screen receives a new session identity")
+    c.Free_Screen_Topology(&single)
+
+    raw := []c.Rect{
+        {X = 1920, W = 1920, H = 1080},
+        {X = 0, W = 1920, H = 1080},
+        {X = 0, W = 1920, H = 1080},
+        {X = 100, Y = 100, W = 800, H = 600},
+        {X = -1280, W = 1280, H = 1024},
+        {W = 0, H = 1080},
+    }
+    first, valid := c.Build_Xinerama_Snapshot(c.Rect{W = 3840, H = 1080}, raw, nil, &next_id)
+    ok(valid, "valid Xinerama rectangles build a topology snapshot")
+    defer c.Free_Screen_Topology(&first)
+    eq(len(first.Screens), 3, "duplicates, contained rectangles, and invalid sizes are removed")
+    eq(first.Screens[0].Geom.X, i32(-1280), "negative-origin screen sorts by physical position")
+    eq(first.Screens[1].Identity, "xinerama-2", "new screen identities follow deterministic spatial order")
+
+    reordered := []c.Rect{
+        {X = 1920, W = 1920, H = 1080},
+        {X = -1280, W = 1280, H = 1024},
+        {X = 0, W = 1920, H = 1080},
+    }
+    second, valid_second := c.Build_Xinerama_Snapshot(c.Rect{W = 3840, H = 1080}, reordered, &first, &next_id)
+    ok(valid_second, "enumeration reorder produces another valid snapshot")
+    defer c.Free_Screen_Topology(&second)
+    for screen, i in second.Screens {
+        eq(screen.Identity, first.Screens[i].Identity,
+           "enumeration reorder preserves geometry-matched identity at index %d", i)
+        eq(screen.Confidence, c.Screen_Identity_Confidence.Exact,
+           "unchanged geometry has exact identity confidence at index %d", i)
+    }
+    ok(c.Screen_Topology_Equal(&first, &second),
+       "generation and match confidence do not create a false topology change")
+
+    resized := []c.Rect{
+        {X = -1280, W = 1280, H = 1024},
+        {X = 0, W = 2560, H = 1440},
+        {X = 2560, W = 1920, H = 1080},
+    }
+    third, valid_third := c.Build_Xinerama_Snapshot(c.Rect{W = 4480, H = 1440}, resized, &second, &next_id)
+    ok(valid_third, "resolution and position changes produce a valid snapshot")
+    defer c.Free_Screen_Topology(&third)
+    eq(third.Screens[0].Confidence, c.Screen_Identity_Confidence.Exact,
+       "unchanged negative-origin screen keeps exact identity")
+    eq(third.Screens[1].Identity, second.Screens[1].Identity,
+       "greatest-overlap matching preserves resized screen identity")
+    eq(third.Screens[2].Identity, second.Screens[2].Identity,
+       "proximity matching preserves moved screen identity")
+
+    partial := c.Normalize_Xinerama_Rects([]c.Rect{
+        {W = 1200, H = 1000},
+        {X = 800, W = 1200, H = 1000},
+    })
+    eq(len(partial), 2, "distinct partial overlaps remain independently managed")
+    delete(partial)
+
+    empty, valid_empty := c.Build_Xinerama_Snapshot(GEOM, []c.Rect{{W = 0, H = 1}}, &third, &next_id)
+    ok(!valid_empty && len(empty.Screens) == 0, "all-invalid query is rejected without replacing prior topology")
+
+    degraded, valid_degraded := c.Build_Root_Snapshot(GEOM, 7)
+    ok(valid_degraded && degraded.Degraded && degraded.Source == .Root,
+       "root-sized degraded topology is explicit")
+    eq(degraded.Generation, u64(7), "degraded snapshot retains requested generation")
+    specs := c.Screen_Snapshot_Specs(&degraded)
+    eq(len(specs), 1, "degraded snapshot reconciles through the shared output contract")
+    eq(specs[0].Name, "screen", "degraded output has a stable diagnostic identity")
+    delete(specs[0].Name)
+    delete(specs)
+    c.Free_Screen_Topology(&degraded)
+    invalid_root, valid_root := c.Build_Root_Snapshot(c.Rect{W = 0, H = 1080})
+    ok(!valid_root && len(invalid_root.Screens) == 0,
+       "invalid root geometry cannot replace a valid degraded topology")
+}
+
+reconcile_snapshot :: proc(m: ^c.Manager, snapshot: ^c.Screen_Topology_Snapshot) -> bool {
+    specs := c.Screen_Snapshot_Specs(snapshot)
+    defer {
+        for spec in specs { if spec.Name != "" { delete(spec.Name) } }
+        delete(specs)
+    }
+    return c.Reconcile_Outputs(m, specs[:])
+}
+
+test_xinerama_topology_transitions :: proc() {
+    m := c.New_Manager()
+    defer c.Destroy_Manager(m)
+    next_id: u64
+
+    one, valid_one := c.Build_Xinerama_Snapshot(
+        c.Rect{W = 1600, H = 900}, []c.Rect{{W = 1600, H = 900}}, nil, &next_id)
+    defer c.Free_Screen_Topology(&one)
+    ok(valid_one && reconcile_snapshot(m, &one), "fake Xinerama 1-screen snapshot commits")
+    survivor := m.Outputs[0]
+    workspace_one := survivor.Current
+    client_one := add_tiled(m, 8901)
+    workspace_one.Layout = .Monocle
+    workspace_one.ViewportX = 41
+
+    two, valid_two := c.Build_Xinerama_Snapshot(
+        c.Rect{W = 3200, H = 900},
+        []c.Rect{{X = 1600, W = 1600, H = 900}, {W = 1600, H = 900}},
+        &one, &next_id)
+    defer c.Free_Screen_Topology(&two)
+    ok(valid_two && reconcile_snapshot(m, &two), "fake Xinerama transition 1 to 2 commits")
+    eq(len(m.Outputs), 2, "1 to 2 transition adds one logical screen")
+    eq(m.Outputs[0], survivor, "unchanged rectangle retains its logical screen object")
+    eq(client_one.Ws, workspace_one, "existing workspace survives screen addition")
+    eq(workspace_one.Layout, c.Workspace_Layout.Monocle, "layout survives screen addition")
+    eq(workspace_one.ViewportX, i32(41), "viewport survives screen addition")
+
+    right := m.Outputs[1]
+    ok(c.Focus_Output(m, right), "focus newly added fake screen")
+    workspace_two := right.Current
+    client_two := add_tiled(m, 8902)
+
+    three, valid_three := c.Build_Xinerama_Snapshot(
+        c.Rect{W = 4800, H = 900},
+        []c.Rect{{X = 3200, W = 1600, H = 900}, {W = 1600, H = 900},
+                  {X = 1600, W = 1600, H = 900}},
+        &two, &next_id)
+    defer c.Free_Screen_Topology(&three)
+    ok(valid_three && reconcile_snapshot(m, &three), "fake Xinerama transition 2 to 3 commits")
+    eq(len(m.Outputs), 3, "2 to 3 transition adds a third logical screen")
+    eq(client_one.Ws, workspace_one, "primary workspace identity survives 2 to 3")
+    eq(client_two.Ws, workspace_two, "secondary workspace identity survives 2 to 3")
+    eq(c.Active_Output(m), right, "adding a screen does not steal active-screen focus")
+
+    reduced, valid_reduced := c.Build_Xinerama_Snapshot(
+        c.Rect{W = 1600, H = 900}, []c.Rect{{W = 1600, H = 900}}, &three, &next_id)
+    defer c.Free_Screen_Topology(&reduced)
+    ok(valid_reduced && reconcile_snapshot(m, &reduced), "fake Xinerama transition 3 to 1 commits")
+    eq(len(m.Outputs), 1, "3 to 1 transition removes stale logical screens")
+    eq(m.Outputs[0], survivor, "exact survivor identity wins after disconnect")
+    eq(client_one.Out, survivor, "survivor client remains on the retained screen")
+    eq(client_two.Out, survivor, "removed-screen client migrates to the survivor")
+    eq(client_one.Ws, workspace_one, "survivor workspace object remains intact")
+    eq(client_two.Ws, workspace_two, "migrated workspace object remains intact")
 }
 
 test_physical_topology :: proc() {
@@ -158,8 +361,12 @@ test_physical_topology :: proc() {
     ok(c.Topology_Valid(&negative), "negative monitor coordinates remain valid")
 
     m := mk_man()
-    payload := c.ipc_topology_payload(m, &old, 7, 3, .Scheduled)
-    ok(strings.contains(string(payload), `"generation":0`) &&
+    discovery, _ := c.Build_Root_Snapshot(GEOM, 5)
+    defer c.Free_Screen_Topology(&discovery)
+    payload := c.ipc_topology_payload(m, &old, &discovery, 7, 3, .Scheduled)
+    ok(strings.contains(string(payload), `"generation":5`) &&
+       strings.contains(string(payload), `"source":"root","degraded":true`) &&
+       strings.contains(string(payload), `"identity":"screen"`) &&
        strings.contains(string(payload), `"connected":true,"enabled":false`) &&
        strings.contains(string(payload), `"scheduler":"scheduled"`) &&
        strings.contains(string(payload), `"logical_outputs":[`),
@@ -172,9 +379,14 @@ test_topology_refresh_scheduler :: proc() {
     state: c.Topology_Refresh_State
     c.Topology_Schedule(&state, 100, 75)
     eq(state.Phase, c.Topology_Refresh_Phase.Scheduled, "event schedules topology refresh")
-    ok(!c.Topology_Begin_Refresh(&state, 174), "refresh does not run before debounce deadline")
-    ok(c.Topology_Begin_Refresh(&state, 175), "refresh runs at debounce deadline")
+    c.Topology_Schedule(&state, 120, 75)
+    eq(state.Deadline, i64(195), "event burst extends the debounce deadline")
+    c.Topology_Schedule(&state, 130, 0)
+    eq(state.Deadline, i64(130), "manual refresh makes an event-scheduled query immediately due")
+    ok(!c.Topology_Begin_Refresh(&state, 129), "refresh does not run before its deadline")
+    ok(c.Topology_Begin_Refresh(&state, 130), "manual refresh runs at its immediate deadline")
     c.Topology_Schedule(&state, 176, 75)
+    c.Topology_Schedule(&state, 180, 75)
     ok(state.Pending, "event during refresh records one pending refresh")
     c.Topology_End_Refresh(&state, 200, 75, false)
     ok(state.Phase == .Scheduled && state.Deadline == 275 && !state.Pending,
@@ -1726,13 +1938,12 @@ test_multi_output :: proc() {
     eq(len(m.Outputs), 2, "two outputs discovered")
     eq(c.Active_Output(m).Name, "eDP-1", "primary output starts active")
     eq(c.Current_WS(m).Id, 1, "primary output starts on workspace 1")
+    eq(m.Outputs[1].Current.Id, 2, "new screen receives the lowest hidden workspace")
 
     left := add_tiled(m, 100)
-    ok(c.Switch_WS_Rel(m, 1), "primary advances to its workspace 2")
-    eq(c.Current_WS(m).Id, 2, "primary workspace changes independently")
-    ok(c.Focus_Output_Rel(m, 1), "focus next output")
-    eq(c.Active_Output(m).Name, "HDMI-1", "secondary output is active")
-    eq(c.Current_WS(m).Id, 1, "secondary retained workspace 1")
+    ok(c.Switch_WS_Rel(m, 1), "selecting visible workspace 2 succeeds")
+    eq(c.Active_Output(m).Name, "HDMI-1", "visible workspace selection focuses its screen")
+    eq(c.Current_WS(m).Id, 2, "secondary screen retains visible workspace 2")
     right := add_tiled(m, 101)
 
     c.Arrange_All(m)
@@ -1740,9 +1951,9 @@ test_multi_output :: proc() {
     ok(right.Geom.X >= 1920, "secondary client arranged on secondary geometry")
     eq(right.Out.Name, "HDMI-1", "client records owning output")
 
-    ok(c.Move_Focused_To_Output_Rel(m, -1), "send focused client to previous output")
+    ok(c.Move_Focused_To_WS(m, 1), "send focused client to workspace visible on another output")
     eq(right.Out.Name, "eDP-1", "window ownership moved to primary")
-    eq(right.Ws.Id, 2, "window lands on target output's visible workspace")
+    eq(right.Ws, m.Outputs[0].Current, "window lands on the globally visible workspace")
     eq(c.Active_Output(m).Name, "HDMI-1", "sending does not change active output")
 
     floating := c.New_Client(102)
@@ -1772,7 +1983,7 @@ test_multi_output :: proc() {
     eq(left.Out, m.Outputs[0], "existing primary client preserved")
     eq(right.Out, m.Outputs[0], "moved client preserved after disconnect")
     eq(floating.Out, m.Outputs[0], "floating client preserved after disconnect")
-    eq(m.Outputs[0].Current.Id, 1, "disconnected active output keeps its visible workspace")
+    eq(m.Outputs[0].Current.Id, 2, "disconnected active output keeps its visible workspace")
     c.Arrange_All(m)
     ok(stranded.Geom.X >= 0 && stranded.Geom.X < m.Outputs[0].Geom.W,
        "window from disconnected active output is visible on survivor")
@@ -1787,6 +1998,48 @@ test_multi_output :: proc() {
     event := c.ipc_output_event_payload("disconnected", "HDMI-1")
     defer delete(event)
     eq(string(event), `{"change":"disconnected","output":"HDMI-1"}`, "output IPC event payload")
+}
+
+test_global_workspace_ownership :: proc() {
+    m := c.New_Manager()
+    defer c.Destroy_Manager(m)
+    specs := []c.Output_Spec{
+        {Name = "left", Geom = c.Rect{W = 1600, H = 900}, Primary = true},
+        {Name = "right", Geom = c.Rect{X = 1600, W = 1600, H = 900}},
+    }
+    ok(c.Reconcile_Outputs(m, specs), "global workspace topology commits")
+    left, right := m.Outputs[0], m.Outputs[1]
+    workspace_two := right.Current
+
+    ok(c.Focus_Output(m, right), "focus secondary screen for workspace ownership test")
+    client := add_tiled(m, 119)
+    workspace_two.Layout = .Monocle
+    workspace_two.ViewportX = 73
+    c.Switch_WS_Id(m, 3)
+    eq(right.Current.Id, 3, "secondary screen can hide its previous workspace")
+
+    ok(c.Focus_Output(m, left), "return to primary screen")
+    eq(c.Switch_WS_Id(m, 2), workspace_two, "hidden workspace moves to the requesting screen")
+    eq(left.Current, workspace_two, "moved workspace becomes visible on the requesting screen")
+    eq(c.Output_Of_WS(m, workspace_two), left, "workspace has one global output owner")
+    eq(c.Find_WS_On_Output(right, 2), nil, "old output no longer retains a duplicate workspace")
+    eq(client.Out, left, "workspace clients follow their workspace to its new screen")
+    eq(workspace_two.Layout, c.Workspace_Layout.Monocle, "workspace layout survives screen transfer")
+    eq(workspace_two.ViewportX, i32(73), "workspace viewport survives screen transfer")
+    eq(workspace_two.Focus, client, "workspace focus history survives screen transfer")
+
+    ok(c.Focus_Output(m, right), "focus other screen before selecting a visible workspace")
+    eq(c.Switch_WS_Id(m, 2), workspace_two, "selecting a visible workspace returns the same object")
+    eq(c.Active_Output(m), left, "selecting a visible workspace focuses its existing screen")
+
+    for output, i in m.Outputs {
+        for ws in output.Ws {
+            for other in m.Outputs[i + 1:] {
+                eq(c.Find_WS_On_Output(other, ws.Id), nil,
+                   "workspace IDs remain globally unique across screens")
+            }
+        }
+    }
 }
 
 test_virtual_screens :: proc() {
@@ -1811,12 +2064,15 @@ test_virtual_screens :: proc() {
     eq(right.Geom, c.Rect{X = 4500, Y = 0, W = 860, H = 1440}, "right geometry consumes the exact remainder")
     eq(left.Geom.W + right.Geom.W, physical.Geom.W, "split covers the complete physical width")
     eq(left.Geom.X + left.Geom.W, right.Geom.X, "split regions share one gapless boundary")
+    eq(left.Current.Id, 1, "existing split side keeps its visible workspace")
+    eq(right.Current.Id, 2, "new split side receives a distinct visible workspace")
     eq(c.Output_At_Point(m, 3000, 700), left, "point lookup selects the left logical screen")
     eq(c.Output_At_Point(m, 5000, 700), right, "point lookup selects the right logical screen")
 
     c.Focus_Output(m, right)
     c.Switch_WS_Id(m, 4)
     secondary_client := add_tiled(m, 802)
+    secondary_workspace := secondary_client.Ws
     c.Arrange_All(m)
     eq(secondary_client.Geom, c.Rect{X = 4510, Y = 10, W = 840, H = 1420},
        "logical screen owns independent layout geometry")
@@ -1872,10 +2128,12 @@ test_virtual_screens :: proc() {
     eq(primary_client.Out, m.Outputs[0], "primary client survives unsplit")
     eq(secondary_client.Out, m.Outputs[0], "secondary client migrates on unsplit")
     eq(secondary_client.Ws.Id, 4, "secondary workspace identity survives migration")
+    eq(secondary_client.Ws, secondary_workspace, "unsplit preserves the workspace object")
 
     ok(c.Enable_Output_Split(m, m.Outputs[0], 0.75), "split can be enabled again")
     eq(m.Outputs[1].Current.Id, 4, "secondary selected workspace is restored on re-split")
-    eq(secondary_client.Out, m.Outputs[0], "migrated clients remain accessible on the primary screen")
+    eq(secondary_client.Out, m.Outputs[1], "restored workspace returns to the secondary screen")
+    eq(secondary_client.Ws, secondary_workspace, "re-split preserves layout and workspace identity")
 
     before_invalid := m.Outputs[0].Geom
     ok(!c.Set_Output_Split_Ratio(m, m.Outputs[0], 0.99),
@@ -2788,6 +3046,20 @@ test_ipc_parse_command :: proc() {
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`focus left`))
     ok(fine && cmd.action == .Focus_Left, "focus left parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`focus output left`))
+    ok(fine && cmd.action == .Focus_Output_Left, "directional output focus parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`focus output 3`))
+    ok(fine && cmd.action == .Focus_Output_Order && cmd.arg == 3,
+       "ordered output focus parsed as a one-based index")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`move output down`))
+    ok(fine && cmd.action == .Move_To_Output_Down, "directional output move parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`move output 2`))
+    ok(fine && cmd.action == .Move_To_Output_Order && cmd.arg == 2,
+       "ordered output move parsed as a one-based index")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`layout vertical-scroller`))
     ok(fine && cmd.action == .Layout_Vertical_Scroller, "vertical scroller layout parsed")

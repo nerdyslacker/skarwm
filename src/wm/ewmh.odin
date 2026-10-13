@@ -14,11 +14,11 @@ import x11 "../x11"
 //     _NET_CLIENT_LIST            every managed client, refreshed on manage/unmanage
 //     _NET_ACTIVE_WINDOW          focused client (None when nothing is focused)
 //     _NET_CURRENT_DESKTOP        current workspace, 0-based
-//     _NET_NUMBER_OF_DESKTOPS     fixed workspace slots across every output
+//     _NET_NUMBER_OF_DESKTOPS     configured/global workspace slots
 //     _NET_DESKTOP_NAMES          configured names (or numeric fallbacks)
 //     _NET_DESKTOP_VIEWPORT       output origin for each desktop (pager pinning)
 //     _NET_DESKTOP_GEOMETRY       root-window dimensions
-//     _NET_WORKAREA               per-output work rect for every desktop
+//     _NET_WORKAREA               owning-output work rect for every desktop
 //
 //   Client properties (written by the WM):
 //     _NET_WM_DESKTOP             owning workspace, 0-based
@@ -192,13 +192,6 @@ ewmh_push_client_list :: proc() {
     x11.set_prop32(g_wm.conn, g_wm.root, atom("_NET_CLIENT_LIST"), atom("WINDOW"), xids)
 }
 
-// EWMH has one global desktop array while skarwm has an independent workspace
-// set per logical output. Flatten (output, workspace slot) into that array:
-//
-//   desktop = output_index * slots_per_output + workspace_id - 1
-//
-// _NET_DESKTOP_VIEWPORT maps each flattened range back to its output. Polybar's
-// xworkspaces module uses that property for pin-workspaces/group-by-monitor.
 desktop_slots :: proc(m: ^c.Manager) -> i32 {
     slots := max(i32(1), m.Cfg.BarWorkspaceCount)
     for o in m.Outputs {
@@ -210,25 +203,19 @@ desktop_slots :: proc(m: ^c.Manager) -> i32 {
 }
 
 desktop_count :: proc(m: ^c.Manager) -> i32 {
-    outputs := max(1, len(m.Outputs))
-    return desktop_slots(m) * i32(outputs)
+    return desktop_slots(m)
 }
 
-desktop_index :: proc(m: ^c.Manager, o: ^c.Output, workspace_id: int) -> (u32, bool) {
-    oi := c.Output_Index(m, o)
+desktop_index :: proc(m: ^c.Manager, workspace_id: int) -> (u32, bool) {
     slots := desktop_slots(m)
-    if oi < 0 || workspace_id < 1 || workspace_id > int(slots) { return 0, false }
-    return u32(i32(oi) * slots + i32(workspace_id - 1)), true
+    if workspace_id < 1 || workspace_id > int(slots) { return 0, false }
+    return u32(workspace_id - 1), true
 }
 
-desktop_target :: proc(m: ^c.Manager, idx: u32) -> (o: ^c.Output, workspace_id: int, ok: bool) {
+desktop_target :: proc(m: ^c.Manager, idx: u32) -> (workspace_id: int, ok: bool) {
     slots := desktop_slots(m)
-    if slots < 1 || idx >= u32(desktop_count(m)) || len(m.Outputs) == 0 {
-        return nil, 0, false
-    }
-    oi := int(idx / u32(slots))
-    if oi < 0 || oi >= len(m.Outputs) { return nil, 0, false }
-    return m.Outputs[oi], int(idx % u32(slots)) + 1, true
+    if slots < 1 || idx >= u32(desktop_count(m)) { return 0, false }
+    return int(idx) + 1, true
 }
 
 same_u32s :: proc(a, b: []u32) -> bool {
@@ -255,13 +242,10 @@ workspace_desktop_name :: proc(id: int) -> string {
 ewmh_push_desktop_names :: proc(slots: i32) {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
-    outputs := max(1, len(g_wm.m.Outputs))
-    for _ in 0 ..< outputs {
-        for id in 1 ..= int(slots) {
-            name := workspace_desktop_name(id)
-            if name == "" { strings.write_int(&builder, id) } else { strings.write_string(&builder, name) }
-            strings.write_byte(&builder, 0)
-        }
+    for id in 1 ..= int(slots) {
+        name := workspace_desktop_name(id)
+        if name == "" { strings.write_int(&builder, id) } else { strings.write_string(&builder, name) }
+        strings.write_byte(&builder, 0)
     }
     payload := transmute([]byte)strings.to_string(builder)
     st := &g_wm.ewmh
@@ -281,17 +265,15 @@ ewmh_push_desktop_layout :: proc(slots: i32) {
         st.geometry_set = true
     }
 
-    outputs := max(1, len(g_wm.m.Outputs))
-    vals := make([]u32, 2 * int(slots) * outputs)
+    vals := make([]u32, 2 * int(slots))
     defer delete(vals)
-    if len(g_wm.m.Outputs) > 0 {
-        for o, oi in g_wm.m.Outputs {
-            for slot in 0 ..< int(slots) {
-                base := 2 * (oi * int(slots) + slot)
-                vals[base] = u32(max(i32(0), o.Geom.X))
-                vals[base + 1] = u32(max(i32(0), o.Geom.Y))
-            }
-        }
+    fallback := c.Active_Output(g_wm.m)
+    for slot in 0 ..< int(slots) {
+        o := fallback
+        if ws, owner := c.Find_WS_Global(g_wm.m, slot + 1); ws != nil { o = owner }
+        if o == nil { continue }
+        vals[2 * slot] = u32(max(i32(0), o.Geom.X))
+        vals[2 * slot + 1] = u32(max(i32(0), o.Geom.Y))
     }
     if same_u32s(st.viewport, vals) { return }
     x11.set_prop32(g_wm.conn, g_wm.root, atom("_NET_DESKTOP_VIEWPORT"), atom("CARDINAL"), vals)
@@ -300,19 +282,18 @@ ewmh_push_desktop_layout :: proc(slots: i32) {
     copy(st.viewport, vals)
 }
 
-// ewmh_push_desktops publishes the flattened current desktop, fixed slot count,
-// names, root geometry, and output viewport mapping.
+// ewmh_push_desktops publishes global workspace IDs as EWMH desktops.
 ewmh_push_desktops :: proc() {
     st := &g_wm.ewmh
     cur := c.Current_WS(g_wm.m)
     idx := i32(0)
     if cur != nil {
-        if mapped, ok := desktop_index(g_wm.m, c.Active_Output(g_wm.m), cur.Id); ok {
+        if mapped, ok := desktop_index(g_wm.m, cur.Id); ok {
             idx = i32(mapped)
         }
     }
     slots := desktop_slots(g_wm.m)
-    count := slots * i32(max(1, len(g_wm.m.Outputs)))
+    count := slots
     if idx != st.last_desktop {
         st.last_desktop = idx
         x11.set_prop32(g_wm.conn, g_wm.root, atom("_NET_CURRENT_DESKTOP"), atom("CARDINAL"), []u32{u32(idx)})
@@ -325,26 +306,24 @@ ewmh_push_desktops :: proc() {
     ewmh_push_desktop_layout(slots)
 }
 
-// ewmh_push_workarea publishes _NET_WORKAREA in the same flattened order as
-// the desktop/viewports array. Each output's work rect (x, y, w, h) is repeated
-// for its workspace slots and already accounts for that output's dock strut
-// reservations. Deduplicated like the other root pushes.
+// Each desktop uses the work area of the screen currently owning its workspace.
 ewmh_push_workarea :: proc() {
     st := &g_wm.ewmh
     m := g_wm.m
     slots := int(desktop_slots(m))
-    outputs := max(1, len(m.Outputs))
-    vals := make([]u32, 4 * slots * outputs)
+    vals := make([]u32, 4 * slots)
     defer delete(vals)
-    for o, oi in m.Outputs {
+    fallback := c.Active_Output(m)
+    for slot in 0 ..< slots {
+        o := fallback
+        if ws, owner := c.Find_WS_Global(m, slot + 1); ws != nil { o = owner }
+        if o == nil { continue }
         p := c.compute_params(m.Cfg, o.Geom, 0, o.Reserved)
-        for slot in 0 ..< slots {
-            base := 4 * (oi * slots + slot)
-            vals[base + 0] = u32(max(i32(0), p.WorkX))
-            vals[base + 1] = u32(max(i32(0), p.WorkY))
-            vals[base + 2] = u32(max(i32(0), p.WorkW))
-            vals[base + 3] = u32(max(i32(0), p.WorkH))
-        }
+        base := 4 * slot
+        vals[base + 0] = u32(max(i32(0), p.WorkX))
+        vals[base + 1] = u32(max(i32(0), p.WorkY))
+        vals[base + 2] = u32(max(i32(0), p.WorkW))
+        vals[base + 3] = u32(max(i32(0), p.WorkH))
     }
     if st.workarea != nil && len(st.workarea) == len(vals) {
         same := true
@@ -363,11 +342,11 @@ ewmh_push_workarea :: proc() {
 // Client property pushes (deduplicated)
 // ---------------------------------------------------------------------------
 
-// ewmh_push_client writes the client's flattened output/workspace desktop.
+// ewmh_push_client writes the client's global workspace desktop.
 ewmh_push_client :: proc(cl: ^c.Client) {
     st := &g_wm.ewmh
     if cl == nil || cl.Ws == nil { return }
-    idx, ok := desktop_index(g_wm.m, cl.Out, cl.Ws.Id)
+    idx, ok := desktop_index(g_wm.m, cl.Ws.Id)
     if !ok { return }
     if cached, ok := st.win_desktop[cl.Xid]; ok && cached == idx { return }
     st.win_desktop[cl.Xid] = idx
@@ -521,15 +500,8 @@ ewmh_on_client_message :: proc(ev: ^x11.Client_Message_Event) {
         ewmh_state_request(ev)
 
     case atom("_NET_CURRENT_DESKTOP"):
-        // Decode the global EWMH desktop back into skarwm's per-output
-        // workspace. Unknown slots are created dynamically on first use.
-        if output, workspace_id, ok := desktop_target(m, ev.data.data32[0]); ok &&
+        if workspace_id, ok := desktop_target(m, ev.data.data32[0]); ok &&
            workspace_id <= EWMH_MAX_WS_ID {
-            old_ws := c.Current_WS(m)
-            if c.Focus_Output(m, output) {
-                ipc_broadcast_output_event("focus", output.Name)
-                ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, output.Current, old_ws)
-            }
             ws_switch_to(workspace_id) // announces the switch over IPC
         }
 
@@ -537,13 +509,13 @@ ewmh_on_client_message :: proc(ev: ^x11.Client_Message_Event) {
         cl := m.ByXid[ev.window]
         requested := ev.data.data32[0]
         if cl != nil && requested != 0xffff_ffff {
-            if output, workspace_id, ok := desktop_target(m, requested); ok &&
+            if workspace_id, ok := desktop_target(m, requested); ok &&
                workspace_id <= EWMH_MAX_WS_ID {
                 src := cl.Ws
-                created := c.Find_WS_On_Output(output, workspace_id) == nil
-                if c.Move_Client_To_WS(m, cl, output, workspace_id) {
+                created := c.Find_WS(m, workspace_id) == nil
+                if c.Move_Client_To_WS(m, cl, cl.Out, workspace_id) {
                     if created {
-                        ipc_broadcast_ws_event(c.IPC_CHANGE_INIT, c.Find_WS_On_Output(output, workspace_id), nil)
+                        ipc_broadcast_ws_event(c.IPC_CHANGE_INIT, c.Find_WS(m, workspace_id), nil)
                     }
                     if src != nil && c.Ws_Is_Empty(src) {
                         ipc_broadcast_ws_event(c.IPC_CHANGE_EMPTY, src, nil)

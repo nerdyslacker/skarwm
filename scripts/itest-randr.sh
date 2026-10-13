@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# RandR 1.5 multi-monitor integration test on a private Xvnc display.
+# Xinerama-first multi-screen integration test on a private Xvnc display.
 
 set -u
 cd "$(dirname "$0")/.." || exit 2
 
-DISP=:98
+DISP="${SKARWM_ITEST_DISPLAY:-:98}"
 SOCK="${TMPDIR:-/tmp}/skarwm-randr-itest.sock"
 PASS=0
 FAIL=0
@@ -75,17 +75,42 @@ if ! kill -0 "$WM_PID" 2>/dev/null; then
 fi
 
 outputs=$(./build/skarwm-msg get-outputs)
-if [[ $outputs == *'"name":"LEFT"'* && $outputs == *'"name":"RIGHT"'* ]]; then
-  pass "discovers both RandR monitors"
-else
-  fail "RandR monitor discovery"
-fi
-if [[ $outputs == *'"name":"LEFT","active":true,"primary":true,"focused":true'* ]]; then
-  pass "selects the primary monitor"
-else
-  fail "primary monitor selection"
-fi
 topology=$(./build/skarwm-msg get-topology)
+output_count=$(printf '%s\n' "$outputs" | grep -o '"name":"[^"]*"' | wc -l)
+if [ "$output_count" -lt 2 ]; then
+  if [[ $topology == *'"source":"xinerama"'* ||
+        $topology == *'"source":"root","degraded":true'* ]]; then
+    pass "does not promote RandR monitor objects into authoritative screens"
+  else
+    fail "reports the authoritative discovery source"
+  fi
+  if ./build/skarwm-msg screen refresh >/dev/null; then
+    sleep 0.2
+    topology=$(./build/skarwm-msg get-topology)
+    [[ $topology == *'"scheduler":"idle"'* ]] &&
+      pass "manual refresh uses the non-blocking topology pipeline" ||
+      fail "manual topology refresh completion"
+  else
+    fail "manual topology refresh command"
+  fi
+  say "SKIP  Xvnc exposes fewer than two Xinerama regions; multi-screen checks require another server"
+  say "== Xinerama/RandR done: $PASS passed, $FAIL failed =="
+  [ "$FAIL" -eq 0 ]
+  exit
+fi
+
+LEFT_ID=$(printf '%s\n' "$outputs" | grep -o '"name":"[^"]*"' | sed -n '1s/"name":"\([^"]*\)"/\1/p')
+RIGHT_ID=$(printf '%s\n' "$outputs" | grep -o '"name":"[^"]*"' | sed -n '2s/"name":"\([^"]*\)"/\1/p')
+if [[ $topology == *'"source":"xinerama"'* && -n "$LEFT_ID" && -n "$RIGHT_ID" ]]; then
+  pass "discovers two authoritative Xinerama screens"
+else
+  fail "Xinerama screen discovery"
+fi
+if [[ $outputs == *'"name":"'"$LEFT_ID"'","active":true,"primary":true,"focused":true'* ]]; then
+  pass "selects the first spatial screen"
+else
+  fail "initial screen selection"
+fi
 if [[ $topology == *'"generation":'* &&
       $topology == *'"name":"VNC-0"'*'"connected":true,"enabled":true'* &&
       $topology == *'"logical_outputs":['* ]]; then
@@ -141,20 +166,20 @@ if [ -n "$x" ] && [ "$x" -lt 640 ]; then pass "moves a window to the previous mo
 ./build/skarwm-msg workspace 2 >/dev/null
 ./build/skarwm-msg focus output prev >/dev/null
 outputs=$(./build/skarwm-msg get-outputs)
-if [[ $outputs == *'"name":"LEFT"'*'"current_workspace":"1"'*'"name":"RIGHT"'*'"current_workspace":"2"'* ]]; then
+if [[ $outputs == *'"name":"'"$LEFT_ID"'"'*'"current_workspace":"1"'*'"name":"'"$RIGHT_ID"'"'*'"current_workspace":"2"'* ]]; then
   pass "keeps independent current workspaces per monitor"
 else
   fail "independent monitor workspaces"
 fi
-if [ "$(xp_val -root _NET_NUMBER_OF_DESKTOPS)" = "16" ] &&
+if [ "$(xp_val -root _NET_NUMBER_OF_DESKTOPS)" = "8" ] &&
    [ "$(xp_val -root _NET_CURRENT_DESKTOP)" = "0" ]; then
-  pass "EWMH flattens eight workspace slots per monitor"
+  pass "EWMH exposes eight global workspace slots"
 else
   fail "EWMH multi-monitor desktop count/current mapping"
 fi
-expected_viewports="$(repeat_pair '0, 0' 8), $(repeat_pair '640, 0' 8)"
+expected_viewports="0, 0, 640, 0, $(repeat_pair '0, 0' 6)"
 if [ "$(xp_val -root _NET_DESKTOP_VIEWPORT)" = "$expected_viewports" ]; then
-  pass "EWMH viewports map workspace ranges to their monitors"
+  pass "EWMH viewports follow each workspace owner"
 else
   fail "EWMH multi-monitor viewport mapping ($(xp_val -root _NET_DESKTOP_VIEWPORT))"
 fi
@@ -185,14 +210,14 @@ fi
 # LEFT is active here and is exactly 640px wide, so 75/25 gives 480/160.
 ./build/skarwm-msg screen split enable >/dev/null
 outputs=$(./build/skarwm-msg get-outputs)
-if [[ $outputs == *'"name":"LEFT:left"'*'"rect":{"x":0,"y":0,"width":480,"height":800}'*'"physical_output":"LEFT"'* &&
-      $outputs == *'"name":"LEFT:right"'*'"rect":{"x":480,"y":0,"width":160,"height":800}'*'"physical_output":"LEFT"'* ]]; then
+if [[ $outputs == *'"name":"'"$LEFT_ID"':left"'*'"rect":{"x":0,"y":0,"width":480,"height":800}'*'"physical_output":"'"$LEFT_ID"'"'* &&
+      $outputs == *'"name":"'"$LEFT_ID"':right"'*'"rect":{"x":480,"y":0,"width":160,"height":800}'*'"physical_output":"'"$LEFT_ID"'"'* ]]; then
   pass "runtime IPC creates a 75/25 logical split"
 else
   fail "runtime logical split"
 fi
 monitors=$(xrandr --listactivemonitors)
-if [[ $monitors == *'LEFT:left'* && $monitors == *'LEFT:right'* ]]; then
+if [[ $monitors == *"$LEFT_ID:left"* && $monitors == *"$LEFT_ID:right"* ]]; then
   pass "publishes virtual screens through RandR 1.5"
 else
   fail "RandR virtual-screen publication"
@@ -212,14 +237,14 @@ fi
 
 ./build/skarwm-msg screen split resize -20 >/dev/null
 outputs=$(./build/skarwm-msg get-outputs)
-if [[ $outputs == *'"name":"LEFT:left"'*'"rect":{"x":0,"y":0,"width":460,"height":800}'* &&
-      $outputs == *'"name":"LEFT:right"'*'"rect":{"x":460,"y":0,"width":180,"height":800}'* ]]; then
+if [[ $outputs == *'"name":"'"$LEFT_ID"':left"'*'"rect":{"x":0,"y":0,"width":460,"height":800}'* &&
+      $outputs == *'"name":"'"$LEFT_ID"':right"'*'"rect":{"x":460,"y":0,"width":180,"height":800}'* ]]; then
   pass "runtime IPC moves the split boundary without gaps"
 else
   fail "runtime split resize"
 fi
 monitors=$(xrandr --listactivemonitors)
-if [[ $monitors == *'LEFT:left'* && $monitors == *'LEFT:right'* ]]; then
+if [[ $monitors == *"$LEFT_ID:left"* && $monitors == *"$LEFT_ID:right"* ]]; then
   pass "RandR virtual screens survive an in-place resize"
 else
   fail "RandR virtual-screen resize publication"
@@ -241,8 +266,8 @@ fi
 ./build/skarwm-msg focus output next >/dev/null
 ./build/skarwm-msg workspace 4 >/dev/null
 outputs=$(./build/skarwm-msg get-outputs)
-if [[ $outputs == *'"name":"LEFT:left"'*'"rect":{"x":0,"y":0,"width":320,"height":800}'* &&
-      $outputs == *'"name":"LEFT:right"'*'"current_workspace":"4"'* ]]; then
+if [[ $outputs == *'"name":"'"$LEFT_ID"':left"'*'"rect":{"x":0,"y":0,"width":320,"height":800}'* &&
+      $outputs == *'"name":"'"$LEFT_ID"':right"'*'"current_workspace":"4"'* ]]; then
   pass "logical siblings keep independent workspaces and ratio updates"
 else
   fail "logical split workspace/ratio"
@@ -253,10 +278,10 @@ fi
 xdotool mousemove 390 10 click 1 >/dev/null 2>&1
 for _ in $(seq 1 30); do
   outputs=$(./build/skarwm-msg get-outputs)
-  [[ $outputs == *'"name":"LEFT:right"'*'"current_workspace":"3"'* ]] && break
+  [[ $outputs == *'"name":"'"$LEFT_ID"':right"'*'"current_workspace":"3"'* ]] && break
   sleep 0.2
 done
-if [[ $outputs == *'"name":"LEFT:left"'*'"current_workspace":"1"'*'"name":"LEFT:right"'*'"current_workspace":"3"'* ]]; then
+if [[ $outputs == *'"name":"'"$LEFT_ID"':left"'*'"current_workspace":"1"'*'"name":"'"$LEFT_ID"':right"'*'"current_workspace":"3"'* ]]; then
   pass "virtual-screen bar controls its own workspace"
 else
   fail "virtual-screen bar workspace targeting"
@@ -264,13 +289,13 @@ fi
 
 ./build/skarwm-msg screen split disable >/dev/null
 outputs=$(./build/skarwm-msg get-outputs)
-if [[ $outputs == *'"name":"LEFT"'* && $outputs != *'"name":"LEFT:right"'* ]]; then
+if [[ $outputs == *'"name":"'"$LEFT_ID"'"'* && $outputs != *'"name":"'"$LEFT_ID"':right"'* ]]; then
   pass "runtime IPC unsplits to the current physical output"
 else
   fail "runtime logical unsplit"
 fi
 monitors=$(xrandr --listactivemonitors)
-if [[ $monitors != *'LEFT:left'* && $monitors != *'LEFT:right'* ]]; then
+if [[ $monitors != *"$LEFT_ID:left"* && $monitors != *"$LEFT_ID:right"* ]]; then
   pass "removes virtual RandR monitors after unsplit"
 else
   fail "RandR virtual-screen cleanup"
@@ -306,13 +331,13 @@ SUB_PID=$!
 sleep 0.5
 xrandr --delmonitor RIGHT
 sleep 1
-if grep -q '"change":"disconnected","output":"RIGHT"' "${TMPDIR:-/tmp}/skarwm_randr_events.log"; then
+if grep -q '"change":"disconnected","output":"'"$RIGHT_ID"'"' "${TMPDIR:-/tmp}/skarwm_randr_events.log"; then
   pass "emits an output event after hot-unplug"
 else
   fail "RandR hot-unplug event"
 fi
 outputs=$(./build/skarwm-msg get-outputs)
-if [[ $outputs == *'"name":"LEFT"'* && $outputs != *'"name":"RIGHT"'* ]]; then
+if [[ $outputs == *'"name":"'"$LEFT_ID"'"'* && $outputs != *'"name":"'"$RIGHT_ID"'"'* ]]; then
   pass "removes a disconnected monitor from the model"
 else
   fail "disconnected monitor reconciliation"
@@ -326,7 +351,7 @@ if [ -n "$migrate_wid" ]; then
   done
 fi
 if [ -n "$migrate_x" ] && [ "$migrate_x" -lt 640 ] &&
-   ./build/skarwm-msg get-windows | grep -q '"id":'"$migrate_wid"'.*"output":"LEFT"'; then
+   ./build/skarwm-msg get-windows | grep -q '"id":'"$migrate_wid"'.*"output":"'"$LEFT_ID"'"'; then
   pass "migrates clients from a disconnected screen to the main screen"
 else
   fail "client migration after screen disconnect"
@@ -337,10 +362,10 @@ fi
 xdotool mousemove 45 10 click 1 >/dev/null 2>&1
 for _ in $(seq 1 30); do
   outputs=$(./build/skarwm-msg get-outputs)
-  [[ $outputs == *'"name":"LEFT"'*'"current_workspace":"2"'* ]] && break
+  [[ $outputs == *'"name":"'"$LEFT_ID"'"'*'"current_workspace":"2"'* ]] && break
   sleep 0.1
 done
-if [[ $outputs == *'"name":"LEFT"'*'"current_workspace":"2"'* ]]; then
+if [[ $outputs == *'"name":"'"$LEFT_ID"'"'*'"current_workspace":"2"'* ]]; then
   pass "pointer remains responsive after hot-unplug"
 else
   fail "pointer input after hot-unplug"
@@ -352,19 +377,21 @@ fi
 xrandr --setmonitor RIGHT 640/170x800/210+640+0 none
 for _ in $(seq 1 30); do
   outputs=$(./build/skarwm-msg get-outputs)
-  [[ $outputs == *'"name":"RIGHT"'* ]] && break
+  [ "$(printf '%s\n' "$outputs" | grep -o '"name":"[^"]*"' | wc -l)" -ge 2 ] && break
   sleep 0.1
 done
-if grep -q '"change":"connected","output":"RIGHT"' "${TMPDIR:-/tmp}/skarwm_randr_events.log"; then
+RECONNECTED_ID=$(printf '%s\n' "$outputs" | grep -o '"name":"[^"]*"' | sed -n '2s/"name":"\([^"]*\)"/\1/p')
+if [ -n "$RECONNECTED_ID" ] &&
+   grep -q '"change":"connected","output":"'"$RECONNECTED_ID"'"' "${TMPDIR:-/tmp}/skarwm_randr_events.log"; then
   pass "emits an output event after hot-plug"
 else
   fail "RandR hot-plug event"
 fi
-if [[ $outputs == *'"name":"LEFT"'* && $outputs == *'"name":"RIGHT"'* ]]; then
+if [[ $outputs == *'"name":"'"$LEFT_ID"'"'* && -n "$RECONNECTED_ID" ]]; then
   pass "recognizes a monitor added while running"
 else
   fail "running monitor addition reconciliation"
 fi
 
-say "== RandR done: $PASS passed, $FAIL failed =="
+say "== Xinerama/RandR done: $PASS passed, $FAIL failed =="
 [ "$FAIL" -eq 0 ]

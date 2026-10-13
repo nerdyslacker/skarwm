@@ -1,13 +1,14 @@
 # skarwm build.
 #
-# Required at *runtime*:   libxcb + libxcb-randr + libxcb-shape; the optional
+# Required at *runtime*:   libxcb + libxcb-xinerama + libxcb-randr + libxcb-shape; the optional
 #                          bar additionally uses libX11 + libXft/fontconfig
-# Required at *build* time: odin
+# Required at *build* time: odin and the development/linker files above
 #
 # Configuration is a plain-text rc file — there is no embedded
 # interpreter, so the WM itself keeps its existing XCB-only dependency. Targets:
 #   make            build skarwm, skarwm-msg, and optional skarwm-bar binaries
 #   make debug      build an assertion-enabled binary into build/skarwm-debug
+#   make check-deps verify WM and optional bar link dependencies with pkg-config
 #   make test       run the unit suite (tests/core_tests) then the X11
 #                   integration tests
 #   make xephyr     run interactively in a nested X server
@@ -28,6 +29,12 @@ SYSCONFDIR ?= /etc
 SKARWMDIR := $(SYSCONFDIR)/skarwm
 
 all: build/skarwm build/skarwm-msg build/skarwm-bar
+
+check-deps:
+	@command -v pkg-config >/dev/null || { echo "pkg-config is required for dependency checks"; exit 1; }
+	@pkg-config --exists xcb xcb-xinerama xcb-randr xcb-shape || { echo "missing WM dependencies: xcb, xcb-xinerama, xcb-randr, or xcb-shape"; exit 1; }
+	@pkg-config --exists x11 xft fontconfig || { echo "missing skarwm-bar dependencies: x11, xft, or fontconfig"; exit 1; }
+	@echo "skarwm dependencies found"
 
 # release build
 build/skarwm: $(ODIN_SRCS)
@@ -77,4 +84,4 @@ itest-decoration: build/skarwm build/skarwm-msg
 clean:
 	rm -rf build
 
-.PHONY: all debug install test xephyr xephyr-multi itest-decoration clean
+.PHONY: all check-deps debug install test xephyr xephyr-multi itest-decoration clean

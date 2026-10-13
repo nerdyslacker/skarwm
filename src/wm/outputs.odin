@@ -4,16 +4,103 @@ import logger "../log"
 import c "../core"
 import x11 "../x11"
 
-// RandR 1.5 monitor discovery. Monitor objects (not raw CRTCs) correctly
-// represent mirrored outputs as one logical rectangle and preserve explicit
-// monitor names created with xrandr --setmonitor.
+// Xinerama supplies managed screen rectangles. RandR remains optional metadata,
+// change notification, and virtual-monitor publication plumbing.
 
 import "core:fmt"
 import "core:strings"
 import "core:time"
 
+Xinerama_State :: struct {
+    present: bool,
+    active: bool,
+    has_valid_query: bool,
+    next_identity: u64,
+    topology: c.Screen_Topology_Snapshot,
+}
+
+g_xinerama: Xinerama_State
+
+xinerama_init :: proc() {
+    name := "XINERAMA"
+    err: ^x11.Error
+    reply := x11.xcb_query_extension_reply(
+        g_wm.conn,
+        x11.xcb_query_extension(g_wm.conn, u16(len(name)), cstring(raw_data(name))),
+        &err,
+    )
+    if err != nil { x11.free_libc(err) }
+    g_xinerama.present = reply != nil && reply.present != 0
+    if reply != nil { x11.free_libc(reply) }
+    if !g_xinerama.present {
+        logger.Warn("Xinerama extension unavailable; using one root-sized degraded screen")
+    }
+}
+
+xinerama_shutdown :: proc() {
+    c.Free_Screen_Topology(&g_xinerama.topology)
+    g_xinerama = {}
+}
+
+xinerama_root_geometry :: proc() -> (c.Rect, bool) {
+    err: ^x11.Error
+    reply := x11.xcb_get_geometry_reply(
+        g_wm.conn, x11.xcb_get_geometry(g_wm.conn, g_wm.root), &err)
+    if err != nil { x11.free_libc(err) }
+    if reply == nil { return {}, false }
+    defer x11.free_libc(reply)
+    root := c.Rect{X = i32(reply.x), Y = i32(reply.y), W = i32(reply.width), H = i32(reply.height)}
+    return root, root.W > 0 && root.H > 0
+}
+
+xinerama_query_candidate :: proc(root: c.Rect) -> (c.Screen_Topology_Snapshot, bool) {
+    generation := g_xinerama.topology.Generation + 1
+    if !g_xinerama.present {
+        return c.Build_Root_Snapshot(root, generation)
+    }
+
+    active_error: ^x11.Error
+    active_reply := x11.xcb_xinerama_is_active_reply(
+        g_wm.conn, x11.xcb_xinerama_is_active(g_wm.conn), &active_error)
+    if active_error != nil { x11.free_libc(active_error) }
+    if active_reply == nil { return {}, false }
+    active := active_reply.state != 0
+    x11.free_libc(active_reply)
+    if !active {
+        if g_xinerama.active || !g_xinerama.has_valid_query {
+            logger.Warn("Xinerama extension is inactive; using one root-sized degraded screen")
+        }
+        g_xinerama.active = false
+        return c.Build_Root_Snapshot(root, generation)
+    }
+
+    query_error: ^x11.Error
+    reply := x11.xcb_xinerama_query_screens_reply(
+        g_wm.conn, x11.xcb_xinerama_query_screens(g_wm.conn), &query_error)
+    if query_error != nil { x11.free_libc(query_error) }
+    if reply == nil { return {}, false }
+    defer x11.free_libc(reply)
+    count := int(x11.xcb_xinerama_query_screens_screen_info_length(reply))
+    info := x11.xcb_xinerama_query_screens_screen_info(reply)
+    if count <= 0 || info == nil { return {}, false }
+
+    rects := make([]c.Rect, count)
+    defer delete(rects)
+    for screen, i in info[:count] {
+        rects[i] = c.Rect{
+            X = i32(screen.x_org), Y = i32(screen.y_org),
+            W = i32(screen.width), H = i32(screen.height),
+        }
+    }
+    snapshot, ok := c.Build_Xinerama_Snapshot(
+        root, rects, &g_xinerama.topology, &g_xinerama.next_identity)
+    if ok { snapshot.Generation = generation }
+    return snapshot, ok
+}
+
 Randr_State :: struct {
     available: bool,
+    notifier_available: bool,
     event_base: u8,
     physical: [dynamic]Randr_Physical_Monitor,
     published: [dynamic]u32,
@@ -108,8 +195,21 @@ randr_monitor_request_ok :: proc(cookie: x11.Cookie) -> bool {
     return true
 }
 
-randr_physical_metadata :: proc(name: string) -> ^Randr_Physical_Monitor {
-    for &monitor in g_randr.physical { if monitor.name == name { return &monitor } }
+randr_physical_metadata :: proc(name: string, geom: c.Rect) -> ^Randr_Physical_Monitor {
+    for &monitor in g_randr.physical {
+        if monitor.name == name || monitor.geom == geom { return &monitor }
+    }
+    return nil
+}
+
+randr_region_for_metadata :: proc(metadata: ^Randr_Physical_Monitor) -> ^c.Physical_Output {
+    if metadata == nil { return nil }
+    if physical := c.Find_Physical_Output(g_wm.m, metadata.name); physical != nil {
+        return physical
+    }
+    for physical in g_wm.m.PhysicalOutputs {
+        if physical.Geom == metadata.geom { return physical }
+    }
     return nil
 }
 
@@ -123,7 +223,7 @@ randr_restore_suppressed :: proc(force: bool) {
     for name in g_randr.suppressed {
         for &metadata in g_randr.physical {
             if atom(metadata.name) != name { continue }
-            physical := c.Find_Physical_Output(g_wm.m, metadata.name)
+            physical := randr_region_for_metadata(&metadata)
             if !force && physical != nil && physical.Split {
                 append(&remaining, name)
                 break
@@ -176,7 +276,7 @@ randr_sync_virtual_monitors :: proc() {
 
     for p in g_wm.m.PhysicalOutputs {
         if !p.Split || len(p.Screens) != 2 { continue }
-        metadata := randr_physical_metadata(p.Name)
+        metadata := randr_physical_metadata(p.Name, p.Geom)
         if metadata == nil { continue }
         // An automatic monitor is replaced when its output is assigned to a
         // user-defined child. Explicit xrandr monitors are allowed to overlap,
@@ -249,9 +349,15 @@ randr_shutdown :: proc() {
     delete(g_randr.suppressed)
     c.Free_Physical_Topology(&g_randr.topology)
     g_randr = {}
+    xinerama_shutdown()
 }
 
 randr_init :: proc() {
+    xinerama_init()
+    g_randr.physical = make([dynamic]Randr_Physical_Monitor, 0, 4)
+    g_randr.published = make([dynamic]u32, 0, 4)
+    g_randr.suppressed = make([dynamic]u32, 0, 2)
+
     name := "RANDR"
     e: ^x11.Error
     qr := x11.xcb_query_extension_reply(
@@ -262,7 +368,8 @@ randr_init :: proc() {
     if e != nil { x11.free_libc(e) }
     if qr == nil || qr.present == 0 {
         if qr != nil { x11.free_libc(qr) }
-        logger.Warn("RandR unavailable; using one screen-sized output")
+        logger.Warn("RandR notifications unavailable; topology refresh requires root events or screen refresh")
+        _ = randr_scan(false)
         return
     }
     g_randr.event_base = qr.first_event
@@ -271,26 +378,32 @@ randr_init :: proc() {
     e = nil
     vr := x11.xcb_randr_query_version_reply(g_wm.conn, x11.xcb_randr_query_version(g_wm.conn, 1, 5), &e)
     if e != nil { x11.free_libc(e) }
-    if vr == nil || vr.major_version < 1 || (vr.major_version == 1 && vr.minor_version < 5) {
-        if vr != nil { x11.free_libc(vr) }
-        logger.Warn("RandR 1.5 monitor objects unavailable; using one screen-sized output")
+    if vr == nil {
+        logger.Warn("RandR version query failed; topology refresh requires root events or screen refresh")
+        _ = randr_scan(false)
         return
     }
+    supports_notifications := vr.major_version > 1 ||
+        (vr.major_version == 1 && vr.minor_version >= 2)
+    supports_resource_change := vr.major_version > 1 ||
+        (vr.major_version == 1 && vr.minor_version >= 4)
+    g_randr.available = vr.major_version > 1 ||
+        (vr.major_version == 1 && vr.minor_version >= 5)
     x11.free_libc(vr)
 
-    // SetMonitor/DeleteMonitor emit ResourceChange. The event handler filters
-    // those while a projection is active, but retains the subscription so an
-    // external xrandr --setmonitor/--delmonitor is still discovered normally.
-    mask := x11.RANDR_NOTIFY_MASK_SCREEN_CHANGE | x11.RANDR_NOTIFY_MASK_CRTC_CHANGE |
-        x11.RANDR_NOTIFY_MASK_OUTPUT_CHANGE | x11.RANDR_NOTIFY_MASK_OUTPUT_PROPERTY |
-        x11.RANDR_NOTIFY_MASK_RESOURCE_CHANGE
-    x11.xcb_randr_select_input(g_wm.conn, g_wm.root, mask)
-    g_randr.available = true
-    g_randr.physical = make([dynamic]Randr_Physical_Monitor, 0, 4)
-    g_randr.published = make([dynamic]u32, 0, 4)
-    g_randr.suppressed = make([dynamic]u32, 0, 2)
-    randr_cleanup_stale_monitors()
-    randr_scan(false)
+    if supports_notifications {
+        mask := x11.RANDR_NOTIFY_MASK_SCREEN_CHANGE | x11.RANDR_NOTIFY_MASK_CRTC_CHANGE |
+            x11.RANDR_NOTIFY_MASK_OUTPUT_CHANGE | x11.RANDR_NOTIFY_MASK_OUTPUT_PROPERTY
+        if supports_resource_change { mask |= x11.RANDR_NOTIFY_MASK_RESOURCE_CHANGE }
+        x11.xcb_randr_select_input(g_wm.conn, g_wm.root, mask)
+        g_randr.notifier_available = true
+    }
+    if g_randr.available {
+        randr_cleanup_stale_monitors()
+    } else {
+        logger.Warn("RandR 1.5 monitor metadata unavailable; Xinerama discovery remains active")
+    }
+    _ = randr_scan(false)
 }
 
 atom_name :: proc(id: u32) -> string {
@@ -300,17 +413,28 @@ atom_name :: proc(id: u32) -> string {
 
 Randr_Candidate :: struct {
     topology: c.Physical_Topology,
+    discovery: c.Screen_Topology_Snapshot,
     specs: [dynamic]c.Output_Spec,
     monitors: [dynamic]Randr_Physical_Monitor,
+    metadata_valid: bool,
 }
 
 randr_free_candidate :: proc(candidate: ^Randr_Candidate) {
     if candidate == nil { return }
     c.Free_Physical_Topology(&candidate.topology)
+    c.Free_Screen_Topology(&candidate.discovery)
     for spec in candidate.specs { if spec.Name != "" { delete(spec.Name) } }
     delete(candidate.specs)
     free_physical_monitors(&candidate.monitors)
     candidate^ = {}
+}
+
+randr_discard_candidate_metadata :: proc(candidate: ^Randr_Candidate) {
+    if candidate == nil { return }
+    c.Free_Physical_Topology(&candidate.topology)
+    candidate.topology.RootGeometry = candidate.discovery.RootGeometry
+    free_physical_monitors(&candidate.monitors)
+    candidate.metadata_valid = false
 }
 
 randr_specs_valid :: proc(specs: []c.Output_Spec) -> bool {
@@ -328,21 +452,25 @@ randr_connector_by_id :: proc(topology: ^c.Physical_Topology, id: u32) -> ^c.Phy
     return nil
 }
 
-// Build a complete temporary snapshot.  No live WM or RandR publication state
-// is changed here; any failed/inconsistent reply rejects the whole candidate.
+// Build a complete temporary snapshot without changing live WM state.
 randr_query_candidate :: proc() -> (candidate: Randr_Candidate, ok: bool) {
-    root_error: ^x11.Error
-    root := x11.xcb_get_geometry_reply(g_wm.conn, x11.xcb_get_geometry(g_wm.conn, g_wm.root), &root_error)
-    if root_error != nil { x11.free_libc(root_error) }
-    if root == nil { return {}, false }
-    candidate.topology.RootGeometry = c.Rect{X = i32(root.x), Y = i32(root.y), W = i32(root.width), H = i32(root.height)}
-    x11.free_libc(root)
+    root, root_ok := xinerama_root_geometry()
+    if !root_ok { return {}, false }
+    candidate.topology.RootGeometry = root
+    candidate.discovery, ok = xinerama_query_candidate(root)
+    if !ok { randr_free_candidate(&candidate); return {}, false }
+    candidate.specs = c.Screen_Snapshot_Specs(&candidate.discovery)
+    if !randr_specs_valid(candidate.specs[:]) {
+        randr_free_candidate(&candidate)
+        return {}, false
+    }
+    if !g_randr.available { return candidate, true }
 
     resource_error: ^x11.Error
     resources := x11.xcb_randr_get_screen_resources_current_reply(
         g_wm.conn, x11.xcb_randr_get_screen_resources_current(g_wm.conn, g_wm.root), &resource_error)
     if resource_error != nil { x11.free_libc(resource_error) }
-    if resources == nil { randr_free_candidate(&candidate); return {}, false }
+    if resources == nil { randr_discard_candidate_metadata(&candidate); return candidate, true }
     defer x11.free_libc(resources)
 
     primary_error: ^x11.Error
@@ -368,15 +496,15 @@ randr_query_candidate :: proc() -> (candidate: Randr_Candidate, ok: bool) {
         if output_error != nil { x11.free_libc(output_error) }
         if info == nil || info.status != x11.RANDR_CONFIG_SUCCESS {
             if info != nil { x11.free_libc(info) }
-            randr_free_candidate(&candidate)
-            return {}, false
+            randr_discard_candidate_metadata(&candidate)
+            return candidate, true
         }
         name_length := int(x11.xcb_randr_get_output_info_name_length(info))
         name_data := x11.xcb_randr_get_output_info_name(info)
         if name_length <= 0 || name_data == nil {
             x11.free_libc(info)
-            randr_free_candidate(&candidate)
-            return {}, false
+            randr_discard_candidate_metadata(&candidate)
+            return candidate, true
         }
         name := strings.clone(string(name_data[:name_length]))
         state := c.Physical_Output_State{
@@ -394,8 +522,8 @@ randr_query_candidate :: proc() -> (candidate: Randr_Candidate, ok: bool) {
                 x11.free_libc(info)
                 if state.StableId != "" { delete(state.StableId) }
                 if state.Name != "" { delete(state.Name) }
-                randr_free_candidate(&candidate)
-                return {}, false
+                randr_discard_candidate_metadata(&candidate)
+                return candidate, true
             }
             state.Rotation = crtc.rotation
             state.Geom = c.Rect{X = i32(crtc.x), Y = i32(crtc.y), W = i32(crtc.width), H = i32(crtc.height)}
@@ -411,9 +539,8 @@ randr_query_candidate :: proc() -> (candidate: Randr_Candidate, ok: bool) {
     monitors_reply := x11.xcb_randr_get_monitors_reply(
         g_wm.conn, x11.xcb_randr_get_monitors(g_wm.conn, g_wm.root, 1), &monitor_error)
     if monitor_error != nil { x11.free_libc(monitor_error) }
-    if monitors_reply == nil { randr_free_candidate(&candidate); return {}, false }
+    if monitors_reply == nil { randr_discard_candidate_metadata(&candidate); return candidate, true }
     defer x11.free_libc(monitors_reply)
-    candidate.specs = make([dynamic]c.Output_Spec, 0, int(monitors_reply.n_monitors) + enabled_count + 1)
     candidate.monitors = make([dynamic]Randr_Physical_Monitor, 0, int(monitors_reply.n_monitors) + enabled_count)
     covered_outputs := make([dynamic]u32, 0, enabled_count)
     defer delete(covered_outputs)
@@ -421,7 +548,10 @@ randr_query_candidate :: proc() -> (candidate: Randr_Candidate, ok: bool) {
     index := 0
     for it.rem > 0 && it.data != nil {
         mi := it.data
-        if mi.width == 0 || mi.height == 0 { randr_free_candidate(&candidate); return {}, false }
+        if mi.width == 0 || mi.height == 0 {
+            randr_discard_candidate_metadata(&candidate)
+            return candidate, true
+        }
         name := atom_name(mi.name)
         if name == "" { name = fmt.aprintf("monitor-%d", index + 1) }
         geom := c.Rect{X = i32(mi.x), Y = i32(mi.y), W = i32(mi.width), H = i32(mi.height)}
@@ -447,76 +577,13 @@ randr_query_candidate :: proc() -> (candidate: Randr_Candidate, ok: bool) {
             continue
         }
         monitor_primary := mi.primary != 0 || (primary != 0 && contains_atom(monitor_outputs[:], primary))
-        append(&candidate.specs, c.Output_Spec{Name = name, Geom = geom, Primary = monitor_primary})
         append(&candidate.monitors, Randr_Physical_Monitor{
-            name = strings.clone(name), primary = monitor_primary, automatic = mi.automatic != 0,
+            name = name, primary = monitor_primary, automatic = mi.automatic != 0,
             geom = geom, width_mm = mi.width_mm, height_mm = mi.height_mm, outputs = monitor_outputs,
         })
         index += 1
         x11.xcb_randr_monitor_info_next(&it)
     }
-    // Some drivers update output/CRTC resources without promptly adding the
-    // corresponding RandR 1.5 monitor object. Fill that gap from the
-    // authoritative connector geometry so hot-plug does not require a login.
-    for connector in candidate.topology.Outputs {
-        if !connector.Enabled || contains_atom(covered_outputs[:], connector.OutputId) { continue }
-        matched := -1
-        for spec, i in candidate.specs {
-            if spec.Geom == connector.Geom { matched = i; break }
-        }
-        if matched >= 0 {
-            metadata := &candidate.monitors[matched]
-            if !contains_atom(metadata.outputs[:], connector.OutputId) {
-                append(&metadata.outputs, connector.OutputId)
-            }
-            metadata.primary = metadata.primary || connector.Primary
-            candidate.specs[matched].Primary = candidate.specs[matched].Primary || connector.Primary
-            append(&covered_outputs, connector.OutputId)
-            continue
-        }
-        outputs := make([dynamic]u32, 0, 1)
-        append(&outputs, connector.OutputId)
-        append(&candidate.specs, c.Output_Spec{
-            Name = strings.clone(connector.Name), Geom = connector.Geom, Primary = connector.Primary,
-        })
-        append(&candidate.monitors, Randr_Physical_Monitor{
-            name = strings.clone(connector.Name), primary = connector.Primary, automatic = true,
-            geom = connector.Geom, width_mm = connector.MmWidth, height_mm = connector.MmHeight,
-            outputs = outputs,
-        })
-        append(&covered_outputs, connector.OutputId)
-        logger.Debug("RandR: active connector missing from monitor objects; synthesized", connector.Name)
-    }
-    if len(candidate.specs) == 0 {
-        append(&candidate.specs, c.Output_Spec{Name = strings.clone("screen"),
-            Geom = candidate.topology.RootGeometry, Primary = true})
-    }
-    // RandR monitor enumeration order is not identity. Keep the logical input
-    // deterministic so a harmless reorder cannot reshuffle screens/workspaces.
-    for i in 1 ..< len(candidate.specs) {
-        j := i
-        for j > 0 {
-            a, b := candidate.specs[j - 1], candidate.specs[j]
-            ordered := a.Geom.X < b.Geom.X ||
-                (a.Geom.X == b.Geom.X && (a.Geom.Y < b.Geom.Y ||
-                (a.Geom.Y == b.Geom.Y && a.Name <= b.Name)))
-            if ordered { break }
-            candidate.specs[j - 1], candidate.specs[j] = candidate.specs[j], candidate.specs[j - 1]
-            j -= 1
-        }
-    }
-    has_primary := false
-    for spec in candidate.specs { if spec.Primary { has_primary = true; break } }
-    if !has_primary {
-        // Servers without an output primary (notably nested Xvnc) should not
-        // let GetMonitors enumeration order randomly move the logical primary.
-        for &spec in candidate.specs {
-            old := c.Find_Physical_Output(g_wm.m, spec.Name)
-            if old != nil && old.Primary { spec.Primary = true; has_primary = true; break }
-        }
-    }
-    if !has_primary { candidate.specs[0].Primary = true }
-
     // Detect a configuration racing this multi-reply query and retry after a
     // short settle period instead of committing a mixed generation.
     verify_error: ^x11.Error
@@ -526,36 +593,42 @@ randr_query_candidate :: proc() -> (candidate: Randr_Candidate, ok: bool) {
     consistent := verify != nil && verify.config_timestamp == resources.config_timestamp
     if verify != nil { x11.free_libc(verify) }
     if !consistent || !c.Topology_Valid(&candidate.topology) || !randr_specs_valid(candidate.specs[:]) {
-        randr_free_candidate(&candidate)
-        return {}, false
+        randr_discard_candidate_metadata(&candidate)
+        return candidate, true
     }
+    candidate.metadata_valid = true
     return candidate, true
 }
 
 randr_scan :: proc(emit_event: bool) -> bool {
-    if !g_randr.available { return false }
     g_randr.refresh_count += 1
     candidate, ok := randr_query_candidate()
     if !ok {
-        logger.Debug("RandR: rejected transient/incomplete topology candidate; retaining generation", g_randr.topology.Generation)
+        logger.Debug("screen discovery rejected an incomplete snapshot; retaining generation", g_xinerama.topology.Generation)
         return false
     }
     defer randr_free_candidate(&candidate)
-    logger.Debug("RandR authoritative query: root", candidate.topology.RootGeometry,
-        "connectors", len(candidate.topology.Outputs), "monitors", len(candidate.specs))
+    logger.Debug("Xinerama authoritative query: root", candidate.discovery.RootGeometry,
+        "screens", len(candidate.discovery.Screens), "degraded", candidate.discovery.Degraded)
     for output in candidate.topology.Outputs {
         logger.Debug("RandR connector:", output.Name, "output", output.OutputId,
             "crtc", output.CrtcId, "connected", output.Connected, "enabled", output.Enabled,
             "geometry", output.Geom, "rotation", output.Rotation, "primary", output.Primary)
     }
     for spec in candidate.specs {
-        logger.Debug("RandR monitor:", spec.Name, "geometry", spec.Geom, "primary", spec.Primary)
+        logger.Debug("managed screen:", spec.Name, "geometry", spec.Geom, "primary", spec.Primary)
     }
 
-    physical_diff := c.Topology_Diff(&g_randr.topology, &candidate.topology)
+    physical_diff: [dynamic]c.Topology_Output_Diff
+    if candidate.metadata_valid {
+        physical_diff = c.Topology_Diff(&g_randr.topology, &candidate.topology)
+    }
     defer delete(physical_diff)
-    topology_changed := g_randr.topology.RootGeometry != candidate.topology.RootGeometry ||
+    metadata_changed := candidate.metadata_valid &&
+        (g_randr.topology.RootGeometry != candidate.topology.RootGeometry ||
         g_randr.topology.PrimaryOutputId != candidate.topology.PrimaryOutputId || len(physical_diff) > 0
+        )
+    topology_changed := !c.Screen_Topology_Equal(&g_xinerama.topology, &candidate.discovery)
     logical_changes := make([dynamic]Randr_Change, 0, len(candidate.specs) + len(g_wm.m.Outputs))
     defer {
         for change in logical_changes { delete(change.output) }
@@ -576,23 +649,36 @@ randr_scan :: proc(emit_event: bool) -> bool {
     }
 
     logical_changed := c.Reconcile_Outputs(g_wm.m, candidate.specs[:])
-    logger.Debug("RandR diff: physical", topology_changed, "connector changes", len(physical_diff),
+    logger.Debug("topology diff: screens", topology_changed, "RandR metadata", metadata_changed,
+        "connector changes", len(physical_diff),
         "logical", logical_changed)
-    if topology_changed || logical_changed {
-        next_generation := g_randr.topology.Generation + 1
-        c.Free_Physical_Topology(&g_randr.topology)
-        g_randr.topology = candidate.topology
-        candidate.topology = {}
+    if topology_changed || logical_changed || metadata_changed {
+        next_generation := g_xinerama.topology.Generation + 1
+        if candidate.metadata_valid {
+            c.Free_Physical_Topology(&g_randr.topology)
+            g_randr.topology = candidate.topology
+            candidate.topology = {}
+        } else {
+            g_randr.topology.RootGeometry = candidate.discovery.RootGeometry
+        }
         g_randr.topology.Generation = next_generation
-        free_physical_monitors(&g_randr.physical)
-        g_randr.physical = candidate.monitors
-        candidate.monitors = nil
+        c.Free_Screen_Topology(&g_xinerama.topology)
+        g_xinerama.topology = candidate.discovery
+        candidate.discovery = {}
+        g_xinerama.topology.Generation = next_generation
+        g_xinerama.active = g_xinerama.topology.Source == .Xinerama
+        g_xinerama.has_valid_query = true
+        if candidate.metadata_valid {
+            free_physical_monitors(&g_randr.physical)
+            g_randr.physical = candidate.monitors
+            candidate.monitors = nil
+        }
         g_randr.transaction_count += 1
         apply_current_virtual_screens()
         apply_workspace_layout_rules()
         cancel_pointer_operation()
-        logger.Info("RandR: committed topology generation", next_generation,
-            "connectors:", len(g_randr.topology.Outputs), "active monitors:", len(candidate.specs))
+        logger.Info("screen topology committed generation", next_generation,
+            "source:", g_xinerama.topology.Source, "screens:", len(candidate.specs))
         if emit_event {
             reflow()
             for change in logical_changes { ipc_broadcast_output_event(change.kind, change.output) }
@@ -601,9 +687,11 @@ randr_scan :: proc(emit_event: bool) -> bool {
     } else {
         // Metadata is still refreshed after a stable query (for virtual-screen
         // publication), but no generation/event is produced for a no-op burst.
-        free_physical_monitors(&g_randr.physical)
-        g_randr.physical = candidate.monitors
-        candidate.monitors = nil
+        if candidate.metadata_valid {
+            free_physical_monitors(&g_randr.physical)
+            g_randr.physical = candidate.monitors
+            candidate.monitors = nil
+        }
     }
     return true
 }
@@ -619,12 +707,10 @@ randr_now_ns :: proc() -> i64 {
 }
 
 randr_schedule_rescan :: proc() {
-    if !g_randr.available { return }
     c.Topology_Schedule(&g_randr.refresh, randr_now_ns(), i64(RANDR_RESCAN_DELAY))
 }
 
 randr_request_rescan :: proc() {
-    if !g_randr.available { return }
     c.Topology_Schedule(&g_randr.refresh, randr_now_ns(), 0)
 }
 
@@ -655,7 +741,7 @@ randr_run_due :: proc() {
 }
 
 randr_handle_event :: proc(event: ^x11.Event, response_type: u8) -> bool {
-    if !g_randr.available { return false }
+    if !g_randr.notifier_available { return false }
     if response_type != g_randr.event_base && response_type != g_randr.event_base + 1 {
         return false
     }

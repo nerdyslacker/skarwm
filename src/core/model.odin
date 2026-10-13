@@ -4,7 +4,7 @@ package core
 // plain u32. Membership is structural:
 //
 //   Manager
-//     ├─ PhysicalOutputs[] Physical_Output (RandR-discovered hardware)
+//     ├─ PhysicalOutputs[] Physical_Output (discovered screen regions)
 //     └─ Outputs[]      Output (logical WM screen)
 //          └─ Ws[]      Workspace         (dynamic, sorted by id, kept when empty)
 //               ├─ Cols[] Column
@@ -166,7 +166,7 @@ Workspace :: struct {
 }
 
 Physical_Output :: struct {
-    Geom: Rect, // authoritative RandR/root geometry
+    Geom: Rect, // authoritative Xinerama/root geometry
     Name: string,
     Primary: bool,
     Screens: [dynamic]^Output, // logical children, left-to-right
@@ -176,9 +176,9 @@ Physical_Output :: struct {
     SecondaryWorkspace: int,
 }
 
-// A logical WM screen. Each screen owns an independent dynamic workspace list
-// and remembers its current workspace. With no virtual topology there is one
-// Output per Physical_Output and both have the same name and geometry.
+// A logical WM screen owns the workspace objects currently assigned to it and
+// remembers which one is visible. Workspace IDs are unique across all screens.
+// With no virtual topology there is one Output per Physical_Output.
 Output :: struct {
     Geom: Rect,
     RelativeGeom: Rect, // parent-relative; Geom is always in root coordinates
@@ -301,8 +301,7 @@ Destroy_Manager :: proc(m: ^Manager) {
     free(m)
 }
 
-// Setup_Output installs the screen-sized fallback used before/without a RandR
-// 1.5 monitor scan.
+// Setup_Output installs the screen-sized fallback used before discovery.
 Setup_Output :: proc(m: ^Manager, name: string, geom: Rect) -> ^Output {
     for o in m.Outputs do free_output(o)
     clear(&m.Outputs)
@@ -443,10 +442,10 @@ Current_WS :: proc(m: ^Manager) -> ^Workspace {
     return o.Current
 }
 
-// Find_WS returns the workspace with the given 1-based id, or nil.
+// Find_WS returns the globally unique workspace with the given id, or nil.
 Find_WS :: proc(m: ^Manager, id: int) -> ^Workspace {
-    o := Active_Output(m)
-    return Find_WS_On_Output(o, id)
+    ws, _ := Find_WS_Global(m, id)
+    return ws
 }
 
 Find_WS_On_Output :: proc(o: ^Output, id: int) -> ^Workspace {
@@ -457,10 +456,62 @@ Find_WS_On_Output :: proc(o: ^Output, id: int) -> ^Workspace {
     return nil
 }
 
+Find_WS_Global :: proc(m: ^Manager, id: int) -> (ws: ^Workspace, owner: ^Output) {
+    if m == nil || id < 1 { return nil, nil }
+    for output in m.Outputs {
+        if found := Find_WS_On_Output(output, id); found != nil {
+            return found, output
+        }
+    }
+    return nil, nil
+}
+
+Visible_Output_For_Workspace :: proc(m: ^Manager, id: int) -> ^Output {
+    if m == nil || id < 1 { return nil }
+    for output in m.Outputs {
+        if output.Current != nil && output.Current.Id == id { return output }
+    }
+    return nil
+}
+
+Ensure_Distinct_Visible_Workspaces :: proc(m: ^Manager) {
+    if m == nil { return }
+    used := make([dynamic]int, 0, len(m.Outputs))
+    defer delete(used)
+    for output in m.Outputs {
+        if output.Current == nil {
+            id := 1
+            for Visible_Output_For_Workspace(m, id) != nil { id += 1 }
+            output.Current = Claim_WS_On_Output(m, output, id)
+        }
+        duplicate := false
+        for id in used {
+            if output.Current.Id == id { duplicate = true; break }
+        }
+        if duplicate {
+            id := 1
+            for {
+                available := true
+                for used_id in used {
+                    if id == used_id { available = false; break }
+                }
+                if available { break }
+                id += 1
+            }
+            output.Current = Claim_WS_On_Output(m, output, id)
+        }
+        append(&used, output.Current.Id)
+    }
+    active := Active_Output(m)
+    m.Focused = nil
+    if active != nil && active.Current != nil { m.Focused = active.Current.Focus }
+}
+
 // Ensure_WS returns the workspace with the given id, creating it (in sorted
 // position) when it does not exist yet.
 Ensure_WS :: proc(m: ^Manager, id: int) -> ^Workspace {
     if id < 1 { return nil }
+    if ws, _ := Find_WS_Global(m, id); ws != nil { return ws }
     o := Active_Output(m)
     return Ensure_WS_On_Output(o, id)
 }
@@ -474,6 +525,56 @@ Ensure_WS_On_Output :: proc(o: ^Output, id: int) -> ^Workspace {
     for i < len(o.Ws) && o.Ws[i].Id < id { i += 1 }
     array_insert_at(&o.Ws, i, ws)
     return ws
+}
+
+insert_workspace_sorted :: proc(o: ^Output, ws: ^Workspace) {
+    i := 0
+    for i < len(o.Ws) && o.Ws[i].Id < ws.Id { i += 1 }
+    array_insert_at(&o.Ws, i, ws)
+}
+
+Transfer_WS_To_Output :: proc(
+    m: ^Manager, ws: ^Workspace, dst: ^Output, allow_visible: bool = false,
+) -> bool {
+    if m == nil || ws == nil || dst == nil { return false }
+    src := Output_Of_WS(m, ws)
+    if src == dst { return true }
+    if src == nil || (!allow_visible && src.Current == ws) ||
+       Find_WS_On_Output(dst, ws.Id) != nil { return false }
+
+    found := false
+    for candidate, i in src.Ws {
+        if candidate == ws {
+            ordered_remove(&src.Ws, i)
+            found = true
+            break
+        }
+    }
+    if !found { return false }
+
+    destination := Output_Work_Area(m, dst)
+    if destination.W <= 0 || destination.H <= 0 { destination = dst.Geom }
+    for col in ws.Cols {
+        for cl in col.Wins { cl.Out = dst }
+    }
+    for cl in ws.Floaters {
+        if !rect_empty(cl.FloatingRect) {
+            cl.FloatingRect = translate_floating_rect(cl.FloatingRect, src.Geom, destination)
+        }
+        cl.Out = dst
+    }
+    insert_workspace_sorted(dst, ws)
+    return true
+}
+
+Claim_WS_On_Output :: proc(m: ^Manager, dst: ^Output, id: int) -> ^Workspace {
+    if m == nil || dst == nil || id < 1 { return nil }
+    if ws := Find_WS_On_Output(dst, id); ws != nil { return ws }
+    if ws, owner := Find_WS_Global(m, id); ws != nil {
+        if owner.Current == ws || !Transfer_WS_To_Output(m, ws, dst) { return nil }
+        return ws
+    }
+    return Ensure_WS_On_Output(dst, id)
 }
 
 logical_child_name :: proc(parent, suffix: string) -> string {
@@ -495,7 +596,6 @@ new_logical_output :: proc(p: ^Physical_Output, name: string, geom, relative: Re
     o.Parent = p
     o.Ws = make([dynamic]^Workspace, 0, 4)
     o.Docks = make([dynamic]^Client, 0, 2)
-    o.Current = Ensure_WS_On_Output(o, 1)
     return o
 }
 
@@ -582,7 +682,13 @@ migrate_output_state :: proc(m: ^Manager, src, dst: ^Output) {
     for cl in m.Clients {
         if cl.Stashed && cl.Out == src { cl.Out = dst }
     }
-    for ws in src.Ws {
+    i := 0
+    for i < len(src.Ws) {
+        ws := src.Ws[i]
+        if Find_WS_On_Output(dst, ws.Id) == nil &&
+           Transfer_WS_To_Output(m, ws, dst, true) {
+            continue
+        }
         target := Ensure_WS_On_Output(dst, ws.Id)
         for col in ws.Cols {
             for cl in col.Wins { cl.Ws = target; cl.Out = dst }
@@ -599,6 +705,7 @@ migrate_output_state :: proc(m: ^Manager, src, dst: ^Output) {
         }
         clear(&ws.Floaters)
         if target.Focus == nil { target.Focus = ws.Focus }
+        i += 1
     }
     for d in src.Docks {
         d.Out = dst
@@ -626,7 +733,11 @@ logical_list_from_physical :: proc(m: ^Manager) -> [dynamic]^Output {
 reset_active_output :: proc(m: ^Manager, wanted: ^Output) {
     m.Active = 0
     for o, i in m.Outputs {
-        if o.Current == nil { o.Current = Ensure_WS_On_Output(o, 1) }
+        if o.Current == nil {
+            id := 1
+            for Visible_Output_For_Workspace(m, id) != nil { id += 1 }
+            o.Current = Claim_WS_On_Output(m, o, id)
+        }
         if o == wanted { m.Active = i }
     }
     active := Active_Output(m)
@@ -634,9 +745,8 @@ reset_active_output :: proc(m: ^Manager, wanted: ^Output) {
     if active != nil && active.Current != nil { m.Focused = active.Current.Focus }
 }
 
-// Reconcile_Outputs treats specs as physical RandR outputs. Physical identity
-// and full geometry are retained separately while Manager.Outputs is rebuilt
-// as the ordered list of logical WM screens.
+// Reconcile_Outputs treats specs as physical screen regions. Identity and full
+// geometry are retained while Manager.Outputs is rebuilt as logical screens.
 Reconcile_Outputs :: proc(m: ^Manager, specs: []Output_Spec) -> bool {
     if m == nil || len(specs) == 0 { return false }
     // Reject the complete candidate before mutating any live object. Negative
@@ -755,6 +865,7 @@ Reconcile_Outputs :: proc(m: ^Manager, specs: []Output_Spec) -> bool {
     m.PhysicalOutputs = next_physical
     delete(old_outputs)
     m.Outputs = logical_list_from_physical(m)
+    Ensure_Distinct_Visible_Workspaces(m)
     Update_Reserved(m)
     if replacement_active == nil || Output_Index(m, replacement_active) < 0 {
         replacement_active = target

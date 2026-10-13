@@ -1,6 +1,6 @@
 package core
 
-// Pure logical-screen topology operations. RandR callers update
+// Pure logical-screen topology operations. Discovery callers update
 // Physical_Output geometry through Reconcile_Outputs; runtime/config callers
 // use these operations so both paths share the same invariants.
 
@@ -13,6 +13,7 @@ replace_logical_list :: proc(m: ^Manager, wanted: ^Output) {
     old := m.Outputs
     m.Outputs = logical_list_from_physical(m)
     delete(old)
+    Ensure_Distinct_Visible_Workspaces(m)
     reset_active_output(m, wanted)
 }
 
@@ -45,7 +46,6 @@ Enable_Output_Split :: proc(
     right_name := logical_child_name(p.Name, "right")
     right := new_logical_output(p, right_name, {}, {}, true)
     delete(right_name)
-    right.Current = Ensure_WS_On_Output(right, max(1, p.SecondaryWorkspace))
 
     p.Split = true
     p.SplitRatio = ratio
@@ -59,6 +59,11 @@ Enable_Output_Split :: proc(
         return false
     }
     replace_logical_list(m, active)
+    desired := max(1, p.SecondaryWorkspace)
+    if Visible_Output_For_Workspace(m, desired) == nil {
+        if ws := Claim_WS_On_Output(m, right, desired); ws != nil { right.Current = ws }
+    }
+    Ensure_Distinct_Visible_Workspaces(m)
     Update_Reserved(m)
     return true
 }
@@ -111,4 +116,3 @@ Resize_Output_Split :: proc(m: ^Manager, o: ^Output, delta: i32) -> bool {
     Update_Reserved(m)
     return true
 }
-

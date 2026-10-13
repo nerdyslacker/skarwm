@@ -3,9 +3,9 @@
 #
 #   usage: scripts/itest.sh
 #
-# Owns a private Xvnc on :99, rebuilds the WM when sources changed, runs the
-# implemented integration steps and prints PASS/FAIL per step. Exits nonzero if
-# any step fails. Pure-logic behaviour (columns/focus/viewport geometry) is
+# Owns a private Xvnc on ${SKARWM_ITEST_DISPLAY:-:99}, rebuilds the WM when
+# sources changed, runs the implemented integration steps and prints PASS/FAIL
+# per step. Exits nonzero if any step fails. Pure-logic behaviour is
 # asserted in depth by tests/core_tests; this file only checks that the wiring
 # through X behaves the same way.
 #
@@ -30,7 +30,7 @@
 set -u
 cd "$(dirname "$0")/.." || exit 2
 
-DISP=":99"
+DISP="${SKARWM_ITEST_DISPLAY:-:99}"
 PASS=0
 FAIL=0
 WM_LOG="${TMPDIR:-/tmp}/skarwm_itest.log"

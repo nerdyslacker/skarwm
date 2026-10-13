@@ -4,7 +4,7 @@ skarwm implements the EWMH/ICCCM subset used by normal applications, panels,
 launchers, and tools such as `wmctrl`:
 
 - client list, active window, desktop count/current desktop, and work areas;
-- desktop names and per-output viewports for external workspace pagers;
+- desktop names and owner-aware viewports for external workspace pagers;
 - fullscreen, floating always-on-top, and paired horizontal/vertical maximize state;
 - close-window and activation requests;
 - `WM_DELETE_WINDOW`, `WM_TAKE_FOCUS`, urgency, titles, and normal size hints.
@@ -52,15 +52,15 @@ For automation and bars, use the nonblocking i3-compatible socket documented in
 
 ## External bars and workspace pagers
 
-skarwm exposes `bar_tag_count` workspace slots per logical output through EWMH.
-The default is eight. Each `(output, workspace)` pair receives its own global
-EWMH desktop index, while `_NET_DESKTOP_VIEWPORT` maps that index back to the
-output geometry. `_NET_WM_DESKTOP` is kept current on every managed window, so
-external pagers can distinguish occupied and empty workspaces. Pager requests
-can switch desktops or move a window to another desktop.
+skarwm exposes `bar_tag_count` global workspace slots through EWMH. The default
+is eight, and workspace `N` maps to EWMH desktop `N - 1` regardless of which
+screen currently owns it. `_NET_DESKTOP_VIEWPORT` and `_NET_WORKAREA` follow
+the workspace's owning screen. `_NET_WM_DESKTOP` is kept current on every
+managed window, and pager requests can show a workspace or move a window to it.
 
 Polybar's `internal/xworkspaces` module works directly with these properties.
-For one bar per monitor, enable monitor grouping and pinning:
+For one bar per monitor, enable monitor grouping and pinning; a workspace moves
+between bars when its owning screen changes:
 
 ```ini
 [module/xworkspaces]

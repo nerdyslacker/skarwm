@@ -76,8 +76,12 @@ Use the normal output commands to move between the two logical screens:
 ```sh
 skarwm-msg focus output next
 skarwm-msg focus output prev
+skarwm-msg focus output left
+skarwm-msg focus output 2
 skarwm-msg move output next
 skarwm-msg move output prev
+skarwm-msg move output right
+skarwm-msg move output 2
 ```
 
 ## Persistent configuration
@@ -119,18 +123,18 @@ DP-1:right
 
 When disabling a split, skarwm:
 
-1. migrates clients and workspace contents from the right screen into matching
-   workspace IDs on the left;
+1. moves the right screen's workspace objects and clients to the left;
 2. remembers the right screen's selected workspace ID;
 3. expands the surviving screen to the physical monitor's current geometry.
 
 If the split is enabled again, the side screen restores its remembered
-workspace selection. Migrated clients remain safely accessible on the main
-screen and are never hidden in an inactive internal screen.
+workspace object, including its clients, layout, viewport, and focus history.
+Until then, those workspaces remain safely accessible on the main screen.
 
-When XRandR changes the monitor's resolution or position, skarwm recomputes a
-ratio-based split from the new physical geometry. If the new size cannot hold
-both minimum widths, it safely falls back to a single logical screen.
+When a RandR notification triggers a refreshed Xinerama geometry, skarwm
+recomputes a ratio-based split from the new physical rectangle. If the new size
+cannot hold both minimum widths, it safely falls back to a single logical
+screen.
 
 ## Output information
 

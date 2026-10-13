@@ -36,8 +36,8 @@ skarwm-msg scratchpad toggle-float N
 skarwm-msg scratchpad remove N
 skarwm-msg scratchpad target appid|class|instance|title VALUE [--spawn COMMAND]
 skarwm-msg scratchpad target-float appid|class|instance|title VALUE [--spawn COMMAND]
-skarwm-msg focus output next|prev
-skarwm-msg move output next|prev
+skarwm-msg focus output next|prev|left|right|up|down|INDEX
+skarwm-msg move output next|prev|left|right|up|down|INDEX
 skarwm-msg screen split toggle
 skarwm-msg screen split enable
 skarwm-msg screen split disable
@@ -97,10 +97,10 @@ hidden client, `scratchpad_register` is one session register or null, and
 `always_on_top` boolean reports the floating above-layer state. The singular
 scratchpad field is retained for simple consumers. Type 101 reports protocol
 version information. `get-topology` (extension type 102) reports the committed
-topology generation, scheduler/transaction diagnostics, every RandR connector
-(including connected-but-disabled connectors), and the current logical output
-snapshot. `screen refresh` schedules the same authoritative refresh used for
-RandR events.
+discovery source, degraded state, Xinerama rectangles and identity confidence,
+scheduler/transaction diagnostics, optional RandR connector metadata, and the
+current logical output snapshot. `screen refresh` schedules the same
+authoritative Xinerama refresh used for RandR and root events.
 
 ## Events
 

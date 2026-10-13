@@ -1,7 +1,7 @@
 package x11
 
-// Minimal XCB RandR 1.5 foreign surface used for monitor discovery and change
-// notifications. Core XCB connection/error/cookie types live in xcb.odin.
+// Minimal XCB RandR foreign surface used for change notifications, optional
+// connector metadata, and virtual-monitor publication.
 
 Randr_Query_Version_Reply :: struct {
     response_type: u8,

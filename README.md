@@ -1,14 +1,22 @@
 <div align="center">
 <a href="https://github.com/nerdyslacker/skarwm"><img src="assets/skarwm.png" width="250"/></a>
+<p><b>S</b>argsyan <b>KAR</b>en's <b>W</b>indow <b>M</b>anager</p>
 </div>
 
 ---
 
 <div align="center">
-<p><b>S</b>argsyan <b>KAR</b>en's <b>W</b>indow <b>M</b>anager.</p>
+
+
+[![License](https://img.shields.io/github/license/nerdyslacker/skarwm)](https://github.com/nerdyslacker/skarwm/blob/main/LICENSE)
+[![GitHub release](https://img.shields.io/github/release/nerdyslacker/skarwm)](https://github.com/nerdyslacker/skarwm/releases)
+<a href="https://app.commanddash.io/agent?github=https://github.com/nerdyslacker/skarwm"><img src="https://img.shields.io/badge/AI-Code%20Assist-EB9FDA"></a>
+[![GitHub stars](https://img.shields.io/github/stars/nerdyslacker/skarwm)](https://github.com/nerdyslacker/skarwm/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/nerdyslacker/skarwm)](https://github.com/nerdyslacker/skarwm/fork)
+
 </div>
 
-**skarwm** is a small keyboard-driven X11 window manager written in Odin. Windows
+**skarwm** is a small keyboard-driven X11 window manager developed as a hobby project for learning Odin. Windows
 live in vertical columns on a horizontally scrolling strip, with workspaces as
 the vertical dimension. An optional lightweight built-in bar provides
 workspace and scheduled script blocks; external desktop UI such as
@@ -20,9 +28,6 @@ fullscreen windows, native scratchpads, atomic rc reloads, window rules,
 edge previews with hover-to-reveal, EWMH/ICCCM interoperability, dock struts,
 and nonblocking Unix-socket IPC.
 
-> **Note:** skarwm was developed with AI assistance as a project for learning
-> Odin. It is a hobby project and my daily driver.
-
 <div align="center">
 <img src="assets/screenshot.png"/>
 </div>
@@ -32,7 +37,7 @@ and nonblocking Unix-socket IPC.
 skarwm requires:
 
 - Odin 2026.07 or newer;
-- libxcb with the RandR and Shape extensions;
+- libxcb with the Xinerama, RandR, and Shape extensions;
 - GNU Make and Clang (used by Odin for linking).
 
 The default build also produces the optional `skarwm-bar`, which requires
@@ -60,7 +65,7 @@ Install Odin separately using the official instructions linked above, then:
 
 ```sh
 sudo apt update
-sudo apt install clang make libxcb1-dev libxcb-randr0-dev libxcb-shape0-dev \
+sudo apt install clang make libxcb1-dev libxcb-xinerama0-dev libxcb-randr0-dev libxcb-shape0-dev \
   libx11-dev libxft-dev libfontconfig1-dev
 ```
 
@@ -150,7 +155,7 @@ sudo pkgin install clang gmake libxcb libX11 libXft fontconfig
 
 Required at runtime:
 
-- an X11 server and `libxcb` with RandR support;
+- an X11 server and the XCB Xinerama, RandR, and Shape libraries;
 - a terminal or launcher configured in the rc file. `$TERMINAL` is preferred,
   with `xterm` as the fallback.
 
@@ -163,8 +168,11 @@ sudo xbps-install -S tigervnc xterm xdotool xwininfo xrandr xprop \
   python3-xlib wmctrl xorg-server-xephyr
 ```
 
-At runtime skarwm links libxcb plus its RandR and Shape extensions. No shell,
-bar, compositor, or notification daemon is required; `skarwm-bar` is optional.
+At runtime skarwm links libxcb plus its Xinerama, RandR, and Shape extensions.
+Xinerama supplies managed screen rectangles. RandR is retained for change
+notifications, optional connector metadata, and virtual-screen publication.
+No shell, compositor, or notification daemon is required; `skarwm-bar` is
+optional.
 
 ## Recommended companion software
 
@@ -195,6 +203,7 @@ your system.
 ## Build and install
 
 ```sh
+make check-deps
 make
 make debug
 make test
@@ -205,8 +214,11 @@ The install target adds `skarwm`, `skarwm-msg`, `skarwm-session`, the display
 manager entry, and the example configuration. Session integration files are
 kept under `assets/`.
 
-Run a standalone nested session with `make xephyr`, or use
-`make xephyr-multi` for two RandR monitor objects.
+Run a standalone nested session with `make xephyr`. `make xephyr-multi` creates
+two RandR monitor objects for notification/projection testing, but some nested
+X servers still expose only one Xinerama rectangle. Check
+`skarwm-msg get-topology`; real multi-screen Xinerama behavior then requires a
+server that reports multiple active Xinerama regions.
 
 ## Source layout
 
@@ -217,7 +229,7 @@ src/
 ├── main.odin          executable entry point
 ├── bar/               optional standalone EWMH dock/bar client
 ├── core/              model, layout, operations, IPC types, pure math
-├── x11/               low-level XCB, properties, and RandR bindings
+├── x11/               low-level XCB, properties, Xinerama, and RandR bindings
 ├── input/             keysyms, modifiers, actions, and resolved bindings
 ├── rendering/         geometry animation and rounded window shapes
 ├── ui/                tabs, help, and drag/drop overlays

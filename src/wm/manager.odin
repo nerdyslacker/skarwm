@@ -69,6 +69,7 @@ Wm :: struct {
     preview_hover_target: u32,
     preview_hover_pending: u32,
     preview_hover_due: time.Tick,
+    preserve_external_focus: bool,
     rendering: rendering.State,
     bar_managed_started: bool,
     bar_blocks: [dynamic]Raw_Bar_Block,
@@ -121,8 +122,8 @@ push_geoms :: proc(animate: bool) {
     rendering.Commit(&g_wm.rendering, g_wm.conn, g_wm.m, animate, ewmh_mark_mapped)
 }
 
-// render_focus sets each window's border colour and applies X input focus to the
-// focused client (or PointerRoot when there is no managed focus). A focused
+// render_focus sets each window's border colour and normally applies X input
+// focus to the focused client (or PointerRoot when there is no managed focus). A focused
 // floating window is always raised above the other clients; keeping that rule
 // here covers pointer focus, click focus, newly-floated windows and IPC focus.
 render_focus :: proc() {
@@ -142,7 +143,9 @@ render_focus :: proc() {
         // may have been newly mapped even when the focused client is tiled.
         raise_docks()
     }
-    apply_x_focus()
+    if !g_wm.preserve_external_focus {
+        apply_x_focus()
+    }
 }
 
 apply_x_focus :: proc() {
@@ -950,10 +953,30 @@ dispatch_action :: proc(b: ^input.Binding) {
         focus_output_rel(1)
     case .Focus_Output_Prev:
         focus_output_rel(-1)
+    case .Focus_Output_Left:
+        focus_output_direction(.Left)
+    case .Focus_Output_Right:
+        focus_output_direction(.Right)
+    case .Focus_Output_Up:
+        focus_output_direction(.Up)
+    case .Focus_Output_Down:
+        focus_output_direction(.Down)
+    case .Focus_Output_Order:
+        focus_output_order(b.arg)
     case .Move_To_Output_Next:
         move_focused_to_output_rel(1)
     case .Move_To_Output_Prev:
         move_focused_to_output_rel(-1)
+    case .Move_To_Output_Left:
+        move_focused_to_output_direction(.Left)
+    case .Move_To_Output_Right:
+        move_focused_to_output_direction(.Right)
+    case .Move_To_Output_Up:
+        move_focused_to_output_direction(.Up)
+    case .Move_To_Output_Down:
+        move_focused_to_output_direction(.Down)
+    case .Move_To_Output_Order:
+        move_focused_to_output_order(b.arg)
     case .Screen_Split_Toggle, .Screen_Split_Enable, .Screen_Split_Disable,
          .Screen_Split_Grow, .Screen_Split_Shrink, .Screen_Split_Ratio:
         screen_split_action(b.action, b.arg)
@@ -1052,11 +1075,55 @@ focus_output_rel :: proc(dir: int) {
     reflow()
 }
 
+focus_output_direction :: proc(dir: c.Dir) {
+    m := g_wm.m
+    old_ws := c.Current_WS(m)
+    if !c.Focus_Output_By_Direction(m, dir) { return }
+    ipc_broadcast_output_event("focus", c.Active_Output(m).Name)
+    ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, c.Current_WS(m), old_ws)
+    raise_focused()
+    reflow()
+}
+
+focus_output_order :: proc(index: int) {
+    m := g_wm.m
+    old_ws := c.Current_WS(m)
+    if !c.Focus_Output_By_Order(m, index - 1) { return }
+    ipc_broadcast_output_event("focus", c.Active_Output(m).Name)
+    ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, c.Current_WS(m), old_ws)
+    raise_focused()
+    reflow()
+}
+
 move_focused_to_output_rel :: proc(dir: int) {
     m := g_wm.m
     src := c.Current_WS(m)
     moved := m.Focused
     if !c.Move_Focused_To_Output_Rel(m, dir) { return }
+    if src != nil && c.Ws_Is_Empty(src) {
+        ipc_broadcast_ws_event(c.IPC_CHANGE_EMPTY, src, nil)
+    }
+    reflow()
+    ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, moved)
+}
+
+move_focused_to_output_direction :: proc(dir: c.Dir) {
+    m := g_wm.m
+    src := c.Current_WS(m)
+    moved := m.Focused
+    if !c.Move_Focused_To_Output_By_Direction(m, dir) { return }
+    if src != nil && c.Ws_Is_Empty(src) {
+        ipc_broadcast_ws_event(c.IPC_CHANGE_EMPTY, src, nil)
+    }
+    reflow()
+    ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, moved)
+}
+
+move_focused_to_output_order :: proc(index: int) {
+    m := g_wm.m
+    src := c.Current_WS(m)
+    moved := m.Focused
+    if !c.Move_Focused_To_Output_By_Order(m, index - 1) { return }
     if src != nil && c.Ws_Is_Empty(src) {
         ipc_broadcast_ws_event(c.IPC_CHANGE_EMPTY, src, nil)
     }
@@ -1085,6 +1152,15 @@ ws_switch_to :: proc(id: int) -> bool {
     if old != nil && old.Id == id {
         raise_focused()
         reflow()
+        return true
+    }
+    if visible := c.Visible_Output_For_Workspace(m, id); visible != nil {
+        if !c.Focus_Output(m, visible) { return true }
+        ipc_broadcast_output_event("focus", visible.Name)
+        ipc_broadcast_ws_event(c.IPC_CHANGE_FOCUS, visible.Current, old)
+        raise_focused()
+        reflow()
+        ipc_broadcast_focus_change(old_focus, m.Focused)
         return true
     }
     new := c.Find_WS(m, id)
@@ -1124,7 +1200,9 @@ move_focused_to_ws :: proc(id: int) {
     if src == nil || src.Focus == nil { return }
     created := id >= 1 && c.Find_WS(m, id) == nil
     if c.Move_Focused_To_WS(m, id) {
-        if created { ipc_broadcast_ws_event(c.IPC_CHANGE_INIT, c.Find_WS(m, id), nil) }
+        if created {
+            ipc_broadcast_ws_event(c.IPC_CHANGE_INIT, c.Find_WS(m, id), nil)
+        }
         if c.Ws_Is_Empty(src) { ipc_broadcast_ws_event(c.IPC_CHANGE_EMPTY, src, nil) }
         reflow()
     }
@@ -1986,20 +2064,7 @@ on_property_notify :: proc(ev: ^x11.Property_Notify_Event) {
 on_configure_notify :: proc(ev: ^x11.Configure_Notify_Event) {
     if ev.event != g_wm.root || ev.window != g_wm.root { return }
     next_w, next_h := i32(ev.width), i32(ev.height)
-    // RandR 1.5 SetMonitor/DeleteMonitor can send a root ConfigureNotify even
-    // when the framebuffer dimensions stay unchanged.  Treat it as a rescreen
-    // signal unless it came from our currently published split projection.
     size_changed := next_w != g_wm.scr_w || next_h != g_wm.scr_h
     if size_changed { g_wm.scr_w, g_wm.scr_h = next_w, next_h }
-    if g_randr.available {
-        if size_changed || len(g_randr.published) == 0 { randr_schedule_rescan() }
-    } else {
-        if !size_changed { return }
-        _ = c.Reconcile_Outputs(g_wm.m, []c.Output_Spec{{
-            Name = "screen",
-            Geom = c.Rect{X = 0, Y = 0, W = g_wm.scr_w, H = g_wm.scr_h},
-            Primary = true,
-        }})
-        reflow()
-    }
+    if size_changed || len(g_randr.published) == 0 { randr_schedule_rescan() }
 }

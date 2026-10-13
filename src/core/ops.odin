@@ -27,6 +27,14 @@ Column_Of :: proc(cl: ^Client) -> (column_index: int, col: ^Column, row: int) {
 Activate_WS :: proc(m: ^Manager, ws: ^Workspace) {
     o := Active_Output(m)
     if o == nil || ws == nil { return }
+    owner := Output_Of_WS(m, ws)
+    if owner != nil && owner != o {
+        if owner.Current == ws {
+            _ = Focus_Output(m, owner)
+            return
+        }
+        if !Transfer_WS_To_Output(m, ws, o) { return }
+    }
     o.Current = ws
     m.Focused = ws.Focus
 }
@@ -36,15 +44,19 @@ Activate_WS :: proc(m: ^Manager, ws: ^Workspace) {
 Focus_Output :: proc(m: ^Manager, o: ^Output) -> bool {
     idx := Output_Index(m, o)
     if idx < 0 { return false }
-    if o.Current == nil { o.Current = Ensure_WS_On_Output(o, 1) }
+    if o.Current == nil {
+        id := 1
+        for Visible_Output_For_Workspace(m, id) != nil { id += 1 }
+        o.Current = Claim_WS_On_Output(m, o, id)
+    }
     changed := m.Active != idx
     m.Active = idx
     m.Focused = o.Current.Focus
     return changed
 }
 
-// Focus_Output_Rel selects the next/previous output in discovery order,
-// wrapping at both ends. Each output retains its independent current workspace.
+// Focus_Output_Rel selects the next/previous output in spatial order, wrapping
+// at both ends. Each output retains its independent current workspace.
 Focus_Output_Rel :: proc(m: ^Manager, dir: int) -> bool {
     n := len(m.Outputs)
     if n < 2 || dir == 0 { return false }
@@ -54,10 +66,94 @@ Focus_Output_Rel :: proc(m: ^Manager, dir: int) -> bool {
     return Focus_Output(m, m.Outputs[idx])
 }
 
-// Switch_WS_Id activates the workspace with the given 1-based id, creating it
-// when absent. Returns the activated workspace or nil.
+Output_By_Order :: proc(m: ^Manager, index: int) -> ^Output {
+    if m == nil || index < 0 || index >= len(m.Outputs) { return nil }
+    return m.Outputs[index]
+}
+
+output_axis_gap :: proc(from, candidate: Rect, dir: Dir) -> (primary, orthogonal: i64, beam: bool) {
+    fx2, fy2 := i64(from.X) + i64(from.W), i64(from.Y) + i64(from.H)
+    cx2, cy2 := i64(candidate.X) + i64(candidate.W), i64(candidate.Y) + i64(candidate.H)
+    switch dir {
+    case .Left:
+        primary = max(i64(0), i64(from.X) - cx2)
+        beam = i64(candidate.Y) < fy2 && cy2 > i64(from.Y)
+        if cy2 <= i64(from.Y) { orthogonal = i64(from.Y) - cy2 }
+        if i64(candidate.Y) >= fy2 { orthogonal = i64(candidate.Y) - fy2 }
+    case .Right:
+        primary = max(i64(0), i64(candidate.X) - fx2)
+        beam = i64(candidate.Y) < fy2 && cy2 > i64(from.Y)
+        if cy2 <= i64(from.Y) { orthogonal = i64(from.Y) - cy2 }
+        if i64(candidate.Y) >= fy2 { orthogonal = i64(candidate.Y) - fy2 }
+    case .Up:
+        primary = max(i64(0), i64(from.Y) - cy2)
+        beam = i64(candidate.X) < fx2 && cx2 > i64(from.X)
+        if cx2 <= i64(from.X) { orthogonal = i64(from.X) - cx2 }
+        if i64(candidate.X) >= fx2 { orthogonal = i64(candidate.X) - fx2 }
+    case .Down:
+        primary = max(i64(0), i64(candidate.Y) - fy2)
+        beam = i64(candidate.X) < fx2 && cx2 > i64(from.X)
+        if cx2 <= i64(from.X) { orthogonal = i64(from.X) - cx2 }
+        if i64(candidate.X) >= fx2 { orthogonal = i64(candidate.X) - fx2 }
+    }
+    return
+}
+
+Output_In_Direction :: proc(m: ^Manager, from: ^Output, dir: Dir) -> ^Output {
+    if m == nil || from == nil { return nil }
+    from_cx := i64(from.Geom.X) * 2 + i64(from.Geom.W)
+    from_cy := i64(from.Geom.Y) * 2 + i64(from.Geom.H)
+    best: ^Output
+    best_beam := false
+    best_primary, best_orthogonal := i64(max(i64)), i64(max(i64))
+    best_center := i64(max(i64))
+    for candidate in m.Outputs {
+        if candidate == from { continue }
+        cx := i64(candidate.Geom.X) * 2 + i64(candidate.Geom.W)
+        cy := i64(candidate.Geom.Y) * 2 + i64(candidate.Geom.H)
+        in_half_plane := false
+        switch dir {
+        case .Left:  in_half_plane = cx < from_cx
+        case .Right: in_half_plane = cx > from_cx
+        case .Up:    in_half_plane = cy < from_cy
+        case .Down:  in_half_plane = cy > from_cy
+        }
+        if !in_half_plane { continue }
+        primary, orthogonal, beam := output_axis_gap(from.Geom, candidate.Geom, dir)
+        dx, dy := cx - from_cx, cy - from_cy
+        center := dx * dx + dy * dy
+        better := best == nil || (beam && !best_beam) || (beam == best_beam &&
+            (primary < best_primary || (primary == best_primary &&
+            (orthogonal < best_orthogonal ||
+            (orthogonal == best_orthogonal && center < best_center)))))
+        if better {
+            best = candidate
+            best_beam = beam
+            best_primary, best_orthogonal, best_center = primary, orthogonal, center
+        }
+    }
+    return best
+}
+
+Focus_Output_By_Direction :: proc(m: ^Manager, dir: Dir) -> bool {
+    target := Output_In_Direction(m, Active_Output(m), dir)
+    return target != nil && Focus_Output(m, target)
+}
+
+Focus_Output_By_Order :: proc(m: ^Manager, index: int) -> bool {
+    target := Output_By_Order(m, index)
+    return target != nil && Focus_Output(m, target)
+}
+
+// Switch_WS_Id focuses a screen already showing the workspace, otherwise it
+// activates or creates that workspace on the current screen.
 Switch_WS_Id :: proc(m: ^Manager, id: int) -> ^Workspace {
-    ws := Ensure_WS(m, id)
+    if visible := Visible_Output_For_Workspace(m, id); visible != nil {
+        _ = Focus_Output(m, visible)
+        return visible.Current
+    }
+    output := Active_Output(m)
+    ws := Claim_WS_On_Output(m, output, id)
     if ws == nil { return nil }
     Activate_WS(m, ws)
     return ws
@@ -795,7 +891,13 @@ Move_Client_To_WS :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output, id: int) -> 
         return false
     }
     src, src_o := cl.Ws, cl.Out
-    tgt := Ensure_WS_On_Output(dst_o, id)
+    destination_output := dst_o
+    tgt: ^Workspace
+    if global, owner := Find_WS_Global(m, id); global != nil && owner.Current == global {
+        tgt, destination_output = global, owner
+    } else {
+        tgt = Claim_WS_On_Output(m, destination_output, id)
+    }
     if tgt == nil || tgt == src { return false }
 
     cl.Fullscreen = false // never arrive fullscreen elsewhere
@@ -803,11 +905,11 @@ Move_Client_To_WS :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output, id: int) -> 
     if cl.Floating {
         remove_floater(src, cl)
         if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
-        if src_o != dst_o && !rect_empty(cl.FloatingRect) {
-            cl.FloatingRect = translate_floating_rect(cl.FloatingRect, src_o.Geom, dst_o.Geom)
+        if src_o != destination_output && !rect_empty(cl.FloatingRect) {
+            cl.FloatingRect = translate_floating_rect(cl.FloatingRect, src_o.Geom, destination_output.Geom)
         }
         append(&tgt.Floaters, cl)
-        cl.Ws, cl.Out = tgt, dst_o
+        cl.Ws, cl.Out = tgt, destination_output
         tgt.Focus = cl
     } else {
         ci, col, row := column_of(src, cl)
@@ -828,23 +930,22 @@ Move_Client_To_WS :: proc(m: ^Manager, cl: ^Client, dst_o: ^Output, id: int) -> 
 Move_Focused_To_WS :: proc(m: ^Manager, id: int) -> bool {
     src := Current_WS(m)
     if src == nil || src.Focus == nil { return false }
-    return Move_Client_To_WS(m, src.Focus, Active_Output(m), id)
+    destination := Visible_Output_For_Workspace(m, id)
+    if destination == nil { destination = Active_Output(m) }
+    return Move_Client_To_WS(m, src.Focus, destination, id)
 }
 
-// Move_Focused_To_Output_Rel sends the focused client to the next/previous
-// output's currently visible workspace. Output selection wraps; the source
-// output remains active and chooses a local fallback focus.
-Move_Focused_To_Output_Rel :: proc(m: ^Manager, dir: int) -> bool {
-    n := len(m.Outputs)
+Move_Focused_To_Output :: proc(m: ^Manager, dst_o: ^Output) -> bool {
     src_o := Active_Output(m)
     src := Current_WS(m)
-    if n < 2 || dir == 0 || src_o == nil || src == nil || src.Focus == nil { return false }
+    if src_o == nil || dst_o == nil || dst_o == src_o || Output_Index(m, dst_o) < 0 ||
+       src == nil || src.Focus == nil { return false }
     cl := src.Focus
-    idx := m.Active + (dir / abs(dir))
-    if idx < 0 { idx = n - 1 }
-    if idx >= n { idx = 0 }
-    dst_o := m.Outputs[idx]
-    if dst_o.Current == nil { dst_o.Current = Ensure_WS_On_Output(dst_o, 1) }
+    if dst_o.Current == nil {
+        id := 1
+        for Visible_Output_For_Workspace(m, id) != nil { id += 1 }
+        dst_o.Current = Claim_WS_On_Output(m, dst_o, id)
+    }
     dst := dst_o.Current
 
     cl.Fullscreen = false
@@ -875,6 +976,27 @@ Move_Focused_To_Output_Rel :: proc(m: ^Manager, dir: int) -> bool {
     if src.Focus == cl { src.Focus = fallback_focus_for_ws(src) }
     m.Focused = src.Focus
     return true
+}
+
+// Move_Focused_To_Output_Rel sends the focused client to the next/previous
+// output's currently visible workspace. Output selection wraps.
+Move_Focused_To_Output_Rel :: proc(m: ^Manager, dir: int) -> bool {
+    n := len(m.Outputs)
+    if n < 2 || dir == 0 { return false }
+    idx := m.Active + (dir / abs(dir))
+    if idx < 0 { idx = n - 1 }
+    if idx >= n { idx = 0 }
+    return Move_Focused_To_Output(m, m.Outputs[idx])
+}
+
+Move_Focused_To_Output_By_Direction :: proc(m: ^Manager, dir: Dir) -> bool {
+    target := Output_In_Direction(m, Active_Output(m), dir)
+    return target != nil && Move_Focused_To_Output(m, target)
+}
+
+Move_Focused_To_Output_By_Order :: proc(m: ^Manager, index: int) -> bool {
+    target := Output_By_Order(m, index)
+    return target != nil && Move_Focused_To_Output(m, target)
 }
 
 remove_floater :: proc(ws: ^Workspace, cl: ^Client) {

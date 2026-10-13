@@ -74,7 +74,7 @@ a single `skarwm.rc` continues to work as before.
 | `bar_font_weight : normal` | Default text weight: `normal`, `medium`, or `bold`. |
 | `bar_foreground : #E6E6E6` | Built-in bar text colour. |
 | `bar_background : #1E1E2E` | Built-in bar background colour. |
-| `bar_tag_count : 8` | Fixed workspace slots shown by the built-in bar and exported to EWMH pagers on every monitor, `1..64`. |
+| `bar_tag_count : 8` | Fixed workspace slots shown by the built-in bar and exported globally to EWMH pagers, `1..64`. |
 | `bar_tag_foreground : #262626` | Workspace-slot text colour. |
 | `bar_tag_background : #5F87AF` | Workspace-slot wrapper colour. |
 | `bar_block_foreground : #262626` | Script/status block text colour. |

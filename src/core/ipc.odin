@@ -71,7 +71,9 @@ Ipc_Action :: enum {
     Show_Bindings,
     Reminder_Add,
     Focus_Output_Next, Focus_Output_Prev,
+    Focus_Output_Left, Focus_Output_Right, Focus_Output_Up, Focus_Output_Down, Focus_Output_Order,
     Move_To_Output_Next, Move_To_Output_Prev,
+    Move_To_Output_Left, Move_To_Output_Right, Move_To_Output_Up, Move_To_Output_Down, Move_To_Output_Order,
     Screen_Split_Toggle, Screen_Split_Enable, Screen_Split_Disable,
     Screen_Split_Resize, Screen_Split_Ratio,
     Screen_Refresh,
@@ -422,8 +424,7 @@ ipc_output_entry :: proc(sb: ^strings.Builder, m: ^Manager, o: ^Output) {
     strings.write_string(sb, `,"power":true,"scale":1}`)
 }
 
-// ipc_outputs_payload renders every connected monitor in RandR discovery
-// order, including its independent current workspace.
+// ipc_outputs_payload renders every committed logical screen and its workspace.
 ipc_outputs_payload :: proc(m: ^Manager) -> []byte {
     sb := strings.builder_make()
     defer strings.builder_destroy(&sb)
@@ -437,12 +438,17 @@ ipc_outputs_payload :: proc(m: ^Manager) -> []byte {
 }
 
 ipc_topology_payload :: proc(
-    m: ^Manager, topology: ^Physical_Topology, refreshes, transactions: u64, phase: Topology_Refresh_Phase,
+    m: ^Manager, topology: ^Physical_Topology, discovery: ^Screen_Topology_Snapshot,
+    refreshes, transactions: u64, phase: Topology_Refresh_Phase,
 ) -> []byte {
     sb := strings.builder_make()
     defer strings.builder_destroy(&sb)
     strings.write_string(&sb, `{"generation":`)
-    strings.write_u64(&sb, topology.Generation)
+    strings.write_u64(&sb, discovery.Generation)
+    strings.write_string(&sb, `,"source":`)
+    ipc_json_string(&sb, discovery.Source == .Xinerama ? "xinerama" : "root")
+    strings.write_string(&sb, `,"degraded":`)
+    json_bool(&sb, discovery.Degraded)
     strings.write_string(&sb, `,"refreshes":`)
     strings.write_u64(&sb, refreshes)
     strings.write_string(&sb, `,"transactions":`)
@@ -454,11 +460,29 @@ ipc_topology_payload :: proc(
     case .Refreshing: ipc_json_string(&sb, "refreshing")
     }
     strings.write_string(&sb, `,"root":{"x":`)
-    json_int(&sb, topology.RootGeometry.X)
-    strings.write_string(&sb, `,"y":`); json_int(&sb, topology.RootGeometry.Y)
-    strings.write_string(&sb, `,"width":`); json_int(&sb, topology.RootGeometry.W)
-    strings.write_string(&sb, `,"height":`); json_int(&sb, topology.RootGeometry.H)
-    strings.write_string(&sb, `},"primary_output_id":`)
+    json_int(&sb, discovery.RootGeometry.X)
+    strings.write_string(&sb, `,"y":`); json_int(&sb, discovery.RootGeometry.Y)
+    strings.write_string(&sb, `,"width":`); json_int(&sb, discovery.RootGeometry.W)
+    strings.write_string(&sb, `,"height":`); json_int(&sb, discovery.RootGeometry.H)
+    strings.write_string(&sb, `},"screens":[`)
+    for screen, i in discovery.Screens {
+        if i > 0 { strings.write_string(&sb, ",") }
+        strings.write_string(&sb, `{"identity":`); ipc_json_string(&sb, screen.Identity)
+        strings.write_string(&sb, `,"identity_confidence":`)
+        switch screen.Confidence {
+        case .Degraded: ipc_json_string(&sb, "degraded")
+        case .New: ipc_json_string(&sb, "new")
+        case .Exact: ipc_json_string(&sb, "exact")
+        case .Overlap: ipc_json_string(&sb, "overlap")
+        case .Proximity: ipc_json_string(&sb, "proximity")
+        }
+        strings.write_string(&sb, `,"rect":{"x":`); json_int(&sb, screen.Geom.X)
+        strings.write_string(&sb, `,"y":`); json_int(&sb, screen.Geom.Y)
+        strings.write_string(&sb, `,"width":`); json_int(&sb, screen.Geom.W)
+        strings.write_string(&sb, `,"height":`); json_int(&sb, screen.Geom.H)
+        strings.write_string(&sb, "}}")
+    }
+    strings.write_string(&sb, `],"primary_output_id":`)
     strings.write_u64(&sb, u64(topology.PrimaryOutputId))
     strings.write_string(&sb, `,"physical_outputs":[`)
     for output, i in topology.Outputs {
@@ -768,9 +792,25 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
         if tokens[0] == "focus" {
             if tokens[2] == "next" { return Ipc_Command{action = .Focus_Output_Next}, "", true }
             if tokens[2] == "prev" || tokens[2] == "previous" { return Ipc_Command{action = .Focus_Output_Prev}, "", true }
+            switch tokens[2] {
+            case "left": return Ipc_Command{action = .Focus_Output_Left}, "", true
+            case "right": return Ipc_Command{action = .Focus_Output_Right}, "", true
+            case "up": return Ipc_Command{action = .Focus_Output_Up}, "", true
+            case "down": return Ipc_Command{action = .Focus_Output_Down}, "", true
+            }
+            index, valid := parse_signed_command_int(tokens[2], 4096)
+            if valid && index > 0 { return Ipc_Command{action = .Focus_Output_Order, arg = index}, "", true }
         } else if tokens[0] == "move" {
             if tokens[2] == "next" { return Ipc_Command{action = .Move_To_Output_Next}, "", true }
             if tokens[2] == "prev" || tokens[2] == "previous" { return Ipc_Command{action = .Move_To_Output_Prev}, "", true }
+            switch tokens[2] {
+            case "left": return Ipc_Command{action = .Move_To_Output_Left}, "", true
+            case "right": return Ipc_Command{action = .Move_To_Output_Right}, "", true
+            case "up": return Ipc_Command{action = .Move_To_Output_Up}, "", true
+            case "down": return Ipc_Command{action = .Move_To_Output_Down}, "", true
+            }
+            index, valid := parse_signed_command_int(tokens[2], 4096)
+            if valid && index > 0 { return Ipc_Command{action = .Move_To_Output_Order, arg = index}, "", true }
         }
     }
 

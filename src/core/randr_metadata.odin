@@ -1,9 +1,8 @@
 package core
 
-// Pure RandR topology types.  These deliberately describe connectors, not
-// logical WM screens: a connected connector may have no CRTC and therefore no
-// usable geometry.  The X11 layer builds a complete candidate and validates it
-// before Reconcile_Outputs is allowed to touch live window-manager state.
+// Optional RandR connector metadata. These records never determine the managed
+// screen list; Xinerama discovery owns that decision. A connected connector may
+// have no CRTC and therefore no usable geometry.
 
 Physical_Output_State :: struct {
     StableId: string, // connector name; outputId is the session-local fallback
