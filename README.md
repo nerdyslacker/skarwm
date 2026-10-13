@@ -1,19 +1,21 @@
-# skarwm
-
 <div align="center">
-<a href="https://github.com/nerdyslacker/skarwm"><img src="assets/skarwm_logo.png" width="150"/></a>
+<a href="https://github.com/nerdyslacker/skarwm"><img src="assets/skarwm.png" width="250"/></a>
 </div>
 
-The name stands for **S**argsyan **KAR**en's **W**indow **M**anager.
+---
 
-skarwm is a small keyboard-driven X11 window manager written in Odin. Windows
+<div align="center">
+<p><b>S</b>argsyan <b>KAR</b>en's <b>W</b>indow <b>M</b>anager.</p>
+</div>
+
+**skarwm** is a small keyboard-driven X11 window manager written in Odin. Windows
 live in vertical columns on a horizontally scrolling strip, with workspaces as
 the vertical dimension. An optional lightweight built-in bar provides
 workspace and scheduled script blocks; external desktop UI such as
 [anush](https://github.com/nerdyslacker/anush) remains fully supported.
 
-Features include dynamic workspaces, stacked and tabbed columns, RandR
-multi-monitor support, independent workspaces per monitor, floating and
+Features include dynamic workspaces, stacked and tabbed columns, Xinerama
+multi-monitor support, independent visible workspaces per monitor, floating and
 fullscreen windows, native scratchpads, atomic rc reloads, window rules,
 edge previews with hover-to-reveal, EWMH/ICCCM interoperability, dock struts,
 and nonblocking Unix-socket IPC.
