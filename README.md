@@ -22,7 +22,7 @@ the vertical dimension. An optional lightweight built-in bar provides
 workspace and scheduled script blocks; external desktop UI such as
 [anush](https://github.com/nerdyslacker/anush) remains fully supported.
 
-Features include dynamic workspaces, stacked and tabbed columns, Xinerama
+Features include dynamic workspaces, stacked and tabbed columns, 
 multi-monitor support, independent visible workspaces per monitor, floating and
 fullscreen windows, native scratchpads, atomic rc reloads, window rules,
 edge previews with hover-to-reveal, EWMH/ICCCM interoperability, dock struts,
