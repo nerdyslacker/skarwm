@@ -330,7 +330,24 @@ ipc_handle_frame :: proc(cl: ^Ipc_Client, f: c.Ipc_Frame) -> bool {
     return true
 }
 
+ipc_preserves_external_focus :: proc(action: c.Ipc_Action) -> bool {
+    #partial switch action {
+    case .Layout_Floating, .Layout_Tabbed, .Layout_Stacked, .Layout_Toggle,
+         .Layout_Scroller, .Layout_Vertical_Scroller, .Layout_Dwindle,
+         .Layout_Monocle, .Layout_Next, .Set_Gaps, .Set_Corner_Radius,
+         .Set_Decorations, .Set_Theme_Colors:
+        return true
+    case:
+        return false
+    }
+}
+
 ipc_run_command :: proc(cmd: c.Ipc_Command) {
+    previous_preserve_external_focus := g_wm.preserve_external_focus
+    g_wm.preserve_external_focus = previous_preserve_external_focus ||
+        (ipc_has_ui_subscriber() && ipc_preserves_external_focus(cmd.action))
+    defer { g_wm.preserve_external_focus = previous_preserve_external_focus }
+        
     b: input.Binding
     b.arg = cmd.arg
     switch cmd.action {

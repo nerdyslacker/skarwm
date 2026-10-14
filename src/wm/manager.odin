@@ -69,6 +69,7 @@ Wm :: struct {
     preview_hover_target: u32,
     preview_hover_pending: u32,
     preview_hover_due: time.Tick,
+    preserve_external_focus: bool,
     rendering: rendering.State,
     bar_managed_started: bool,
     bar_blocks: [dynamic]Raw_Bar_Block,
@@ -121,8 +122,8 @@ push_geoms :: proc(animate: bool) {
     rendering.Commit(&g_wm.rendering, g_wm.conn, g_wm.m, animate, ewmh_mark_mapped)
 }
 
-// render_focus sets each window's border colour and applies X input focus to the
-// focused client (or PointerRoot when there is no managed focus). A focused
+// render_focus sets each window's border colour and normally applies X input
+// focus to the focused client (or PointerRoot when there is no managed focus). A focused
 // floating window is always raised above the other clients; keeping that rule
 // here covers pointer focus, click focus, newly-floated windows and IPC focus.
 render_focus :: proc() {
@@ -142,7 +143,9 @@ render_focus :: proc() {
         // may have been newly mapped even when the focused client is tiled.
         raise_docks()
     }
-    apply_x_focus()
+    if !g_wm.preserve_external_focus {
+        apply_x_focus()
+    }
 }
 
 apply_x_focus :: proc() {

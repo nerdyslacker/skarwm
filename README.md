@@ -1,14 +1,22 @@
 <div align="center">
 <a href="https://github.com/nerdyslacker/skarwm"><img src="assets/skarwm.png" width="250"/></a>
+<p><b>S</b>argsyan <b>KAR</b>en's <b>W</b>indow <b>M</b>anager</p>
 </div>
 
 ---
 
 <div align="center">
-<p><b>S</b>argsyan <b>KAR</b>en's <b>W</b>indow <b>M</b>anager.</p>
+
+
+[![License](https://img.shields.io/github/license/nerdyslacker/skarwm)](https://github.com/nerdyslacker/skarwm/blob/main/LICENSE)
+[![GitHub release](https://img.shields.io/github/release/nerdyslacker/skarwm)](https://github.com/nerdyslacker/skarwm/releases)
+<a href="https://app.commanddash.io/agent?github=https://github.com/nerdyslacker/skarwm"><img src="https://img.shields.io/badge/AI-Code%20Assist-EB9FDA"></a>
+[![GitHub stars](https://img.shields.io/github/stars/nerdyslacker/skarwm)](https://github.com/nerdyslacker/skarwm/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/nerdyslacker/skarwm)](https://github.com/nerdyslacker/skarwm/fork)
+
 </div>
 
-**skarwm** is a small keyboard-driven X11 window manager written in Odin. Windows
+**skarwm** is a small keyboard-driven X11 window manager developed as a hobby project for learning Odin. Windows
 live in vertical columns on a horizontally scrolling strip, with workspaces as
 the vertical dimension. An optional lightweight built-in bar provides
 workspace and scheduled script blocks; external desktop UI such as
