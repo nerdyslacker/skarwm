@@ -22,18 +22,20 @@ the vertical dimension. An optional lightweight built-in bar provides
 workspace and scheduled script blocks; external desktop UI such as
 [anush](https://github.com/nerdyslacker/anush) remains fully supported.
 
+<div align="center">
+<img src="assets/screenshot.png"/>
+</div>
+
 Features include dynamic workspaces, stacked and tabbed columns, Xinerama
 multi-monitor support, independent visible workspaces per monitor, floating and
 fullscreen windows, native scratchpads, atomic rc reloads, window rules,
 edge previews with hover-to-reveal, EWMH/ICCCM interoperability, dock struts,
 and nonblocking Unix-socket IPC.
 
+[![demo](assets/demo.gif)](https://github.com/nerdyslacker/skarwm/blob/main/assets/images/demo.gif)
+
 > **Note:** skarwm was developed with AI assistance as a project for learning
 > Odin. It is a hobby project and my daily driver.
-
-<div align="center">
-<img src="assets/screenshot.png"/>
-</div>
 
 ## Dependencies
 
