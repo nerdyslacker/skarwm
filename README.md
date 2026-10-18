@@ -8,7 +8,7 @@
 <div align="center">
 
 
-[![License](https://img.shields.io/github/license/nerdyslacker/skarwm)](https://github.com/nerdyslacker/skarwm/blob/main/LICENSE)
+[![License](https://img.shields.io/badge/license-BSD--2--Clause-green)](https://github.com/nerdyslacker/skarwm/blob/main/LICENSE)
 [![GitHub release](https://img.shields.io/github/release/nerdyslacker/skarwm)](https://github.com/nerdyslacker/skarwm/releases)
 <a href="https://app.commanddash.io/agent?github=https://github.com/nerdyslacker/skarwm"><img src="https://img.shields.io/badge/AI-Code%20Assist-EB9FDA"></a>
 [![GitHub stars](https://img.shields.io/github/stars/nerdyslacker/skarwm)](https://github.com/nerdyslacker/skarwm/stargazers)
@@ -50,7 +50,7 @@ language compiler, install it from the
 Debian and Ubuntu, the repository package named `odin` is an unrelated MRI
 application and must not be used.
 
-### Void Linux
+### Void Linux / LazyLinux
 
 Odin is available from the LazyLinux repository:
 
@@ -75,6 +75,26 @@ sudo apt install clang make libxcb1-dev libxcb-randr0-dev libxcb-shape0-dev \
 
 ```sh
 sudo pacman -S --needed odin clang base-devel libxcb libx11 libxft fontconfig
+```
+
+### Alpine Linux
+
+Install Odin separately using the official instructions linked above. Alpine
+Edge users may instead install the `odin` package from the testing repository.
+Then install the remaining dependencies:
+
+```sh
+sudo apk add clang make musl-dev libxcb-dev libx11-dev libxft-dev \
+  fontconfig-dev
+```
+
+### Chimera Linux
+
+Install Odin separately using the official instructions linked above, then:
+
+```sh
+sudo apk add clang gmake libxcb-devel libx11-devel libxft-devel \
+  fontconfig-devel
 ```
 
 ### Gentoo
