@@ -61,6 +61,10 @@ shape_init :: proc(state: ^State, conn: ^x11.Connection) {
 
 rounded_inset :: proc(radius, row, height: i32) -> i32 {
     edge := min(row, height - 1 - row)
+    return rounded_edge_inset(radius, edge)
+}
+
+rounded_edge_inset :: proc(radius, edge: i32) -> i32 {
     if edge >= radius { return 0 }
     r := f64(radius)
     dy := r - (f64(edge) + 0.5)
@@ -84,6 +88,44 @@ shape_rounded_rectangle :: proc(conn: ^x11.Connection, xid: u32, kind: u8, x, y,
     band_inset := rounded_inset(r, 0, height)
     for row in 1 ..< height {
         inset := rounded_inset(r, row, height)
+        if inset == band_inset { continue }
+        append(&rects, Shape_Rectangle{
+            x = i16(x + band_inset), y = i16(y + band_y),
+            width = u16(max(i32(1), width - 2 * band_inset)),
+            height = u16(row - band_y),
+        })
+        band_y = row
+        band_inset = inset
+    }
+    append(&rects, Shape_Rectangle{
+        x = i16(x + band_inset), y = i16(y + band_y),
+        width = u16(max(i32(1), width - 2 * band_inset)),
+        height = u16(height - band_y),
+    })
+    xcb_shape_rectangles(
+        conn, SHAPE_SET, kind, SHAPE_UNSORTED, xid,
+        0, 0, u32(len(rects)), raw_data(rects),
+    )
+}
+
+shape_bottom_rounded_rectangle :: proc(
+    conn: ^x11.Connection,
+    xid: u32,
+    kind: u8,
+    x, y, width, height, radius: i32,
+) {
+    r := clamp(radius, i32(0), min(width, height) / 2)
+    if r <= 0 {
+        shape_rounded_rectangle(conn, xid, kind, x, y, width, height, 0)
+        return
+    }
+
+    rects := make([dynamic]Shape_Rectangle, 0, r + 1)
+    defer delete(rects)
+    band_y := i32(0)
+    band_inset := i32(0)
+    for row in 1 ..< height {
+        inset := rounded_edge_inset(r, height - 1 - row)
         if inset == band_inset { continue }
         append(&rects, Shape_Rectangle{
             x = i16(x + band_inset), y = i16(y + band_y),
@@ -133,10 +175,20 @@ shape_client :: proc(
 ) {
     if !state.ShapeAvailable || cl == nil { return }
 
+    if cl.Dock { return }
+
     width := max(i32(1), geom.W) + 2 * max(i32(0), border)
     height := max(i32(1), geom.H) + 2 * max(i32(0), border)
     radius := clamp(m.Cfg.CornerRadius, i32(0), min(width, height) / 2)
-    rounded := radius > 0 && !cl.Fullscreen && !cl.Dock
+    decorated := cl.Decorated && cl.DecorationFrame != 0
+    rounded := radius > 0 && !cl.Fullscreen && !cl.Dock && !decorated
+    decoration_inset := max(
+        max(i32(0), m.Cfg.Decoration.BorderWidth),
+        max(i32(1), m.Cfg.Decoration.ResizeHitWidth),
+    )
+    bottom_radius := max(i32(0), radius - decoration_inset)
+    bottom_rounded := bottom_radius > 0 && !cl.Fullscreen && decorated
+    shape_radius := bottom_radius if bottom_rounded else radius
     b := max(i32(0), border)
     bounding := c.Rect{X = -b, Y = -b, W = width, H = height}
     viewport := constrain_to_output && cl.Out != nil && !cl.Floating && !cl.Dock && !cl.Fullscreen
@@ -157,12 +209,12 @@ shape_client :: proc(
     }
     desired := Window_Shape_State{
         Width = width, Height = height, Border = border,
-        Radius = radius, Rounded = rounded,
+        Radius = shape_radius, Rounded = rounded, Bottom_Rounded = bottom_rounded,
         Viewport = viewport, Bounding = bounding,
     }
     if old, found := state.WindowShapes[cl.Xid]; found && old == desired { return }
 
-    if !rounded && !viewport {
+    if !rounded && !bottom_rounded && !viewport {
         // None removes both client regions and restores the server defaults.
         xcb_shape_mask(conn, SHAPE_SET, SHAPE_BOUNDING, cl.Xid, 0, 0, 0)
         xcb_shape_mask(conn, SHAPE_SET, SHAPE_CLIP, cl.Xid, 0, 0, 0)
@@ -178,6 +230,15 @@ shape_client :: proc(
             conn, cl.Xid, SHAPE_CLIP, 0, 0,
             max(i32(1), geom.W), max(i32(1), geom.H), max(i32(0), radius - b),
         )
+        if viewport {
+            shape_rectangle(conn, cl.Xid, SHAPE_INTERSECT, SHAPE_BOUNDING, bounding)
+        }
+    } else if bottom_rounded {
+        shape_bottom_rounded_rectangle(
+            conn, cl.Xid, SHAPE_BOUNDING, -b, -b,
+            width, height, bottom_radius,
+        )
+        xcb_shape_mask(conn, SHAPE_SET, SHAPE_CLIP, cl.Xid, 0, 0, 0)
         if viewport {
             shape_rectangle(conn, cl.Xid, SHAPE_INTERSECT, SHAPE_BOUNDING, bounding)
         }
@@ -213,7 +274,20 @@ shape_decoration_frame :: proc(
         if viewport { bounding = clipped }
     }
     xid := cl.DecorationFrame
-    if viewport {
+    radius := clamp(
+        m.Cfg.CornerRadius, i32(0),
+        min(max(i32(1), frame.W), max(i32(1), frame.H)) / 2,
+    )
+    rounded := radius > 0 && !cl.Fullscreen
+    if rounded {
+        shape_rounded_rectangle(
+            conn, xid, SHAPE_BOUNDING, 0, 0,
+            max(i32(1), frame.W), max(i32(1), frame.H), radius,
+        )
+        if viewport {
+            shape_rectangle(conn, xid, SHAPE_INTERSECT, SHAPE_BOUNDING, bounding)
+        }
+    } else if viewport {
         shape_rectangle(conn, xid, SHAPE_SET, SHAPE_BOUNDING, bounding)
     } else {
         xcb_shape_mask(conn, SHAPE_SET, SHAPE_BOUNDING, xid, 0, 0, 0)

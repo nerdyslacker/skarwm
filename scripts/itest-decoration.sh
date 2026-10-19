@@ -68,6 +68,16 @@ else
   fail "frame lifecycle"
   exit 1
 fi
+./build/skarwm-msg corner-radius 12 >/dev/null 2>&1
+sleep 0.2
+if xwininfo -id "$frame" -shape 2>/dev/null | grep -q 'Window shape extents' \
+   && xwininfo -id "$client" -shape 2>/dev/null | grep -q 'Window shape extents'; then
+  pass "rounded decoration shapes the frame and clips the client's lower corners"
+else
+  fail "rounded decoration frame shape"
+fi
+./build/skarwm-msg corner-radius 0 >/dev/null 2>&1
+sleep 0.2
 client_geom=$(xwininfo -id "$client" 2>/dev/null | awk '/Width:/{w=$2}/Height:/{h=$2}/Absolute upper-left X:/{x=$4}/Absolute upper-left Y:/{y=$4}END{printf "%sx%s+%s+%s",w,h,x,y}')
 frame_geom=$(xwininfo -id "$frame" 2>/dev/null | awk '/Width:/{w=$2}/Height:/{h=$2}/Absolute upper-left X:/{x=$4}/Absolute upper-left Y:/{y=$4}END{printf "%sx%s+%s+%s",w,h,x,y}')
 if [ "$client_geom" = "1256x759+12+29" ] && [ "$frame_geom" = "1264x784+8+8" ]; then

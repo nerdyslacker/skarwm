@@ -21,6 +21,7 @@ Client_Animation :: struct {
 Window_Shape_State :: struct {
     Width, Height, Border, Radius: i32,
     Rounded: bool,
+    Bottom_Rounded: bool,
     Viewport: bool,
     Bounding: c.Rect,
 }
