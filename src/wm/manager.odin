@@ -133,6 +133,7 @@ render_focus :: proc() {
         col := m.Cfg.UnfocusedBorder
         if cl == focused { col = m.Cfg.FocusedBorder }
         if cl.AlwaysOnTop { col = m.Cfg.Decoration.Accent }
+        if cl.Depth == 32 { col |= 0xff000000 }
         x11.xcb_change_window_attributes(g_wm.conn, cl.Xid, x11.CW_BORDER_PIXEL, &col)
     }
     ui.Draw_All_Decorations(&g_wm.ui, m)
@@ -475,6 +476,7 @@ read_dock_geometry :: proc(cl: ^c.Client) {
     }
     if reply != nil {
         defer x11.free_libc(reply)
+        cl.Depth = reply.depth
         cl.FloatingRect = c.Rect { X = i32(reply.x), Y = i32(reply.y), W = i32(reply.width), H = i32(reply.height) }
         return
     }

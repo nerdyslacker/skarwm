@@ -46,6 +46,7 @@ Insets :: struct {
 // A single managed X11 window.
 Client :: struct {
     Xid: u32,
+    Depth: u8,
 
     // Strings are heap allocated/cloned by the manager and freed on unmanage.
     Title:    string,
