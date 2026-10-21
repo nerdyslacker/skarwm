@@ -333,7 +333,7 @@ ipc_handle_frame :: proc(cl: ^Ipc_Client, f: c.Ipc_Frame) -> bool {
 ipc_preserves_external_focus :: proc(action: c.Ipc_Action) -> bool {
     #partial switch action {
     case .Layout_Floating, .Layout_Tabbed, .Layout_Stacked, .Layout_Toggle,
-         .Layout_Scroller, .Layout_Vertical_Scroller, .Layout_Dwindle,
+         .Layout_Scroller, .Layout_Vertical_Scroller, .Layout_Game, .Layout_Dwindle,
          .Layout_Monocle, .Layout_Next, .Set_Gaps, .Set_Corner_Radius,
          .Set_Decorations, .Set_Theme_Colors:
         return true
@@ -384,6 +384,7 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
     case .Layout_Toggle:     b.action = .Layout_Toggle
     case .Layout_Scroller:   b.action = .Layout_Scroller
     case .Layout_Vertical_Scroller: b.action = .Layout_Vertical_Scroller
+    case .Layout_Game:       b.action = .Layout_Game
     case .Layout_Dwindle:    b.action = .Layout_Dwindle
     case .Layout_Monocle:    b.action = .Layout_Monocle
     case .Layout_Next:       b.action = .Layout_Next

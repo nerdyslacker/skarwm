@@ -146,7 +146,7 @@ runs once at startup and is not run again by configuration reloads.
 `workspace-ID : LAYOUT : ICON [: NAME]` gives that workspace/tag a persistent
 layout on every output and configures its bar icon plus optional hover name.
 `workspace_ID` is accepted as an equivalent spelling. Supported names are
-`scrolling-tile`, `vertical-scrolling-tile`, `dwindle` (`fibonacci` is an
+`scrolling-tile`, `vertical-scrolling-tile`, `game`, `dwindle` (`fibonacci` is an
 alias), `monocle`, and `floating`. Matching workspaces are created and updated when the configuration
 loads or reloads, so windows opened later use the declared layout. A manual
 layout selection may override it until the next reload.
@@ -165,10 +165,10 @@ a future release. Use `workspace-ID : LAYOUT : ICON [: NAME]` for new
 configurations.
 
 Workspace-wide layout actions are `layout_scrolling_tile`,
-`layout_vertical_scroller`, `layout_dwindle`
+`layout_vertical_scroller`, `layout_game`, `layout_dwindle`
 (`layout_fibonacci` is an alias), `layout_monocle`, `layout_floating`, and
 `layout_next`. The last one cycles Scrolling Tile → Vertical Scrolling Tile →
-Dwindle/Fibonacci → Monocle → Floating and is bound to `Super+g` by the built-in defaults.
+Game → Dwindle/Fibonacci → Monocle → Floating and is bound to `Super+g` by the built-in defaults.
 `layout_scroller` remains a compatibility alias. `togglefloating` changes only
 the focused window. `togglealwaysontop` toggles the above layer for a focused
 floating window and has no effect on tiled windows. Returning the window to

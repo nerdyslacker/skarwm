@@ -161,6 +161,43 @@ Focus_Dir :: proc(m: ^Manager, dir: Dir) -> bool {
     ci, col, row := column_of(ws, cl)
     if col == nil { return false }
 
+    if ws.Layout == .Game {
+        target: ^Client = nil
+        switch dir {
+        case .Left:
+            if ci > 0 {
+                if row > 0 { target = col.Wins[row - 1] }
+                else {
+                    target = ws.Cols[0].Focus
+                    if target == nil || !column_member(ws.Cols[0], target) { target = ws.Cols[0].Wins[0] }
+                }
+            }
+        case .Right:
+            if row + 1 < len(col.Wins) { target = col.Wins[row + 1] }
+            else if ci == 0 && len(ws.Cols) > 1 {
+                target = ws.Cols[1].Focus
+                if target == nil || !column_member(ws.Cols[1], target) { target = ws.Cols[1].Wins[0] }
+            }
+        case .Up:
+            if ci == 0 {
+                if row > 0 { target = col.Wins[row - 1] }
+            } else if ci > 1 {
+                target = ws.Cols[ci - 1].Focus
+                if target == nil || !column_member(ws.Cols[ci - 1], target) { target = ws.Cols[ci - 1].Wins[0] }
+            }
+        case .Down:
+            if ci == 0 {
+                if row + 1 < len(col.Wins) { target = col.Wins[row + 1] }
+            } else if ci + 1 < len(ws.Cols) {
+                target = ws.Cols[ci + 1].Focus
+                if target == nil || !column_member(ws.Cols[ci + 1], target) { target = ws.Cols[ci + 1].Wins[0] }
+            }
+        }
+        if target == nil || target == cl { return false }
+        Focus_Client(m, target)
+        return true
+    }
+
     // In the vertical scroller the outer group axis and the in-group axis are
     // transposed: Up/Down changes rows, Left/Right changes members of a row.
     effective_dir := dir
@@ -1312,7 +1349,8 @@ Cycle_Workspace_Layout :: proc(m: ^Manager) -> bool {
     if ws == nil { return false }
     switch ws.Layout {
     case .Scroller:          return Set_Workspace_Layout(m, .Vertical_Scroller)
-    case .Vertical_Scroller: return Set_Workspace_Layout(m, .Dwindle)
+    case .Vertical_Scroller: return Set_Workspace_Layout(m, .Game)
+    case .Game:     return Set_Workspace_Layout(m, .Dwindle)
     case .Dwindle:  return Set_Workspace_Layout(m, .Monocle)
     case .Monocle:  return Set_Workspace_Layout(m, .Floating)
     case .Floating: return Set_Workspace_Layout(m, .Scroller)
@@ -1329,9 +1367,31 @@ Scroll_Output_Viewport :: proc(m: ^Manager, o: ^Output, dir: int) -> bool {
     if dir == 0 { return false }
     if o == nil { return false }
     ws := o.Current
-    if ws == nil || (ws.Layout != .Scroller && ws.Layout != .Vertical_Scroller) || len(ws.Cols) == 0 { return false }
+    if ws == nil || (ws.Layout != .Scroller && ws.Layout != .Vertical_Scroller && ws.Layout != .Game) || len(ws.Cols) == 0 { return false }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
     sign := i32(dir / abs(dir))
+    if ws.Layout == .Game {
+        if len(ws.Cols) <= 1 { return false }
+        next := ws.ViewportY
+        if sign > 0 {
+            for ci in 1 ..< len(ws.Cols) {
+                top := game_companion_top(ws, p, ci)
+                if top > ws.ViewportY { next = top; break }
+                if ci + 1 == len(ws.Cols) { next += game_companion_height(ws, p) + p.Inner }
+            }
+        } else {
+            next = 0
+            for ci in 1 ..< len(ws.Cols) {
+                top := game_companion_top(ws, p, ci)
+                if top >= ws.ViewportY { break }
+                next = top
+            }
+        }
+        next = clamp_game_viewport(next, ws, p)
+        if next == ws.ViewportY { return false }
+        ws.ViewportY = next
+        return true
+    }
     if ws.Layout == .Vertical_Scroller {
         next := ws.ViewportY
         if sign > 0 {
@@ -1394,6 +1454,13 @@ Reveal_Scroll_Client :: proc(m: ^Manager, cl: ^Client) -> bool {
     ci, col, _ := column_of(ws, cl)
     if col == nil { return false }
     p := compute_params(m.Cfg, cl.Out.Geom, len(ws.Cols), cl.Out.Reserved)
+    if ws.Layout == .Game {
+        next := ensure_game_companion_visible(ws.ViewportY, ws, p, ci)
+        changed := next != ws.ViewportY || m.Focused != cl
+        ws.ViewportY = next
+        Focus_Client(m, cl)
+        return changed
+    }
     if ws.Layout == .Vertical_Scroller {
         next := ensure_workspace_row_visible(ws.ViewportY, ws, p, ci)
         changed := next != ws.ViewportY || m.Focused != cl
@@ -1499,7 +1566,7 @@ Sync_Focus :: proc(m: ^Manager) {
 // fullscreen focus. Call Arrange_All afterwards.
 Ensure_Active_Focus_Visible :: proc(m: ^Manager) {
     ws := Current_WS(m)
-    if ws == nil || (ws.Layout != .Scroller && ws.Layout != .Vertical_Scroller) || ws.Focus == nil { return }
+    if ws == nil || (ws.Layout != .Scroller && ws.Layout != .Vertical_Scroller && ws.Layout != .Game) || ws.Focus == nil { return }
     cl := ws.Focus
     if cl.Floating || cl.Fullscreen { return }
     ci, _, _ := column_of(ws, cl)
@@ -1507,7 +1574,9 @@ Ensure_Active_Focus_Visible :: proc(m: ^Manager) {
     o := Active_Output(m)
     if o == nil { return }
     p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
-    if ws.Layout == .Vertical_Scroller {
+    if ws.Layout == .Game {
+        ws.ViewportY = ensure_game_companion_visible(ws.ViewportY, ws, p, ci)
+    } else if ws.Layout == .Vertical_Scroller {
         ws.ViewportY = ensure_workspace_row_visible(ws.ViewportY, ws, p, ci)
     } else {
         ws.ViewportX = ensure_workspace_col_visible(ws.ViewportX, ws, p, ci)

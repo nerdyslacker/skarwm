@@ -21,7 +21,7 @@ skarwm-msg move workspace next|prev
 skarwm-msg toggle-floating
 skarwm-msg toggle-always-on-top
 skarwm-msg toggle-fullscreen
-skarwm-msg layout scrolling-tile|vertical-scroller|dwindle|fibonacci|monocle|floating|next
+skarwm-msg layout scrolling-tile|vertical-scroller|game|dwindle|fibonacci|monocle|floating|next
 skarwm-msg gaps 0..100
 skarwm-msg corner-radius 0..4096
 skarwm-msg decorations enable|disable|toggle
@@ -95,7 +95,7 @@ output, while `focused` additionally requires that output to be active.
 `loaded_config_file_name` field, or null when built-in defaults are active.
 Workspace objects add a `windows` count so a shell can distinguish an empty
 workspace without fetching the window list, plus a `layout` name of
-`scrolling-tile`, `vertical-scrolling-tile`, `dwindle`, `monocle`, or
+`scrolling-tile`, `vertical-scrolling-tile`, `game`, `dwindle`, `monocle`, or
 `floating`. `get-windows` is skarwm
 extension type 100 and returns metadata, workspace membership, state, and the
 last arranged geometry for every managed client. Tiled clients also include

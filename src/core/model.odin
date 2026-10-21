@@ -128,6 +128,7 @@ Column_Layout :: enum u8 {
 Workspace_Layout :: enum u8 {
     Scroller,
     Vertical_Scroller,
+    Game,
     Dwindle,
     Monocle,
     Floating,
@@ -137,6 +138,7 @@ Workspace_Layout_Name :: proc(layout: Workspace_Layout) -> string {
     switch layout {
     case .Scroller: return "scrolling-tile"
     case .Vertical_Scroller: return "vertical-scrolling-tile"
+    case .Game:     return "game"
     case .Dwindle:  return "dwindle"
     case .Monocle:  return "monocle"
     case .Floating: return "floating"

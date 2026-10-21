@@ -34,6 +34,8 @@ PAGE_COLS :: 2 // columns that fit on screen before the strip starts scrolling
 PAGE_ROWS :: 1 // focused row shown between top/bottom neighbor previews
 TAB_BAR_HEIGHT :: i32(24)
 SCROLL_PREVIEW_WIDTH :: i32(20)
+GAME_ANCHOR_PERCENT :: i32(75)
+GAME_COMPANION_ROWS :: 3
 
 Layout_Params :: struct {
     WorkX, WorkY: i32,
@@ -234,6 +236,38 @@ ensure_workspace_row_visible :: proc(vp: i32, ws: ^Workspace, p: Layout_Params, 
         next = bottom - p.WorkH
     }
     return clamp_vertical_viewport(next, ws, p)
+}
+
+game_companion_height :: proc(ws: ^Workspace, p: Layout_Params) -> i32 {
+    companions := max(0, len(ws.Cols) - 1)
+    if companions == 0 { return 0 }
+    visible := i32(min(companions, GAME_COMPANION_ROWS))
+    return max(i32(40), (p.WorkH - p.Inner * (visible - 1)) / visible)
+}
+
+game_companion_top :: proc(ws: ^Workspace, p: Layout_Params, idx: int) -> i32 {
+    if idx <= 1 { return 0 }
+    return i32(idx - 1) * (game_companion_height(ws, p) + p.Inner)
+}
+
+game_companion_total :: proc(ws: ^Workspace, p: Layout_Params) -> i32 {
+    companions := max(0, len(ws.Cols) - 1)
+    if companions == 0 { return 0 }
+    return i32(companions) * game_companion_height(ws, p) + i32(companions - 1) * p.Inner
+}
+
+clamp_game_viewport :: proc(vp: i32, ws: ^Workspace, p: Layout_Params) -> i32 {
+    return clamp(vp, i32(0), max(i32(0), game_companion_total(ws, p) - p.WorkH))
+}
+
+ensure_game_companion_visible :: proc(vp: i32, ws: ^Workspace, p: Layout_Params, idx: int) -> i32 {
+    if idx <= 0 || idx >= len(ws.Cols) { return clamp_game_viewport(vp, ws, p) }
+    top := game_companion_top(ws, p, idx)
+    bottom := top + game_companion_height(ws, p)
+    next := vp
+    if top < next { next = top }
+    if bottom > next + p.WorkH { next = bottom - p.WorkH }
+    return clamp_game_viewport(next, ws, p)
 }
 
 workspace_col_left :: proc(ws: ^Workspace, p: Layout_Params, idx: int) -> i32 {
@@ -494,6 +528,25 @@ Scroll_Preview_At_Point :: proc(m: ^Manager, x, y: i32) -> (preview: Scroll_Prev
 Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) -> (Rect, bool) {
     if m == nil || o == nil || ws == nil || col_index < 0 || col_index >= len(ws.Cols) {
         return {}, false
+    }
+    if ws.Layout == .Game {
+        p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+        if column_has_maximized(ws.Cols[col_index]) || p.WorkH <= 1 { return {}, false }
+        tile := Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}
+        if len(ws.Cols) > 1 {
+            anchor_w := max(i32(1), p.WorkW * GAME_ANCHOR_PERCENT / 100)
+            if col_index == 0 {
+                tile.W = anchor_w
+            } else {
+                tile.X = p.WorkX + anchor_w + p.Inner
+                tile.W = max(i32(1), p.WorkW - anchor_w - p.Inner)
+                tile.Y = p.WorkY - ws.ViewportY + game_companion_top(ws, p, col_index)
+                tile.H = game_companion_height(ws, p)
+                if tile.Y < p.WorkY || tile.Y + tile.H > p.WorkY + p.WorkH { return {}, false }
+            }
+        }
+        tile.H = min(TAB_BAR_HEIGHT, tile.H - 1)
+        return tile, true
     }
     if ws.Layout == .Vertical_Scroller {
         p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
@@ -1133,7 +1186,7 @@ arrange_dwindle :: proc(ws: ^Workspace, clients: []^Client, p: Layout_Params) {
 
 // Returns true when a non-scrolling workspace mode handled tiled placement.
 arrange_workspace_mode :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect) -> bool {
-    if ws.Layout == .Scroller || ws.Layout == .Vertical_Scroller || ws.Layout == .Floating { return false }
+    if ws.Layout == .Scroller || ws.Layout == .Vertical_Scroller || ws.Layout == .Game || ws.Layout == .Floating { return false }
     clients := workspace_tiled_clients(ws)
     defer delete(clients)
     if len(clients) == 0 { return true }
@@ -1161,9 +1214,97 @@ arrange_workspace_mode :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect) -> 
             Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}, p.Border)
     case .Scroller:
     case .Vertical_Scroller:
+    case .Game:
     case .Floating:
     }
     return true
+}
+
+arrange_game_column :: proc(ws: ^Workspace, col: ^Column, tile, hide: Rect, p: Layout_Params) {
+    if col == nil || len(col.Wins) == 0 { return }
+    if col.Layout == .Tabbed {
+        active := col.Focus
+        if active == nil || !column_member(col, active) {
+            active = col.Wins[0]
+            col.Focus = active
+        }
+        tab_h := min(TAB_BAR_HEIGHT, max(i32(0), tile.H - 1))
+        content := Rect{X = tile.X, Y = tile.Y + tab_h, W = tile.W, H = tile.H - tab_h}
+        for cl in col.Wins {
+            if cl == active { place_client_in_tile(ws, cl, content, p.Border) }
+            else { cl.Geom = hide; cl.Border = 0 }
+        }
+        return
+    }
+
+    count := len(col.Wins)
+    content_h := max(i32(count), tile.H - p.Inner * i32(count - 1))
+    total_weight := f64(0)
+    weighted := 0
+    for cl in col.Wins {
+        if cl.TileWeight > 0 { total_weight += cl.TileWeight; weighted += 1 }
+    }
+    default_weight := f64(1)
+    if weighted > 0 { default_weight = total_weight / f64(weighted) }
+    total_weight += default_weight * f64(count - weighted)
+    heights := make([]i32, count)
+    used := i32(0)
+    distributable := content_h - i32(count)
+    for cl, i in col.Wins {
+        weight := cl.TileWeight
+        if weight <= 0 { weight = default_weight }
+        heights[i] = 1 + i32(f64(distributable) * weight / total_weight)
+        used += heights[i]
+    }
+    remaining := content_h - used
+    for i := 0; remaining > 0; i = (i + 1) % count {
+        heights[i] += 1
+        remaining -= 1
+    }
+    y := tile.Y
+    for cl, i in col.Wins {
+        place_client_in_tile(ws, cl, Rect{X = tile.X, Y = y, W = tile.W, H = heights[i]}, p.Border)
+        y += heights[i] + p.Inner
+    }
+    delete(heights)
+}
+
+// Game mode keeps the first group anchored to most of the work area. Later
+// groups live in a right-hand rail whose independent vertical viewport makes
+// an arbitrarily long companion list reachable without disturbing the anchor.
+arrange_game :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect) {
+    if ws == nil || len(ws.Cols) == 0 || p.WorkW <= 0 || p.WorkH <= 0 { return }
+    hide := Rect{X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H}
+    for col in ws.Cols { for cl in col.Wins { cl.Geom = hide; cl.Border = 0 } }
+
+    if ws.Focus != nil && !ws.Focus.Floating && ws.Focus.Maximized {
+        place_client_in_tile(ws, ws.Focus,
+            Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}, p.Border)
+        return
+    }
+
+    if len(ws.Cols) == 1 {
+        ws.ViewportY = 0
+        arrange_game_column(ws, ws.Cols[0],
+            Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}, hide, p)
+        return
+    }
+
+    anchor_w := max(i32(1), p.WorkW * GAME_ANCHOR_PERCENT / 100)
+    rail_x := p.WorkX + anchor_w + p.Inner
+    rail_w := max(i32(1), p.WorkW - anchor_w - p.Inner)
+    arrange_game_column(ws, ws.Cols[0],
+        Rect{X = p.WorkX, Y = p.WorkY, W = anchor_w, H = p.WorkH}, hide, p)
+
+    ws.ViewportY = clamp_game_viewport(ws.ViewportY, ws, p)
+    row_h := game_companion_height(ws, p)
+    for ci in 1 ..< len(ws.Cols) {
+        y := p.WorkY - ws.ViewportY + game_companion_top(ws, p, ci)
+        // X has no per-output clipping, so only complete rail rows are mapped.
+        if y < p.WorkY || y + row_h > p.WorkY + p.WorkH { continue }
+        arrange_game_column(ws, ws.Cols[ci],
+            Rect{X = rail_x, Y = y, W = rail_w, H = row_h}, hide, p)
+    }
 }
 
 // arrange_vertical_scroller is the axis-transposed counterpart of Scroller:
@@ -1282,6 +1423,8 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
     // hidden neighbor fills any newly exposed space without changing width.
     if ws.Layout == .Vertical_Scroller {
         ws.ViewportY = clamp_vertical_viewport(ws.ViewportY, ws, p)
+    } else if ws.Layout == .Game {
+        ws.ViewportY = clamp_game_viewport(ws.ViewportY, ws, p)
     } else {
         ws.ViewportX = clamp_workspace_viewport(ws.ViewportX, ws, p)
         expose_missing_custom_preview(ws, p)
@@ -1308,7 +1451,9 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
     workspace_mode_arranged := arrange_workspace_mode(ws, p, geom)
     vertical_arranged := ws.Layout == .Vertical_Scroller
     if vertical_arranged { arrange_vertical_scroller(ws, p, geom) }
-    if !workspace_mode_arranged && !vertical_arranged && n_cols > 0 && p.ColW > 0 && p.WorkH > 0 {
+    game_arranged := ws.Layout == .Game
+    if game_arranged { arrange_game(ws, p, geom) }
+    if !workspace_mode_arranged && !vertical_arranged && !game_arranged && n_cols > 0 && p.ColW > 0 && p.WorkH > 0 {
         base_x := p.WorkX - ws.ViewportX
         hide := Rect { X = geom.X + HIDE_X, Y = geom.Y, W = geom.W, H = geom.H }
         custom_widths := workspace_has_custom_widths(ws)

@@ -2,7 +2,7 @@
 
 ## Workspace layouts
 
-`Super+g` / `layout_next` cycles the active workspace through five layouts:
+`Super+g` / `layout_next` cycles the active workspace through six layouts:
 
 - **Scrolling Tile** — the original hybrid tiled-column layout: up to two
   columns tile the work area and additional columns continue in a scrollable
@@ -11,6 +11,10 @@
   the work area while its previous/next rows peek from the top and bottom.
   Members grouped in one row tile left-to-right, and the vertical viewport is
   remembered per workspace.
+- **Game Mode** — the first tiled group stays anchored to 75% of the work area.
+  Later groups form a narrow companion rail on the right, with up to three
+  visible at once and any overflow available through vertical scrolling. The
+  anchor and each companion retain their own stacked or tabbed arrangement.
 - **Dwindle/Fibonacci** — all tiled windows recursively split the remaining
   work area, alternating left/right and top/bottom axes. It never scrolls.
 - **Monocle** — the focused tiled window fills the work area; the others are
@@ -22,11 +26,17 @@
 
 The choice belongs to the workspace, survives workspace switches, and applies
 automatically to newly opened windows. Use `layout_scrolling_tile`,
-`layout_vertical_scroller`, `layout_dwindle` (also `layout_fibonacci`), or
+`layout_vertical_scroller`, `layout_game`, `layout_dwindle` (also
+`layout_fibonacci`), or
 `layout_monocle` to select one directly; `layout_floating` selects
 workspace-wide Floating. The older
 `layout_scroller` name remains an alias. Dwindle and Monocle leave existing
 stacked/tabbed column grouping intact when returning to Scrolling Tile.
+
+In Game Mode, `focusright` enters the companion rail and `focusleft` returns to
+the anchor. `focusup`/`focusdown` walk companion groups. The normal viewport
+scroll action (including `Super`+wheel in the default configuration) scrolls
+only the companion rail; the anchor never moves.
 
 `Super+Space` / `togglefloating` continues to affect only the focused window.
 A window floated this way remains floating when the workspace enters and later

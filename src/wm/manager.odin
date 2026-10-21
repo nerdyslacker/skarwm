@@ -865,7 +865,7 @@ dispatch_action :: proc(b: ^input.Binding) {
             changed = c.Toggle_Floating(m)
         }
         ws := c.Current_WS(m)
-        if ws == nil || ws.Layout != .Vertical_Scroller {
+        if ws == nil || (ws.Layout != .Vertical_Scroller && ws.Layout != .Game) {
             changed = c.Set_Workspace_Layout(m, .Scroller) || changed
         }
         changed = c.Set_Column_Layout(m, .Tabbed) || changed
@@ -879,7 +879,7 @@ dispatch_action :: proc(b: ^input.Binding) {
             changed = c.Toggle_Floating(m)
         }
         ws := c.Current_WS(m)
-        if ws == nil || ws.Layout != .Vertical_Scroller {
+        if ws == nil || (ws.Layout != .Vertical_Scroller && ws.Layout != .Game) {
             changed = c.Set_Workspace_Layout(m, .Scroller) || changed
         }
         changed = c.Set_Column_Layout(m, .Stacked) || changed
@@ -892,11 +892,12 @@ dispatch_action :: proc(b: ^input.Binding) {
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)
         }
-    case .Layout_Scroller, .Layout_Vertical_Scroller, .Layout_Dwindle, .Layout_Monocle, .Layout_Next:
+    case .Layout_Scroller, .Layout_Vertical_Scroller, .Layout_Game, .Layout_Dwindle, .Layout_Monocle, .Layout_Next:
         changed := false
         #partial switch b.action {
         case .Layout_Scroller: changed = c.Set_Workspace_Layout(m, .Scroller)
         case .Layout_Vertical_Scroller: changed = c.Set_Workspace_Layout(m, .Vertical_Scroller)
+        case .Layout_Game:      changed = c.Set_Workspace_Layout(m, .Game)
         case .Layout_Dwindle:  changed = c.Set_Workspace_Layout(m, .Dwindle)
         case .Layout_Monocle:  changed = c.Set_Workspace_Layout(m, .Monocle)
         case .Layout_Next:     changed = c.Cycle_Workspace_Layout(m)

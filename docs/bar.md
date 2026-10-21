@@ -72,7 +72,7 @@ shows left-aligned workspace and current-layout blocks plus the focused window
 title in the centre.
 
 The layout block uses Nerd Font glyphs for Scrolling Tile, Vertical Scroller,
-Tabbed, Dwindle, Monocle, and Floating.
+Game Mode, Tabbed, Dwindle, Monocle, and Floating.
 
 The title block always fits and displays the complete focused-window title.
 It does not ellipsize the title or show a title tooltip. Hover a layout glyph

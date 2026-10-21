@@ -70,6 +70,7 @@ bar_block : systray : right
 # Workspaces: assign a layout, icon, and name.
 # workspace number : workspace layout : workspace icon : workspace name
 # workspace-1 : scrolling-tile : 󰈹 : Web
+# workspace-2 : game : 󰌈 : Game
 # workspace-3 : dwindle : 󰆍 : Code
 # workspace-5 : monocle : 󰍹 : Focus
 
@@ -127,6 +128,8 @@ call : mod + Shift + space : togglealwaysontop
 call : mod + f : togglefullscreen
 call : mod + t : toggle_tabbed
 call : mod + g : layout_next
+# Direct Game Mode selection: 75% anchor plus a vertically scrolling side rail.
+call : mod + Shift + g : layout_game
 call : mod + Control + Alt + h : show_bindings
 call : mod + Control + Alt + t : show_datetime
 call : mod + Control + Alt + b : show_battery

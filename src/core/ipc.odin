@@ -63,7 +63,7 @@ Ipc_Action :: enum {
     Move_To_Workspace, Move_To_Workspace_Next, Move_To_Workspace_Prev,
     Toggle_Floating, Toggle_Always_On_Top, Toggle_Fullscreen,
     Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
-    Layout_Scroller, Layout_Vertical_Scroller, Layout_Dwindle, Layout_Monocle, Layout_Next,
+    Layout_Scroller, Layout_Vertical_Scroller, Layout_Game, Layout_Dwindle, Layout_Monocle, Layout_Next,
     Set_Gaps, Set_Corner_Radius, Set_Decorations, Set_Theme_Colors,
     Scratchpad_Toggle, Scratchpad_Toggle_Float,
     Scratchpad_Toggle_Quake, Scratchpad_Toggle_Sidebar, Scratchpad_Remove,
@@ -859,6 +859,7 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
             return Ipc_Command{action = .Layout_Scroller}, "", true
         case "vertical-scroller", "vertical_scroller", "vertical-scrolling-tile", "vertical_scrolling_tile":
             return Ipc_Command{action = .Layout_Vertical_Scroller}, "", true
+        case "game", "game-mode", "game_mode": return Ipc_Command{action = .Layout_Game}, "", true
         case "dwindle", "fibonacci": return Ipc_Command{action = .Layout_Dwindle}, "", true
         case "monocle":          return Ipc_Command{action = .Layout_Monocle}, "", true
         case "next":             return Ipc_Command{action = .Layout_Next}, "", true

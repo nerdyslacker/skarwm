@@ -42,6 +42,7 @@ Binding_Description :: proc(b: ^input.Binding) -> string {
     case .Layout_Toggle:       return fmt.aprintf("toggle tabbed layout")
     case .Layout_Scroller:     return fmt.aprintf("use scrolling tile workspace layout")
     case .Layout_Vertical_Scroller: return fmt.aprintf("use vertical scrolling tile workspace layout")
+    case .Layout_Game:         return fmt.aprintf("use game workspace layout")
     case .Layout_Dwindle:      return fmt.aprintf("use dwindle workspace layout")
     case .Layout_Monocle:      return fmt.aprintf("use monocle workspace layout")
     case .Layout_Next:         return fmt.aprintf("cycle workspace layout")

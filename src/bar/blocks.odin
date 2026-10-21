@@ -448,6 +448,7 @@ layout_name :: proc(layout: string) -> string {
     switch layout {
     case "scrolling-tile":          return fmt.aprintf("Scrolling Tile")
     case "vertical-scrolling-tile": return fmt.aprintf("Vertical Scroller")
+    case "game":                    return fmt.aprintf("Game Mode")
     case "tabbed":                  return fmt.aprintf("Tabbed")
     case "dwindle":                 return fmt.aprintf("Dwindle")
     case "monocle":                 return fmt.aprintf("Monocle")
@@ -460,6 +461,7 @@ layout_glyph :: proc(layout: string) -> string {
     switch layout {
     case "scrolling-tile":          return fmt.aprintf("󰙀")
     case "vertical-scrolling-tile": return fmt.aprintf("󱥣")
+    case "game":                    return fmt.aprintf("󰌈")
     case "tabbed":                  return fmt.aprintf("󰓩")
     case "dwindle":                 return fmt.aprintf("󰕮")
     case "monocle":                 return fmt.aprintf("󰍹")

@@ -59,6 +59,7 @@ main :: proc() {
     test_tabbed_layout()
     test_workspace_layouts()
     test_vertical_scroller()
+    test_game_layout()
     test_vertical_scroller_drop_targets()
     test_output_work_area()
     test_floating_reserved_right_edge()
@@ -359,6 +360,54 @@ test_vertical_scroller :: proc() {
     c.Focus_Client(m, a)
     ok(c.Focus_Dir(m, .Right), "focus right walks across a vertical-scroller row")
     eq(m.Focused, b, "horizontal focus selects the next row member")
+}
+
+test_game_layout :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    anchor := add_tiled(m, 4811)
+    first := add_tiled(m, 4812)
+    second := add_tiled(m, 4813)
+    third := add_tiled(m, 4814)
+    fourth := add_tiled(m, 4815)
+
+    ok(c.Set_Workspace_Layout(m, .Game), "select game layout")
+    eq(c.Workspace_Layout_Name(ws.Layout), "game", "game layout has a stable IPC name")
+    c.Focus_Client(m, anchor)
+    c.Arrange_All(m)
+    anchor_geom := anchor.Geom
+    ok(anchor_geom.W > GEOM.W / 2 && anchor_geom.H > GEOM.H / 2,
+        "game anchor owns most of the work area")
+    ok(first.Geom.X > anchor.Geom.X + anchor.Geom.W &&
+       second.Geom.X == first.Geom.X && third.Geom.X == first.Geom.X,
+       "game companions occupy one narrow side rail")
+    ok(first.Geom.Y < second.Geom.Y && second.Geom.Y < third.Geom.Y,
+        "game companion rail tiles vertically")
+    ok(fourth.Geom.X <= c.HIDE_X, "overflowing game companion starts parked")
+    ok(c.Focus_Dir(m, .Right) && m.Focused == first,
+        "game focus enters the companion rail from the anchor")
+    ok(c.Focus_Dir(m, .Down) && m.Focused == second,
+        "game focus walks downward through companion groups")
+
+    ok(c.Scroll_Viewport(m, 1), "game companion rail scrolls downward")
+    c.Arrange_All(m)
+    eq(anchor.Geom, anchor_geom, "scrolling companions never moves the game anchor")
+    ok(ws.ViewportY > 0, "game mode remembers its vertical rail viewport")
+
+    c.Focus_Client(m, fourth)
+    c.Ensure_Active_Focus_Visible(m)
+    c.Arrange_All(m)
+    ok(fourth.Geom.X > anchor.Geom.X + anchor.Geom.W && fourth.Geom.Y >= 0,
+        "focusing an overflow companion reveals it in the rail")
+    eq(anchor.Geom, anchor_geom, "revealing a companion preserves anchor geometry")
+
+    c.Focus_Client(m, second)
+    ok(c.Move_Dir(m, .Left), "game companions can be grouped into a stack")
+    c.Arrange_All(m)
+    ok(first.Geom.X == second.Geom.X && second.Geom.Y > first.Geom.Y,
+        "a companion group keeps its own stacked tiling arrangement")
 }
 
 test_vertical_scroller_drop_targets :: proc() {
@@ -2818,6 +2867,9 @@ test_ipc_parse_command :: proc() {
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`layout vertical-scroller`))
     ok(fine && cmd.action == .Layout_Vertical_Scroller, "vertical scroller layout parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`layout game`))
+    ok(fine && cmd.action == .Layout_Game, "game layout parsed")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`focus window 4194309`))
     ok(fine && cmd.action == .Focus_Window && cmd.arg == 4194309,
