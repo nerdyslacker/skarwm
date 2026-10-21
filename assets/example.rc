@@ -47,7 +47,7 @@ bar_tag_foreground : #0E0D0C
 bar_tag_background : #917E6B
 bar_block_foreground : #0E0D0C
 bar_block_background : #C5B088
-# bar_block : button : left : 󰀻 : "rofi -show drun"
+# bar_block : button : left : 󰀻 : "~/.config/skarwm/scripts/rofi.sh -show drun -disable-history -show-icons"
 bar_block : workspaces : left
 bar_block : layout : left
 bar_block : title : left
@@ -62,7 +62,7 @@ bar_block : audio : right : "pavucontrol"
 bar_block : battery : right : "tlpui"
 bar_block : systray : right
 # bar_block : button : right :  : "maim -s ~/Pictures/Screenshot_$(date +%Y-%m-%d_%H-%M-%S).png"
-# bar_block : button : right : ⏻ : "rofi -show power-menu -modi power-menu:rofi-power-menu"
+# bar_block : button : right : ⏻ : "~/.config/skarwm/scripts/power.sh"
 
 # Virtual screen: output : split : left percent : pixel offset.
 # virtual_screen : DP-1 : split : 75 : -30
@@ -88,6 +88,26 @@ bind : mod + Return : "st"
 autostart : "xsetroot -solid '#262522'"
 # autostart : "picom --config ~/.config/picom/picom.conf -b"
 # autostart : "dunst -config ~/.config/dunst/dunstrc"
+# Restore the wallpaper selected by the optional Rofi helper bundle in
+# assets/config. Disable xsetroot above when enabling this line.
+# autostart : "~/.config/skarwm/scripts/auto_start.sh"
+
+# Optional Rofi helpers from assets/config. These cover every bundled Rofi
+# script; uncomment the bindings you want after copying the bundle to
+# ~/.config. Rofi itself reads ~/.config/rofi/config.rasi automatically.
+# bind : mod + d : "~/.config/skarwm/scripts/rofi.sh -show drun -disable-history -show-icons"
+# bind : mod + Shift + d : "~/.config/skarwm/scripts/rofi.sh -show run -disable-history"
+# bind : mod + w : "~/.config/skarwm/scripts/window_switcher.sh"
+# bind : mod + u : "~/.config/skarwm/scripts/chooseBackgroundImage.sh"
+# bind : mod + x : "~/.config/skarwm/scripts/executeScripts.sh"
+# bind : mod + b : "~/.config/skarwm/scripts/bookmarks.sh tab all"
+# bind : mod + Shift + b : "~/.config/skarwm/scripts/bookmarks.sh tab category"
+# bind : mod + Control + b : "~/.config/skarwm/scripts/bookmarks.sh private all"
+# bind : mod + Shift + n : "~/.config/skarwm/scripts/nmcli_connect_network.sh"
+# bind : mod + Alt + n : "~/.config/skarwm/scripts/nmcli_delete_network.sh"
+# bind : mod + Alt + t : "~/.config/skarwm/scripts/skarwmThemeSwitcher.sh"
+# bind : mod + Shift + e : "~/.config/skarwm/scripts/power.sh"
+# bind : mod + Alt + r : "~/.config/skarwm/scripts/redshift.sh"
 
 # Window actions.
 call : mod + h : focusleft
@@ -165,4 +185,8 @@ rule : title : Network : floating
 rule : instance : firefox : workspace 3
 rule : title : "Mozilla Firefox" : floating
 
+# Optional theme switching: uncomment this repository-relative import. After
+# copying example.rc to ~/.config/skarwm/skarwm.rc, use `import : theme.rc`
+# instead. It is disabled by default so the bar palette above stays canonical.
+# import : config/skarwm/theme.rc
 # import : config.d/keybindings.rc

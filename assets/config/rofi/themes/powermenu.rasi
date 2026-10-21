@@ -1,0 +1,70 @@
+* {
+  bar-background: #121110;
+  bar-foreground: #FCE8C3;
+  tag-background: #917E6B;
+  tag-foreground: #0E0D0C;
+  block-background: #C5B088;
+  block-foreground: #0E0D0C;
+  highlight: underline bold #FCE8C3;
+  transparent: #00000000;
+  margin: 0;
+  padding: 0;
+  spacing: 0;
+  border: 0;
+  background-color: transparent;
+  text-color: @block-foreground;
+  font: "monospace bold 16";
+}
+
+window {
+  width: 65%;
+  location: center;
+  anchor: center;
+  background-color: @transparent;
+}
+
+mainbox {
+  padding: 6px;
+  border: 5px solid;
+  border-color: @bar-background;
+  background-color: @tag-background;
+  children: [listview];
+}
+
+listview {
+  lines: 1;
+  columns: 5;
+  fixed-height: true;
+  fixed-columns: true;
+  scrollbar: false;
+  cycle: false;
+  spacing: 8px;
+  background-color: @tag-background;
+}
+
+element {
+  padding: 13px 8px;
+  background-color: @block-background;
+  text-color: @block-foreground;
+  horizontal-align: 0.5;
+  children: [element-text];
+}
+
+element selected {
+  background-color: @tag-background;
+  text-color: @tag-foreground;
+}
+
+element-text {
+  expand: true;
+  background-color: inherit;
+  text-color: inherit;
+  vertical-align: 0.5;
+  horizontal-align: 0.5;
+}
+
+error-message {
+  padding: 10px;
+  background-color: @bar-background;
+  text-color: @bar-foreground;
+}

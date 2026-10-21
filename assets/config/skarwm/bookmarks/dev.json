@@ -1,0 +1,20 @@
+[
+  {"title": "Github", "url": "https://github.com"},
+  {"title": "Codeberg", "url": "https://codeberg.org"},
+  {"title": "TypeScript", "url": "https://www.typescriptlang.org/docs"},
+  {"title": "NodeJs", "url": "https://nodejs.org/docs/latest/api"},
+  {"title": "ExpressJs Routing", "url": "https://expressjs.com/en/guide/routing.html"},
+  {"title": "NPM", "url": "https://www.npmjs.com"},
+  {"title": "React", "url": "https://react.dev/learn"},
+  {"title": "React Router", "url": "https://reactrouter.com/home"},
+  {"title": "NextJs", "url": "https://nextjs.org/docs"},
+  {"title": "Redux", "url": "https://redux.js.org/introduction/getting-started"},
+  {"title": "Tanstack Query", "url": "https://tanstack.com/query/latest"},
+  {"title": "Tailwind CSS", "url": "https://tailwindcss.com/docs"},
+  {"title": "DaisyUi", "url": "https://daisyui.com/docs/intro"},
+  {"title": "ShadcnUi", "url": "https://ui.shadcn.com/docs/installation"},
+  {"title": "DrawSQL", "url": "https://drawsql.app/draw"},
+  {"title": "Prisma Postgresql Quickstart", "url": "https://www.prisma.io/docs/prisma-orm/quickstart/postgresql"},
+  {"title": "Prisma Data Models", "url": "https://www.prisma.io/docs/orm/prisma-schema/data-model/models"},
+  {"title": "Prisma Crud Queries", "url": "https://www.prisma.io/docs/orm/prisma-client/queries/crud"}
+]

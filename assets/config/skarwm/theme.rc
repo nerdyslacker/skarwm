@@ -1,0 +1,9 @@
+# Active skarwm theme. skarwmThemeSwitcher.sh replaces this file with a
+# symlink to the selected fragment in themes/.
+sel_outer_border : #F75341
+bar_foreground : #FCE8C3
+bar_background : #121110
+bar_tag_foreground : #0E0D0C
+bar_tag_background : #917E6B
+bar_block_foreground : #0E0D0C
+bar_block_background : #C5B088

@@ -9,7 +9,8 @@ skarwm
 skarwm-msg
 !cmd/skarwm-msg/
 !cmd/skarwm-msg/main.odin
-
+!assets/config/skarwm
+!assets/config/skarwm/**
 # Editor / OS
 *.swp
 *~

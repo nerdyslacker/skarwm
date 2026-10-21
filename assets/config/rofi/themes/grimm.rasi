@@ -1,0 +1,127 @@
+* {
+  bar-background: #121110;
+  bar-foreground: #FCE8C3;
+  tag-background: #917E6B;
+  tag-foreground: #0E0D0C;
+  block-background: #C5B088;
+  block-foreground: #0E0D0C;
+  highlight: underline bold #FCE8C3;
+  margin: 0;
+  padding: 0;
+  spacing: 0;
+  border: 0;
+  background-color: transparent;
+  text-color: @bar-foreground;
+  font: "monospace bold 14";
+}
+
+configuration {
+  display-drun: "APPS";
+  display-run: "CMD";
+  display-window: "WIN";
+}
+
+window {
+  width: 32%;
+  location: center;
+  anchor: center;
+  border: 3px solid;
+  border-color: @block-background;
+  background-color: @bar-background;
+}
+
+mainbox {
+  background-color: @bar-background;
+  children: [inputbar, message, listview];
+}
+
+inputbar {
+  margin: 6px;
+  spacing: 6px;
+  background-color: @bar-background;
+  children: [prompt, entry];
+}
+
+prompt {
+  expand: false;
+  padding: 6px 10px;
+  background-color: @tag-background;
+  text-color: @tag-foreground;
+}
+
+entry {
+  expand: true;
+  padding: 6px 10px;
+  border: 2px solid;
+  border-color: @block-background;
+  background-color: @bar-background;
+  text-color: @bar-foreground;
+  placeholder: "Search";
+  placeholder-color: @bar-foreground;
+}
+
+listview {
+  lines: 8;
+  columns: 1;
+  fixed-height: false;
+  scrollbar: false;
+  cycle: true;
+  spacing: 4px;
+  margin: 0 6px 6px 6px;
+  padding: 6px;
+  border: 2px solid;
+  border-color: @block-background;
+  background-color: @bar-background;
+}
+
+element {
+  padding: 7px 9px;
+  spacing: 9px;
+  background-color: @bar-background;
+  text-color: @bar-foreground;
+  children: [element-icon, element-text];
+}
+
+element selected {
+  background-color: @block-background;
+  text-color: @block-foreground;
+}
+
+element selected.active {
+  background-color: @tag-background;
+  text-color: @tag-foreground;
+}
+
+element-icon {
+  size: 1.5em;
+  background-color: inherit;
+  text-color: inherit;
+  vertical-align: 0.5;
+}
+
+element-text {
+  expand: true;
+  background-color: inherit;
+  text-color: inherit;
+  vertical-align: 0.5;
+  horizontal-align: 0.0;
+}
+
+message {
+  margin: 0 6px 6px 6px;
+  background-color: @bar-background;
+}
+
+textbox {
+  padding: 6px 9px;
+  border: 2px solid;
+  border-color: @tag-background;
+  background-color: @bar-background;
+  text-color: @bar-foreground;
+}
+
+error-message {
+  padding: 10px;
+  background-color: @bar-background;
+  text-color: @bar-foreground;
+}

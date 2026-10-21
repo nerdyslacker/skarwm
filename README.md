@@ -336,6 +336,9 @@ Tabbed mode affects only the focused column. Move windows into it with
 
 The fully commented [assets/example.rc](assets/example.rc) documents settings,
 bindings, workspace rules, window rules, and autostart commands.
+An optional [Rofi configuration and X11 helper bundle](assets/config/README.md)
+provides matching launchers for wallpapers, windows, bookmarks, saved scripts,
+Wi-Fi, and session power actions.
 
 ### Jumping to matching windows
 
@@ -396,3 +399,4 @@ The window-management design was inspired by:
 - [tonybanters/oxwm](https://github.com/tonybanters/oxwm)
 - [Mr-Emacs/nwm](https://github.com/Mr-Emacs/nwm)
 - [mangowm/mango](https://github.com/mangowm/mango)
+- [mister-grimm96/swaystation](https://github.com/mister-grimm96/swaystation)
