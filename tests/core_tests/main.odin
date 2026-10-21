@@ -2223,7 +2223,7 @@ test_scratchpads :: proc() {
     ok(!b.Stashed && b.Ws == c.Current_WS(m), "summoned client follows active workspace")
     eq(m.Focused, b, "summoned client receives focus")
 
-    ok(c.Scratchpad_Toggle_Register(m, 2, true), "floating register can be assigned")
+    ok(c.Scratchpad_Toggle_Register(m, 2, .Float), "floating register can be assigned")
     ok(b.Floating, "toggle-float changes assigned client to floating")
     scratchpad_json := c.ipc_windows_payload(m)
     ok(strings.contains(string(scratchpad_json), `"scratchpad_registers":[1,2]`),
@@ -2238,6 +2238,33 @@ test_scratchpads :: proc() {
     ok(count == 1 && changed && b.Stashed, "metadata target stashes exact matches")
     count, changed = c.Scratchpad_Toggle_Target(m, .AppId, "Term")
     ok(count == 1 && changed && !b.Stashed, "appid target summons class/instance match")
+
+    count, changed = c.Scratchpad_Toggle_Target(m, .Class, "Term", .Quake)
+    ok(count == 1 && changed && b.Stashed && b.Floating, "quake target floats and stashes matches")
+    count, changed = c.Scratchpad_Toggle_Target(m, .Class, "Term", .Quake)
+    c.Arrange_All(m)
+    quake_work := c.compute_params(m.Cfg, b.Out.Geom, 0, b.Out.Reserved)
+    eq(b.FloatingRect, c.Rect{X = quake_work.WorkX, Y = quake_work.WorkY, W = quake_work.WorkW, H = quake_work.WorkH / 2},
+        "quake target occupies the top half of the work area")
+
+    count, changed = c.Scratchpad_Toggle_Target(m, .Class, "Term", .Sidebar)
+    ok(count == 1 && changed && b.Stashed, "sidebar target stashes matches")
+    count, changed = c.Scratchpad_Toggle_Target(m, .Class, "Term", .Sidebar)
+    c.Arrange_All(m)
+    sidebar_width := quake_work.WorkW / 3
+    eq(b.FloatingRect, c.Rect{X = quake_work.WorkX + quake_work.WorkW - sidebar_width, Y = quake_work.WorkY, W = sidebar_width, H = quake_work.WorkH},
+        "sidebar target occupies the right third of the work area")
+
+    ok(c.Scratchpad_Toggle_Register(m, 3, .Quake), "quake register can be assigned")
+    eq(b.FloatingRect, c.Rect{X = quake_work.WorkX, Y = quake_work.WorkY, W = quake_work.WorkW, H = quake_work.WorkH / 2},
+        "quake register applies quake geometry")
+    ok(c.Scratchpad_Toggle_Register(m, 3, .Quake) && b.Stashed,
+        "quake register hides its visible client")
+    ok(c.Scratchpad_Toggle_Register(m, 3, .Quake) && !b.Stashed,
+        "quake register summons its hidden client")
+    ok(c.Scratchpad_Toggle_Register(m, 4, .Sidebar), "sidebar register can be assigned")
+    eq(b.FloatingRect, c.Rect{X = quake_work.WorkX + quake_work.WorkW - sidebar_width, Y = quake_work.WorkY, W = sidebar_width, H = quake_work.WorkH},
+        "sidebar register applies sidebar geometry")
 
     c.Focus_Client(m, a)
     auto_register, auto_stashed := c.Scratchpad_Stash_Client(m, a)
@@ -2892,6 +2919,12 @@ test_ipc_parse_command :: proc() {
     cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad toggle-float 2`))
     ok(fine && cmd.action == .Scratchpad_Toggle_Float && cmd.arg == 2, "floating scratchpad toggle parsed")
     if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad toggle-quake 3`))
+    ok(fine && cmd.action == .Scratchpad_Toggle_Quake && cmd.arg == 3, "quake scratchpad toggle parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad toggle-sidebar 4`))
+    ok(fine && cmd.action == .Scratchpad_Toggle_Sidebar && cmd.arg == 4, "sidebar scratchpad toggle parsed")
+    if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad remove 2`))
     ok(fine && cmd.action == .Scratchpad_Remove && cmd.arg == 2, "scratchpad remove parsed")
     if err != "" do delete(err)
@@ -2900,6 +2933,18 @@ test_ipc_parse_command :: proc() {
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad target title Music Player --spawn kitty --class music`))
     ok(fine && cmd.text == "Music Player" && cmd.spawn == "kitty --class music", "scratchpad target preserves match and spawn command")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad target-float class Pavucontrol`))
+    ok(fine && cmd.action == .Scratchpad_Target_Class && cmd.scratchpad_mode == .Float,
+       "floating scratchpad target parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad target-quake appid kitty`))
+    ok(fine && cmd.action == .Scratchpad_Target_AppId && cmd.scratchpad_mode == .Quake,
+       "quake scratchpad target parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`scratchpad target-sidebar class Thunar`))
+    ok(fine && cmd.action == .Scratchpad_Target_Class && cmd.scratchpad_mode == .Sidebar,
+       "sidebar scratchpad target parsed")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`focus output next`))
     ok(fine && cmd.action == .Focus_Output_Next, "focus output next parsed")

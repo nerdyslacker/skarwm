@@ -65,7 +65,8 @@ Ipc_Action :: enum {
     Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
     Layout_Scroller, Layout_Vertical_Scroller, Layout_Dwindle, Layout_Monocle, Layout_Next,
     Set_Gaps, Set_Corner_Radius, Set_Decorations, Set_Theme_Colors,
-    Scratchpad_Toggle, Scratchpad_Toggle_Float, Scratchpad_Remove,
+    Scratchpad_Toggle, Scratchpad_Toggle_Float,
+    Scratchpad_Toggle_Quake, Scratchpad_Toggle_Sidebar, Scratchpad_Remove,
     Scratchpad_Target_AppId, Scratchpad_Target_Class,
     Scratchpad_Target_Instance, Scratchpad_Target_Title,
     Show_Bindings,
@@ -83,7 +84,7 @@ Ipc_Command :: struct {
     arg:    int,
     text:   string, // non-owning view into the request payload during dispatch
     spawn:  string, // optional non-owning command for an unmatched target
-    flag:   bool,   // optional command modifier (currently target as floating)
+    scratchpad_mode: Scratchpad_Mode,
     colors: [8]u32,
 }
 
@@ -948,6 +949,8 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
             switch tokens[1] {
             case "toggle": return Ipc_Command{action = .Scratchpad_Toggle, arg = register}, "", true
             case "toggle-float": return Ipc_Command{action = .Scratchpad_Toggle_Float, arg = register}, "", true
+            case "toggle-quake": return Ipc_Command{action = .Scratchpad_Toggle_Quake, arg = register}, "", true
+            case "toggle-sidebar": return Ipc_Command{action = .Scratchpad_Toggle_Sidebar, arg = register}, "", true
             case "remove", "delete": return Ipc_Command{action = .Scratchpad_Remove, arg = register}, "", true
             }
         }
@@ -956,7 +959,8 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
     // Metadata targets use exact matching. The value is the untouched request
     // tail, so titles containing spaces do not require special IPC quoting.
     if len(tokens) >= 4 && tokens[0] == "scratchpad" &&
-       (tokens[1] == "target" || tokens[1] == "target-float") {
+       (tokens[1] == "target" || tokens[1] == "target-float" ||
+        tokens[1] == "target-quake" || tokens[1] == "target-sidebar") {
         action: Ipc_Action
         switch tokens[2] {
         case "appid":    action = .Scratchpad_Target_AppId
@@ -982,11 +986,17 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
             if value_end <= starts[3] {
                 return {}, strings.clone("scratchpad target: empty match value"), false
             }
+            mode := Scratchpad_Mode.Normal
+            switch tokens[1] {
+            case "target-float":   mode = .Float
+            case "target-quake":   mode = .Quake
+            case "target-sidebar": mode = .Sidebar
+            }
             return Ipc_Command{
                 action = action,
                 text = string(data[starts[3]:value_end]),
                 spawn = spawn,
-                flag = tokens[1] == "target-float",
+                scratchpad_mode = mode,
             }, "", true
         }
     }

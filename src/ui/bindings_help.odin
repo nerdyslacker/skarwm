@@ -49,6 +49,8 @@ Binding_Description :: proc(b: ^input.Binding) -> string {
     case .Overview_Prev:       return fmt.aprintf("window overview (previous)")
     case .Scratchpad_Toggle:   return fmt.aprintf("toggle scratchpad %d", b.arg)
     case .Scratchpad_Toggle_Float: return fmt.aprintf("toggle floating scratchpad %d", b.arg)
+    case .Scratchpad_Toggle_Quake: return fmt.aprintf("toggle quake scratchpad %d", b.arg)
+    case .Scratchpad_Toggle_Sidebar: return fmt.aprintf("toggle sidebar scratchpad %d", b.arg)
     case .Scratchpad_Remove:   return fmt.aprintf("remove scratchpad %d", b.arg)
     case .Show_Bindings:       return fmt.aprintf("show or hide keybindings")
     case .Show_Date_Time:      return fmt.aprintf("show date and time notice")

@@ -575,6 +575,16 @@ resolve_bind :: proc(rb: Raw_Bind, mod_key: string) -> (out: input.Binding, err:
             return {}, fmt.aprintf("bind(%q): scratchpad register must be >= 0", rb.combo)
         }
         base.action = .Scratchpad_Toggle_Float; base.arg = rb.argi; return base, ""
+    case "scratchpad_toggle_quake":
+        if rb.argk != .Num || rb.argi < 0 {
+            return {}, fmt.aprintf("bind(%q): scratchpad register must be >= 0", rb.combo)
+        }
+        base.action = .Scratchpad_Toggle_Quake; base.arg = rb.argi; return base, ""
+    case "scratchpad_toggle_sidebar":
+        if rb.argk != .Num || rb.argi < 0 {
+            return {}, fmt.aprintf("bind(%q): scratchpad register must be >= 0", rb.combo)
+        }
+        base.action = .Scratchpad_Toggle_Sidebar; base.arg = rb.argi; return base, ""
     case "scratchpad_remove":
         if rb.argk != .Num || rb.argi < 0 {
             return {}, fmt.aprintf("bind(%q): scratchpad register must be >= 0", rb.combo)
@@ -2005,6 +2015,8 @@ cfg_apply_default :: proc() {
     add_bind_def(sc, "Mod4+Control+Shift+r", "reminder_clear_all", "")
     add_bind_def(sc, "Mod4+grave", "scratchpad_toggle", "", 1)
     add_bind_def(sc, "Mod4+Shift+grave", "scratchpad_toggle_float", "", 2)
+    add_bind_def(sc, "Mod4+Alt+grave", "scratchpad_toggle_quake", "", 3)
+    add_bind_def(sc, "Mod4+Control+Alt+grave", "scratchpad_toggle_sidebar", "", 4)
     add_bind_def(sc, "Mod4+Control+grave", "scratchpad_remove", "", 1)
     add_bind_def(sc, "Mod4+Shift+q", "close_window", "")
     add_bind_def(sc, "Mod4+Shift+r", "reload_config", "")

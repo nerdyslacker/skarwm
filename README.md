@@ -369,6 +369,8 @@ focused workspace and monitor:
 ```text
 call : mod + grave : scratchpad_toggle 1
 call : mod + Shift + grave : scratchpad_toggle_float 2
+call : mod + Alt + grave : scratchpad_toggle_quake 3
+call : mod + Control + Alt + grave : scratchpad_toggle_sidebar 4
 call : mod + Control + grave : scratchpad_remove 1
 ```
 
@@ -380,11 +382,16 @@ instance, or title:
 skarwm-msg scratchpad target appid kitty
 skarwm-msg scratchpad target title "Music Player"
 skarwm-msg scratchpad target-float class Pavucontrol
+skarwm-msg scratchpad target-quake appid kitty
+skarwm-msg scratchpad target-sidebar class Thunar
 skarwm-msg scratchpad target appid kitty --spawn kitty
 ```
 
 When matching windows are hidden, the command summons all of them; otherwise
-it hides them. `--spawn COMMAND` starts the application when no window matches.
+it hides them. `target-quake` presents matches across the top half of the usable
+work area, while `target-sidebar` uses its right third. Both modes make matches
+floating and follow the active monitor. `--spawn COMMAND` starts the application
+when no window matches.
 
 ## IPC and shell integration
 

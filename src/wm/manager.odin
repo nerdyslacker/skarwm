@@ -909,8 +909,17 @@ dispatch_action :: proc(b: ^input.Binding) {
         overview_begin(1)
     case .Overview_Prev:
         overview_begin(-1)
-    case .Scratchpad_Toggle, .Scratchpad_Toggle_Float:
-        if c.Scratchpad_Toggle_Register(m, b.arg, b.action == .Scratchpad_Toggle_Float) {
+    case .Scratchpad_Toggle, .Scratchpad_Toggle_Float,
+         .Scratchpad_Toggle_Quake, .Scratchpad_Toggle_Sidebar:
+        mode := c.Scratchpad_Mode.Normal
+        #partial switch b.action {
+        case .Scratchpad_Toggle_Float:   mode = .Float
+        case .Scratchpad_Toggle_Quake:   mode = .Quake
+        case .Scratchpad_Toggle_Sidebar: mode = .Sidebar
+        case .Scratchpad_Toggle:
+        case: unreachable()
+        }
+        if c.Scratchpad_Toggle_Register(m, b.arg, mode) {
             raise_focused()
             reflow()
             ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, m.Focused)

@@ -960,18 +960,20 @@ Summon_Client :: proc(m: ^Manager, cl: ^Client, as_float: bool = false) -> bool 
 // Scratchpad_Toggle_Register assigns an unused register to the focused window.
 // Later calls hide it when it is on the active workspace, or summon it from a
 // stash/other workspace. Registers deliberately live only for this WM session.
-Scratchpad_Toggle_Register :: proc(m: ^Manager, number: int, as_float: bool = false) -> bool {
+Scratchpad_Toggle_Register :: proc(m: ^Manager, number: int, mode: Scratchpad_Mode = .Normal) -> bool {
     if number < 0 { return false }
     cl, found := m.Scratchpad_Registers[number]
     if !found || cl == nil {
         cl = m.Focused
         if cl == nil || cl.Dock { return false }
         m.Scratchpad_Registers[number] = cl
-        if as_float { Set_Floating(m, cl, true) }
+        scratchpad_apply_mode(m, cl, mode)
         return true
     }
     if cl.Stashed || cl.Ws != Current_WS(m) {
-        return Summon_Client(m, cl, as_float)
+        summoned := Summon_Client(m, cl, mode != .Normal)
+        if summoned { scratchpad_apply_mode(m, cl, mode) }
+        return summoned
     }
     return Stash_Client(m, cl)
 }
@@ -1020,6 +1022,37 @@ Scratchpad_Stash_Client :: proc(m: ^Manager, cl: ^Client) -> (register: int, ok:
 
 Scratchpad_Match_Field :: enum { AppId, Class, Instance, Title }
 
+// Presentation applied to metadata-targeted scratchpads. Quake and Sidebar
+// use the client's output work area, so they avoid docks and follow a
+// scratchpad when it is summoned on another output.
+Scratchpad_Mode :: enum { Normal, Float, Quake, Sidebar }
+
+scratchpad_apply_mode :: proc(m: ^Manager, cl: ^Client, mode: Scratchpad_Mode) {
+    if cl == nil || mode == .Normal { return }
+    if cl.Ws != nil && !cl.Floating { Set_Floating(m, cl, true) }
+    if mode == .Float || cl.Out == nil { return }
+
+    p := compute_params(m.Cfg, cl.Out.Geom, 0, cl.Out.Reserved)
+    switch mode {
+    case .Quake:
+        cl.FloatingRect = Rect {
+            X = p.WorkX,
+            Y = p.WorkY,
+            W = max(i32(1), p.WorkW),
+            H = max(i32(1), p.WorkH / 2),
+        }
+    case .Sidebar:
+        width := max(i32(1), p.WorkW / 3)
+        cl.FloatingRect = Rect {
+            X = p.WorkX + p.WorkW - width,
+            Y = p.WorkY,
+            W = width,
+            H = max(i32(1), p.WorkH),
+        }
+    case .Normal, .Float:
+    }
+}
+
 scratchpad_matches :: proc(cl: ^Client, field: Scratchpad_Match_Field, value: string) -> bool {
     if cl == nil || cl.Dock { return false }
     #partial switch field {
@@ -1033,7 +1066,7 @@ scratchpad_matches :: proc(cl: ^Client, field: Scratchpad_Match_Field, value: st
 
 // Scratchpad_Toggle_Target toggles every exact metadata match as a group. If
 // any match is stashed, all are summoned; otherwise all are stashed.
-Scratchpad_Toggle_Target :: proc(m: ^Manager, field: Scratchpad_Match_Field, value: string, as_float: bool = false) -> (count: int, changed: bool) {
+Scratchpad_Toggle_Target :: proc(m: ^Manager, field: Scratchpad_Match_Field, value: string, mode: Scratchpad_Mode = .Normal) -> (count: int, changed: bool) {
     summon := false
     for cl in m.Clients {
         if scratchpad_matches(cl, field, value) {
@@ -1045,9 +1078,11 @@ Scratchpad_Toggle_Target :: proc(m: ^Manager, field: Scratchpad_Match_Field, val
     for cl in m.Clients {
         if !scratchpad_matches(cl, field, value) { continue }
         if summon {
-            changed = Summon_Client(m, cl, as_float) || changed
+            summoned := Summon_Client(m, cl, mode != .Normal)
+            if summoned { scratchpad_apply_mode(m, cl, mode) }
+            changed = summoned || changed
         } else {
-            if as_float && cl.Ws != nil { Set_Floating(m, cl, true) }
+            scratchpad_apply_mode(m, cl, mode)
             changed = Stash_Client(m, cl) || changed
         }
     }

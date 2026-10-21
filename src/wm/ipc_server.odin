@@ -389,6 +389,8 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
     case .Layout_Next:       b.action = .Layout_Next
     case .Scratchpad_Toggle: b.action = .Scratchpad_Toggle
     case .Scratchpad_Toggle_Float: b.action = .Scratchpad_Toggle_Float
+    case .Scratchpad_Toggle_Quake: b.action = .Scratchpad_Toggle_Quake
+    case .Scratchpad_Toggle_Sidebar: b.action = .Scratchpad_Toggle_Sidebar
     case .Scratchpad_Remove: b.action = .Scratchpad_Remove
     case .Scratchpad_Target_AppId, .Scratchpad_Target_Class,
          .Scratchpad_Target_Instance, .Scratchpad_Target_Title:
@@ -401,7 +403,7 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
         case: return
         }
         old_focus := g_wm.m.Focused
-        count, changed := c.Scratchpad_Toggle_Target(g_wm.m, field, cmd.text, cmd.flag)
+        count, changed := c.Scratchpad_Toggle_Target(g_wm.m, field, cmd.text, cmd.scratchpad_mode)
         if count == 0 && cmd.spawn != "" {
             process.Spawn(cmd.spawn)
         } else if changed {

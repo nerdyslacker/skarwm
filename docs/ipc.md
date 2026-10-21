@@ -33,9 +33,13 @@ skarwm-msg show-bindings
 skarwm-msg reminder add MINUTES MESSAGE
 skarwm-msg scratchpad toggle N
 skarwm-msg scratchpad toggle-float N
+skarwm-msg scratchpad toggle-quake N
+skarwm-msg scratchpad toggle-sidebar N
 skarwm-msg scratchpad remove N
 skarwm-msg scratchpad target appid|class|instance|title VALUE [--spawn COMMAND]
 skarwm-msg scratchpad target-float appid|class|instance|title VALUE [--spawn COMMAND]
+skarwm-msg scratchpad target-quake appid|class|instance|title VALUE [--spawn COMMAND]
+skarwm-msg scratchpad target-sidebar appid|class|instance|title VALUE [--spawn COMMAND]
 skarwm-msg focus output next|prev
 skarwm-msg move output next|prev
 skarwm-msg screen split toggle
@@ -60,14 +64,19 @@ physical width. Invalid minimum widths are rejected without changing geometry.
 The first numbered `toggle` assigns the focused window to that session-only
 register. Further toggles hide it when it is on the active workspace, or summon
 and focus it on the active workspace/monitor from anywhere else. `toggle-float`
-also makes it floating. `remove` forgets the register and summons a hidden
-window before doing so.
+also makes it floating, `toggle-quake` places it across the top half of the work
+area, and `toggle-sidebar` places it in the right third. `remove` forgets the
+register and summons a hidden window before doing so.
 
 Metadata targets toggle every exact match as a group. `appid` matches either
 X11 `WM_CLASS` value (instance or class); the other fields select one value
 explicitly. If any match is hidden, all matches are summoned; otherwise all are
 hidden. `target-float` makes matches floating before hiding or summoning them.
-When no window matches, the optional command after `--spawn` is launched.
+`target-quake` makes matches floating across the top half of the usable work
+area. `target-sidebar` makes them floating in the right third. These geometries
+respect reserved panel space and are reapplied on the active monitor when the
+windows are summoned. When no window matches, the optional command after
+`--spawn` is launched.
 
 ## Queries
 

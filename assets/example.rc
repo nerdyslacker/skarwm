@@ -147,6 +147,8 @@ call : mod + Shift + r : reload_config
 # Scratchpads and workspace navigation.
 call : mod + grave : scratchpad_toggle 1
 call : mod + Shift + grave : scratchpad_toggle_float 2
+call : mod + Alt + grave : scratchpad_toggle_quake 3
+call : mod + Control + Alt + grave : scratchpad_toggle_sidebar 4
 call : mod + Control + grave : scratchpad_remove 1
 call : mod + n : ws_next
 call : mod + p : ws_prev
@@ -188,5 +190,5 @@ rule : title : "Mozilla Firefox" : floating
 # Optional theme switching: uncomment this repository-relative import. After
 # copying example.rc to ~/.config/skarwm/skarwm.rc, use `import : theme.rc`
 # instead. It is disabled by default so the bar palette above stays canonical.
-# import : config/skarwm/theme.rc
+# import : config.d/theme.rc
 # import : config.d/keybindings.rc
