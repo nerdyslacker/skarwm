@@ -19,7 +19,8 @@ bar_tag_count : 8
 The WM launches `skarwm-bar`, or the executable named by `$SKARWM_BAR`. During
 development it uses `build/skarwm-bar` when that file exists. Reloading the WM
 configuration updates the position and height; disabling the bar makes a
-managed instance exit and removes its struts.
+managed instance exit and removes its struts. If the managed process exits,
+the WM restarts it with a one-second backoff.
 
 The binary can also be run independently:
 
@@ -173,7 +174,7 @@ timeout in seconds, and command. Named blocks render as `name value`, so icon
 labels do not acquire punctuation. Use `_` as the name to render only command
 output; a glyph or icon can be used as an ordinary name. Intervals are
 `1..86400`; timeouts are
-`1..60`. Commands deliberately run through `/bin/sh -c` with the user's
+`1..60`. Commands run through `/bin/sh -c` with the user's
 permissions so shell pipelines and quoting work. Button commands use the same
 shell behavior. Do not place untrusted text in these commands.
 

@@ -137,12 +137,12 @@ both minimum widths, it safely falls back to a single logical screen.
 `skarwm-msg get-outputs` returns one object per logical screen. Virtual-screen
 objects include:
 
-- `name` — stable logical name such as `DP-1:right`;
-- `physical_output` — parent monitor name such as `DP-1`;
-- `virtual` — whether the screen belongs to a split;
-- `rect` — X11 root-coordinate geometry;
-- `relative_rect` — geometry relative to the physical monitor;
-- `workarea` — usable logical geometry after docks and struts.
+- `name`: stable logical name such as `DP-1:right`
+- `physical_output`: parent monitor name such as `DP-1`
+- `virtual`: whether the screen belongs to a split
+- `rect`: X11 root-coordinate geometry
+- `relative_rect`: geometry relative to the physical monitor
+- `workarea`: usable logical geometry after docks and struts
 
 Active virtual screens are also published as standard RandR 1.5 monitor
 objects. Monitor-aware bars and shells therefore see the split through their

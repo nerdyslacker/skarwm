@@ -24,16 +24,14 @@ import : config.d/keybindings.rc
 import : config.d/rules.rc
 ```
 
-Relative paths are resolved from the directory containing the file with the
-`import` directive, including inside nested imports. Absolute paths and quoted
-paths are also accepted. Imported content is processed in place as though it
-appeared directly in the containing file, so later settings override earlier
-settings in the usual way.
+skarwm resolves relative paths from the directory containing the `import`
+directive, including inside nested imports. It accepts absolute and quoted
+paths. skarwm processes imported content in place, so later settings override
+earlier settings.
 
-Imports are recursive, but cycles and unreadable files reject the complete
-reload and leave the running configuration unchanged. The main file and every
-imported file are watched for automatic reloads. Imports are entirely optional;
-a single `skarwm.rc` continues to work as before.
+Imports can nest. A cycle or unreadable file rejects the reload and leaves the
+running configuration unchanged. skarwm watches the main file and each import
+for changes. A single `skarwm.rc` works without imports.
 
 ## Settings
 
@@ -113,43 +111,26 @@ virtual_screen : DP-1 : split : 75 : -30
 rule : class : Firefox : workspace 3 floating decorate false
 ```
 
-Append `foreground : background` to workspace, clock, battery, audio, network,
-Bluetooth, or systray blocks. Put the same pair immediately before the final
-command for script and button blocks. Either value may be `_` to inherit the
-global block colour. The audio
-block toggles mute on middle click and changes the default sink volume by five
-percent when scrolled. Network shows its active non-loopback interface name,
-or `󰤭 off` when disconnected; hover shows the available SSID and IP address on
-separate lines, and middle click toggles the Wi-Fi radio.
-Bluetooth shows its configured icon while connected and `󰂲` while
-disconnected, followed by `on` or `off`. Muted audio uses the `󰝟` icon and
-displays `muted`. Bluetooth middle click toggles adapter power. Network and
-Bluetooth open `nm-connection-editor` or `blueman-manager` on left click.
-
-Audio, Battery, Clock, Network, and Bluetooth blocks accept an optional final
-quoted shell command for left click. Put it after the optional label or colour
-pair. It overrides the Network/Bluetooth default application; Audio, Battery,
-and Clock otherwise have no left-click action:
-
-```rc
-bar_block : audio : right : "pavucontrol"
-bar_block : battery : right : "xterm -e upower -d"
-bar_block : clock : center : "gsimplecal"
-bar_block : network : right : _ : _ : "rofi -show network"
-bar_block : bluetooth : right : "blueman-manager"
-```
-
 `bind` launches a shell command. `call` invokes a WM action. `workspace view`
 switches workspace and `workspace tag` sends the focused window. `autostart`
 runs once at startup and is not run again by configuration reloads.
 
+The `focus` action accepts `class`, `instance`, and `title` criteria. It uses
+case-sensitive substring matches, combines criteria with AND, and cycles
+through matches on repeat presses. It skips docks and hidden scratchpads.
+
+```rc
+call : mod + a : focus class URxvt title VIM
+call : mod + m : focus title "Music Player"
+```
+
 `workspace-ID : LAYOUT : ICON [: NAME]` gives that workspace/tag a persistent
 layout on every output and configures its bar icon plus optional hover name.
-`workspace_ID` is accepted as an equivalent spelling. Supported names are
+skarwm accepts `workspace_ID` as an equivalent spelling. Supported names are
 `scrolling-tile`, `vertical-scrolling-tile`, `game`, `dwindle` (`fibonacci` is an
-alias), `monocle`, and `floating`. Matching workspaces are created and updated when the configuration
-loads or reloads, so windows opened later use the declared layout. A manual
-layout selection may override it until the next reload.
+alias), `monocle`, and `floating`. skarwm creates and updates matching
+workspaces when the configuration loads, so new windows use the declared
+layout. A manual layout selection may override it until the next reload.
 
 The older layout-only directives remain available so existing configurations
 continue to load:
@@ -197,27 +178,16 @@ call : mod + F8 : screen_split_grow 15
 Workspace, layout, title, and `systray` blocks take an alignment. A workspace
 declaration uses `workspace-ID : LAYOUT : ICON [: NAME]` (or `workspace_ID`):
 it sets the workspace layout and changes the corresponding workspace cell
-without rendering its own block. Button blocks take an
-alignment, display label, and left-click shell command. Audio, network, and
-Bluetooth blocks take an alignment, provide their own icons and built-in
-actions, and optionally take a final left-click shell command. Battery also
-accepts an optional left-click command. The `network`
-icon distinguishes Wi-Fi from Ethernet automatically. Explicit labels remain
-accepted as compatibility overrides.
-The `clock` block displays `%H:%M` and toggles to
-`%a, %b %d - %H:%M:%S` on middle click; left click runs its optional command.
-The `battery` block uses the same compact
-syntax and auto-detects Linux power-supply/UPower and BSD battery interfaces.
-Script blocks additionally
-take a name, interval in seconds, timeout in seconds, and a shell command. See
-[Built-in bar](bar.md) for limits, failure handling, and security details.
+without rendering a block. Other blocks take an alignment followed by their
+label, colours, or command. Use `_` to inherit a global colour or omit a script
+label. See [Built-in bar](bar.md) for field order, examples, actions, limits,
+and failure handling.
 
 Rules use a substring match against `class`, `instance`, or `title`. Effects are
 `workspace N`, `floating`, `floating true|false`, `decorate`, and
 `decorate true|false`; the first matching rule is used. A decoration rule
 overrides the global `decorations_enabled` value for that client.
 
-The main configuration and its imports are watched and reloaded automatically
-after they change (including editor saves that replace a file).
-`Super+Shift+r` also runs `reload_config` on demand. Reload is atomic: malformed
-input leaves the active configuration unchanged.
+skarwm watches the main configuration and its imports, including editor saves
+that replace a file. `Super+Shift+r` runs `reload_config` on demand. Reload is
+atomic: malformed input leaves the active configuration unchanged.

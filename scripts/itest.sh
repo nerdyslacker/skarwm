@@ -108,6 +108,7 @@ ipc_workspace_count() {
 wait_workspace_n() { local i=0; while [ "$i" -lt 45 ]; do
   [ "$(ipc_workspace_count "$1")" -eq "$2" ] && return 0; sleep 0.3; i=$((i+1));
 done; return 1; }
+bar_restarted() { [ -f "$bar_restart_count_file" ] && [ "$(wc -l <"$bar_restart_count_file")" -ge 2 ]; }
 all_windows_are_tabs_n() {
   state=$(./build/skarwm-msg get-windows 2>/dev/null) || return 1
   [ "$(printf '%s' "$state" | grep -o '"id":' | wc -l)" -eq "$1" ] &&
@@ -171,7 +172,10 @@ mkdir -p "$XDGC/skarwm"
 cp assets/example.rc "$XDGC/skarwm/skarwm.rc"
 cp assets/example.rc "$XDGC/skarwm/config.rc"
 rm -f "$WM_LOG"
-env -u SKARWM_CONFIG TERMINAL=xterm SKARWM_BAR=/bin/true ./build/skarwm >"$WM_LOG" 2>&1 &
+bar_restart_count_file="${TMPDIR:-/tmp}/skarwm-itest-bar-restarts"
+rm -f "$bar_restart_count_file"
+env -u SKARWM_CONFIG TERMINAL=xterm SKARWM_BAR="$PWD/scripts/itest-bar-restart.sh" \
+  SKARWM_BAR_TEST_COUNT_FILE="$bar_restart_count_file" ./build/skarwm >"$WM_LOG" 2>&1 &
 example_wm_pid=$!
 for _ in $(seq 1 30); do ./build/skarwm-msg get-windows >/dev/null 2>&1 && break; sleep 0.1; done
 if grep -q "config applied: load from $XDGC/skarwm/skarwm.rc" "$WM_LOG"; then
@@ -179,8 +183,14 @@ if grep -q "config applied: load from $XDGC/skarwm/skarwm.rc" "$WM_LOG"; then
 else
   fail "skarwm.rc example discovery/load"
 fi
+if wait_for bar_restarted; then
+  pass "managed bar restarts after a crash"
+else
+  fail "managed bar crash restart"
+fi
 kill "$example_wm_pid" 2>/dev/null || true
 wait "$example_wm_pid" 2>/dev/null || true
+rm -f "$bar_restart_count_file"
 rm -f "$SKARWM_SOCKET"
 
 # The former config.rc name remains usable when skarwm.rc is absent.

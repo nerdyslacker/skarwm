@@ -6,23 +6,22 @@ the corresponding bindings in [`../example.rc`](../example.rc).
 
 The scripts use X11-native tools:
 
-- `feh` sets and restores wallpapers;
-- Rofi's EWMH window mode switches skarwm windows;
-- `betterlockscreen` or `i3lock` locks the X11 session;
-- `skarwm-msg quit` logs out of skarwm;
-- `redshift` night-light helper;
-- rc theme fragments;
+- `feh` sets and restores wallpapers.
+- Rofi's EWMH mode switches skarwm windows.
+- `betterlockscreen` or `i3lock` locks the X11 session.
+- `skarwm-msg quit` logs out of skarwm.
+- `redshift` adjusts the display colour temperature.
+- rc fragments change the skarwm theme.
 
-All bundled menus use `scripts/rofi.sh`. It keeps a valid session locale when
-available and selects an installed UTF-8 fallback when the X11 session has
-inherited a stale locale value, avoiding Rofi's `Failed to set locale` error.
+All bundled menus use `scripts/rofi.sh`. The script preserves a valid session
+locale or selects an installed UTF-8 fallback, which prevents Rofi's
+`Failed to set locale` error.
 
-The complete helper set expects `bash`, `rofi`, `feh`, `libnotify`, `jq`, and
-NetworkManager's `nmcli`. The complete session helper set also uses `upower`,
-`lm_sensors`, and `redshift`. The power menu additionally needs `systemctl`
-plus Anush, `betterlockscreen`, or `i3lock`. The themes use the generic
-fontconfig `monospace` family, so their geometry does not depend on a specific
-Nerd Font being installed.
+The helpers require `bash`, `rofi`, `feh`, `libnotify`, `jq`, and
+NetworkManager's `nmcli`. Session helpers use `upower`, `lm_sensors`, and
+`redshift`. The power menu needs `systemctl` plus Anush, `betterlockscreen`, or
+`i3lock`. Themes use the fontconfig `monospace` family and do not require a
+specific Nerd Font.
 
 The bundle includes starter JSON files under `~/.config/skarwm/bookmarks`.
 Each file is one category and contains an array such as:
@@ -33,16 +32,16 @@ Each file is one category and contains an array such as:
 ]
 ```
 
-Set `BROWSER` to choose the browser (the default is `firefox`). Executable
-files placed directly in `~/.config/skarwm/scripts/executables` appear in the
-script picker. Wallpaper images default to `~/Pictures/backgrounds`; the
+Set `BROWSER` to choose the browser (the default is `firefox`). Put executable
+files in `~/.config/skarwm/scripts/executables` to add them to the script
+picker. Wallpaper images default to `~/Pictures/backgrounds`; the
 fallback restored at login is `~/.config/skarwm/wallpaper.jpeg`.
 
 When running `assets/example.rc` directly, its import is
 `config/skarwm/theme.rc`, relative to the `assets` directory. After copying the
 example to `~/.config/skarwm/skarwm.rc`, change that line to `import : theme.rc`.
 The included file starts with the Grimm palette; add more `.rc` fragments to
-`~/.config/skarwm/themes` and the picker will discover them automatically.
+`~/.config/skarwm/themes`; the picker lists them.
 
 The following optional environment variables override those paths:
 

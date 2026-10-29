@@ -18,10 +18,9 @@ Hidden scratchpads remain managed but leave the workspace layout. The floating
 variant makes the window floating. Removing a register summons a hidden window
 before forgetting it. Closing a window clears its registrations.
 
-IPC can also toggle groups by exact app ID, class, instance, or title and can
-spawn a command when no match exists. Target groups can be summoned normally,
-as ordinary floating windows, in quake mode across the top half of the work
-area, or as a right-side sidebar occupying one third. See [IPC.md](IPC.md).
+IPC can toggle groups by exact app ID, class, instance, or title and spawn a
+command when no match exists. You can summon a group as tiled windows, floating
+windows, a top-half quake panel, or a right-side panel. See [IPC](ipc.md).
 
 ## Overview integration
 

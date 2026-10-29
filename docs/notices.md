@@ -1,11 +1,11 @@
 # Notices
 
 skarwm can display small temporary status overlays without a bar or external
-notification daemon. They close automatically after 2.5 seconds and can also
-be dismissed with a click.
+notification daemon. It closes them after 2.5 seconds; a click closes them
+sooner.
 
-Expired reminder notices are intentionally different: they remain visible
-until clicked and cannot be replaced by temporary status notices.
+Expired reminder notices remain visible until clicked. Temporary status notices
+cannot replace them.
 
 | Default binding | Action | Meaning |
 |---|---|---|
@@ -17,5 +17,5 @@ Battery information comes from `/sys/class/power_supply`. On desktops without
 a battery, the notice reports that battery status is unavailable.
 
 Shells may subscribe to the IPC `ui` event stream to replace these surfaces and
-the bindings overlay. The built-in windows remain the automatic fallback when
-there is no UI subscriber.
+the bindings overlay. skarwm draws the built-in windows when no UI subscriber
+exists.

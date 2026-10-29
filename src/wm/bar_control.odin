@@ -10,11 +10,14 @@ import x11 "../x11"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:sys/posix"
+import "core:time"
 
 BAR_CONFIG_ATOM :: "_SKARWM_BAR_CONFIG"
 BAR_BLOCKS_ATOM :: "_SKARWM_BAR_BLOCKS"
 BAR_FONT_ATOM :: "_SKARWM_BAR_FONT"
 BAR_CONFIG_VERSION :: u32(3)
+BAR_RESTART_DELAY :: time.Second
 
 bar_write_escaped :: proc(builder: ^strings.Builder, value: string) {
     for byte in transmute([]u8)value {
@@ -146,6 +149,49 @@ bar_publish_blocks :: proc() {
     )
 }
 
+bar_start_managed :: proc() {
+    executable := "skarwm-bar"
+    env_buf: [1024]u8
+    if configured := os.get_env_buf(env_buf[:], "SKARWM_BAR"); configured != "" {
+        executable = configured
+    } else if os.exists("build/skarwm-bar") {
+        executable = "build/skarwm-bar"
+    }
+    command := fmt.aprintf("%q --managed", executable)
+    g_wm.bar_managed_pid = process.Spawn_Tracked(command)
+    delete(command)
+    if g_wm.bar_managed_pid > 0 {
+        g_wm.bar_restart_due = {}
+    } else {
+        g_wm.bar_restart_due = time.tick_add(time.tick_now(), BAR_RESTART_DELAY)
+    }
+}
+
+bar_run_due :: proc() {
+    if g_wm.m == nil { return }
+    now := time.tick_now()
+    if g_wm.bar_managed_pid > 0 {
+        waited := posix.waitpid(g_wm.bar_managed_pid, nil, {.NOHANG})
+        if waited == 0 { return }
+        g_wm.bar_managed_pid = 0
+        if g_wm.m.Cfg.BarEnabled {
+            g_wm.bar_restart_due = time.tick_add(now, BAR_RESTART_DELAY)
+        }
+    }
+    if !g_wm.m.Cfg.BarEnabled { g_wm.bar_restart_due = {}; return }
+    if g_wm.bar_restart_due != {} && time.tick_diff(g_wm.bar_restart_due, now) < 0 { return }
+    bar_start_managed()
+}
+
+bar_poll_timeout_ms :: proc() -> i32 {
+    if g_wm.bar_managed_pid > 0 { return 1000 }
+    if g_wm.m == nil || !g_wm.m.Cfg.BarEnabled { return -1 }
+    if g_wm.bar_restart_due == {} { return 0 }
+    remaining := time.tick_diff(time.tick_now(), g_wm.bar_restart_due)
+    if remaining <= 0 { return 0 }
+    return i32((i64(remaining) + i64(time.Millisecond) - 1) / i64(time.Millisecond))
+}
+
 bar_sync_config :: proc() {
     if g_wm.conn == nil || g_wm.m == nil { return }
     cfg := &g_wm.m.Cfg
@@ -166,31 +212,13 @@ bar_sync_config :: proc() {
     bar_publish_blocks()
     x11.xcb_flush(g_wm.conn)
 
-    if !cfg.BarEnabled {
-        // A managed bar observes the root property and exits. Mark it stopped
-        // so a later enable can launch a fresh process.
-        g_wm.bar_managed_started = false
-        return
-    }
-    if g_wm.bar_managed_started { return }
-
-    executable := "skarwm-bar"
-    env_buf: [1024]u8
-    if configured := os.get_env_buf(env_buf[:], "SKARWM_BAR"); configured != "" {
-        executable = configured
-    } else if os.exists("build/skarwm-bar") {
-        executable = "build/skarwm-bar"
-    }
-    command := fmt.aprintf("%q --managed", executable)
-    process.Spawn(command)
-    delete(command)
-    g_wm.bar_managed_started = true
+    if !cfg.BarEnabled { return }
+    if g_wm.bar_managed_pid <= 0 && g_wm.bar_restart_due == {} { bar_start_managed() }
 }
 
 bar_shutdown :: proc() {
-    if g_wm.conn == nil || !g_wm.bar_managed_started { return }
+    if g_wm.conn == nil || g_wm.bar_managed_pid <= 0 { return }
     values := []u32{BAR_CONFIG_VERSION, 0, 0, 0}
     x11.set_prop32(g_wm.conn, g_wm.root, atom(BAR_CONFIG_ATOM), atom("CARDINAL"), values)
     x11.xcb_flush(g_wm.conn)
-    g_wm.bar_managed_started = false
 }

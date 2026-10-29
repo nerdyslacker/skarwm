@@ -4,28 +4,27 @@
 
 `Super+g` / `layout_next` cycles the active workspace through six layouts:
 
-- **Scrolling Tile** — the original hybrid tiled-column layout: up to two
+- **Scrolling Tile**: the original hybrid tiled-column layout. Up to two
   columns tile the work area and additional columns continue in a scrollable
   strip.
-- **Vertical Scrolling Tile** — the transposed scroller: one selected row uses
+- **Vertical Scrolling Tile**: the transposed scroller. One selected row uses
   the work area while its previous/next rows peek from the top and bottom.
   Members grouped in one row tile left-to-right, and the vertical viewport is
   remembered per workspace.
-- **Game Mode** — the first tiled group stays anchored to 75% of the work area.
+- **Game Mode**: the first tiled group stays anchored to 75% of the work area.
   Later groups form a narrow companion rail on the right, with up to three
   visible at once and any overflow available through vertical scrolling. The
   anchor and each companion retain their own stacked or tabbed arrangement.
-- **Dwindle/Fibonacci** — all tiled windows recursively split the remaining
+- **Dwindle/Fibonacci**: all tiled windows recursively split the remaining
   work area, alternating left/right and top/bottom axes. It never scrolls.
-- **Monocle** — the focused tiled window fills the work area; the others are
+- **Monocle**: the focused tiled window fills the work area; the others are
   parked off-screen until focused.
-- **Floating** — all current tiled windows become floating, and new windows
-  open floating until another workspace layout is selected. Automatically
-  floated windows start at slightly offset, fully visible positions instead of
-  overlapping exactly.
+- **Floating**: all current tiled windows become floating, and new windows
+  open floating until another workspace layout is selected. skarwm offsets new
+  floating windows and keeps them inside the work area.
 
-The choice belongs to the workspace, survives workspace switches, and applies
-automatically to newly opened windows. Use `layout_scrolling_tile`,
+skarwm stores the layout per workspace and applies it to new windows. Use
+`layout_scrolling_tile`,
 `layout_vertical_scroller`, `layout_game`, `layout_dwindle` (also
 `layout_fibonacci`), or
 `layout_monocle` to select one directly; `layout_floating` selects
@@ -42,9 +41,9 @@ only the companion rail; the anchor never moves.
 A window floated this way remains floating when the workspace enters and later
 leaves its all-window Floating mode.
 
-Workspace-wide Floating places and keeps its automatically floated windows
-inside the reserved work area, including gaps beside left/right bars. Manually
-positioned floating windows may still overlap panels intentionally.
+In workspace-wide Floating, skarwm keeps windows inside the reserved work area,
+including gaps beside left/right bars. You can move a floating window over a
+panel.
 
 ## Columns
 

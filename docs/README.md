@@ -1,18 +1,18 @@
 # skarwm documentation
 
-- [Configuration](configuration.md) — rc discovery, settings, commands, rules, and reloads.
-- [Built-in bar](bar.md) — optional dock process, workspace/script blocks, XEmbed tray, and lifecycle.
-- [Layouts and windows](layouts-and-windows.md) — columns, stacks, tabs, floating, maximize, fullscreen, and resizing.
-- [Scrolling and drag/drop](scrolling-and-drag-drop.md) — the horizontal strip, edge previews, and pointer controls.
-- [Workspaces and outputs](workspaces-and-outputs.md) — dynamic workspaces and RandR monitors.
-- [Virtual screens](virtual-screens.md) — ultrawide split setup, commands, keybindings, and behavior.
-- [Scratchpads and overview](scratchpads-and-overview.md) — session registers and shell-driven overview events.
-- [Appearance and animation](appearance-and-animation.md) — gaps, borders, rounded corners, and transitions.
-- [Notices](notices.md) — temporary date/time and battery overlays without a bar.
-- [Reminders](reminders.md) — countdown reminders, editor controls, and shortcuts.
-- [X11 integration](x11-integration.md) — EWMH/ICCCM, docks, focus, and window rules.
-- [IPC reference](ipc.md) — `skarwm-msg`, queries, commands, and subscriptions.
-- [Architecture](architecture.md) — packages, dependency direction, and source ownership.
+- [Configuration](configuration.md): rc discovery, settings, commands, rules, and reloads
+- [Built-in bar](bar.md): dock process, blocks, XEmbed tray, and lifecycle
+- [Layouts and windows](layouts-and-windows.md): columns, tabs, floating, and resizing
+- [Scrolling and drag/drop](scrolling-and-drag-drop.md): strip, edge previews, and pointer controls
+- [Workspaces and outputs](workspaces-and-outputs.md): workspaces and RandR monitors
+- [Virtual screens](virtual-screens.md): ultrawide splits, commands, and keybindings
+- [Scratchpads and overview](scratchpads-and-overview.md): registers and shell-driven overview events
+- [Appearance and animation](appearance-and-animation.md): gaps, borders, corners, and transitions
+- [Notices](notices.md): date, time, and battery overlays
+- [Reminders](reminders.md): countdown editor and shortcuts
+- [X11 integration](x11-integration.md): EWMH/ICCCM, docks, focus, and rules
+- [IPC reference](ipc.md): `skarwm-msg`, queries, commands, and subscriptions
+- [Architecture](architecture.md): packages, dependencies, and source ownership
 
 The bindings shown here are the built-in defaults. The core bindings also
 appear in [`assets/example.rc`](../assets/example.rc), which includes numbered

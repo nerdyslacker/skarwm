@@ -16,6 +16,7 @@ import x11 "../x11"
 import "core:time"
 import "core:strings"
 import "core:fmt"
+import "core:sys/posix"
 
 Tiled_Resize_State :: struct {
     Active: bool,
@@ -71,7 +72,8 @@ Wm :: struct {
     preview_hover_due: time.Tick,
     preserve_external_focus: bool,
     rendering: rendering.State,
-    bar_managed_started: bool,
+    bar_managed_pid: posix.pid_t,
+    bar_restart_due: time.Tick,
     bar_blocks: [dynamic]Raw_Bar_Block,
     virtual_screens: [dynamic]Virtual_Screen_Profile,
     workspace_layouts: [dynamic]Workspace_Layout_Rule,

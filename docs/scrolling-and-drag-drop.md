@@ -26,9 +26,9 @@ activated.
 
 ## Drag and drop
 
-Hold `Super` and left-drag a tiled window. The tiled window under the pointer—or
-the nearest visible one—becomes the drop anchor. An overlay covers the active half
-of that target:
+Hold `Super` and left-drag a tiled window. The window under the pointer becomes
+the drop anchor. If the pointer is not over a tiled window, skarwm uses the
+nearest visible one. An overlay covers the active half of that target:
 
 - Left/right inserts a horizontal column immediately before/after the target.
 - Top/bottom inserts the window immediately above/below the target in its

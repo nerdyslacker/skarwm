@@ -4,10 +4,9 @@ skarwm listens on a Unix socket at `$XDG_RUNTIME_DIR/skarwm.sock`, falling back
 to `/tmp/skarwm-<uid>.sock`. Set `SKARWM_SOCKET` for an explicit path in both
 the WM and `skarwm-msg`.
 
-The transport uses i3's 14-byte `i3-ipc` frame header. This lets consumers use
-the standard workspace/output request and subscription shapes while keeping
-the skarwm-specific surface deliberately small. The protocol identifier
-returned by `get-version` is `i3-ipc+skarwm-v1`.
+skarwm frames messages with i3's 14-byte `i3-ipc` header. It preserves the
+standard workspace/output requests and subscriptions, then adds a small custom
+surface. `get-version` returns the protocol identifier `i3-ipc+skarwm-v1`.
 
 ## Commands
 
@@ -90,7 +89,7 @@ skarwm-msg get-version
 
 `get-workspaces` and `get-outputs` use i3-compatible message types and object
 fields. `get-workspaces` includes every output; `visible` means current on its
-output, while `focused` additionally requires that output to be active.
+output; `focused` requires that output to be active.
 `get-version` reports the resolved active configuration path in the standard
 `loaded_config_file_name` field, or null when built-in defaults are active.
 Workspace objects add a `windows` count so a shell can distinguish an empty

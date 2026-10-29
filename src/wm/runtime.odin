@@ -262,6 +262,10 @@ event_loop :: proc() {
         if timeout < 0 || (config_timeout >= 0 && config_timeout < timeout) {
             timeout = config_timeout
         }
+        bar_timeout := bar_poll_timeout_ms()
+        if timeout < 0 || (bar_timeout >= 0 && bar_timeout < timeout) {
+            timeout = bar_timeout
+        }
         if posix.poll(raw_data(pfds), posix.nfds_t(len(pfds)), timeout) < 0 {
             delete(pfds) // EINTR or a signal: repoll
             continue
@@ -318,6 +322,7 @@ event_loop :: proc() {
         preview_hover_run_due()
         randr_run_due()
         cfg_watch_run_due()
+        bar_run_due()
     }
 }
 

@@ -7,7 +7,7 @@ import logger "../log"
 // Everything skarwm spawns goes through `/bin/sh -c`, so bindings and the rc
 // config can use ordinary shell syntax ("kitty", "foot &", "notify-send …").
 //
-// Process handling uses core's posix package. A double fork is used:
+// Ordinary process handling uses core's posix package and a double fork:
 // the middle child exits at once and the running grandchild is reparented to
 // init(1), which reaps it — so the WM never needs SIGCHLD handling and never
 // accumulates zombies. The grandchild becomes a session leader with stdio on
@@ -46,6 +46,24 @@ Spawn :: proc(cmdline: string) {
     }
     // reap the short-lived middle child; the running child is now init's problem
     posix.waitpid(pid, nil, {})
+}
+
+// Spawn_Tracked keeps the child attached so its owner can detect and restart it.
+Spawn_Tracked :: proc(cmdline: string) -> posix.pid_t {
+    if len(cmdline) == 0 || len(cmdline) >= len(sh_buf) {
+        logger.Warn("ignoring spawn (empty or too long)")
+        return 0
+    }
+    copy(sh_buf[:len(cmdline)], cmdline)
+    sh_buf[len(cmdline)] = 0
+
+    pid := posix.fork()
+    if pid < 0 {
+        logger.Error("fork failed:", posix.errno())
+        return 0
+    }
+    if pid == 0 { child_exec_sh() }
+    return pid
 }
 
 child_exec_sh :: proc() {
