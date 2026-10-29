@@ -37,6 +37,7 @@ Ipc_Client :: struct {
     reader:  c.Ipc_Reader, // partial-frame reassembly (owns its buffer)
     out:     [dynamic]u8, // bytes queued for the socket
     off:     int,         // out[off:] is still unsent
+    closing: bool,
 }
 
 Ipc_State :: struct {
@@ -46,6 +47,9 @@ Ipc_State :: struct {
 }
 
 g_ipc := Ipc_State{listen = -1}
+
+IPC_READS_PER_PASS :: 16
+IPC_MAX_QUEUED_BYTES :: 1 << 20
 
 // ---------------------------------------------------------------------------
 // listener lifecycle
@@ -74,10 +78,13 @@ ipc_start :: proc() {
         }
     }
 
-    // Remove a socket left behind by a dead instance (the path check below
-    // would otherwise fail with EADDRINUSE).
+    // Remove only a stale socket that belongs to this user.
+    if !ipc_unlink_owned_socket(path) {
+        delete(path)
+        return
+    }
+
     buf: [256]u8
-    posix.unlink(nul_path(buf[:], path))
 
     fd := posix.socket(.UNIX, .STREAM)
     if fd < 0 {
@@ -148,6 +155,26 @@ ipc_sock_path :: proc() -> (path: string, ok: bool) {
     return strings.clone(strings.to_string(sb)), true
 }
 
+ipc_unlink_owned_socket :: proc(path: string) -> bool {
+    buf: [256]u8
+    cpath := nul_path(buf[:], path)
+    status: posix.stat_t
+    if posix.lstat(cpath, &status) != .OK {
+        if posix.errno() == .ENOENT { return true }
+        logger.Warn("ipc: cannot inspect", path, ":", posix.errno(), "— IPC disabled")
+        return false
+    }
+    if !posix.S_ISSOCK(status.st_mode) || status.st_uid != posix.geteuid() {
+        logger.Warn("ipc: refusing to remove non-socket or unowned path:", path)
+        return false
+    }
+    if posix.unlink(cpath) != .OK {
+        logger.Warn("ipc: cannot remove stale socket", path, ":", posix.errno())
+        return false
+    }
+    return true
+}
+
 // ipc_stop tears the server down: every client socket, the listener and the
 // socket file. Runs at exit (registered after cleanup_all, so it runs first
 // while the model is still alive).
@@ -156,8 +183,7 @@ ipc_stop :: proc() {
     delete(g_ipc.clients)
     if g_ipc.listen >= 0 { posix.close(g_ipc.listen) }
     if g_ipc.path != "" {
-        buf: [256]u8
-        posix.unlink(nul_path(buf[:], g_ipc.path))
+        ipc_unlink_owned_socket(g_ipc.path)
         delete(g_ipc.path)
     }
     g_ipc = {}
@@ -172,8 +198,7 @@ ipc_listener_down :: proc() {
         g_ipc.listen = -1
     }
     if g_ipc.path != "" {
-        buf: [256]u8
-        posix.unlink(nul_path(buf[:], g_ipc.path))
+        ipc_unlink_owned_socket(g_ipc.path)
         delete(g_ipc.path)
         g_ipc.path = ""
     }
@@ -229,7 +254,7 @@ ipc_accept :: proc() {
 // oversized declared length drop the connection, i3-style).
 ipc_service_client :: proc(cl: ^Ipc_Client) -> bool {
     buf: [4096]u8
-    for {
+    for _ in 0 ..< IPC_READS_PER_PASS {
         n := posix.recv(cl.fd, &buf, cc.size_t(len(buf)), {})
         if n > 0 {
             frames, good := c.ipc_reader_feed(&cl.reader, buf[:n])
@@ -252,6 +277,7 @@ ipc_service_client :: proc(cl: ^Ipc_Client) -> bool {
         if err == .EAGAIN { return true }
         return false
     }
+    return true
 }
 
 // ipc_handle_frame answers one request frame. Replies are queued before the
@@ -513,8 +539,19 @@ ipc_drop_client :: proc(cl: ^Ipc_Client) {
 // for the call. A failed flush does not close the client here — the socket
 // error surfaces through poll (.ERR) and the next service pass drops it.
 ipc_send :: proc(cl: ^Ipc_Client, typ: c.Ipc_Type, payload: []byte) {
+    if cl.closing { return }
     frame := c.ipc_encode(typ, payload)
     defer delete(frame)
+    if len(cl.out) - cl.off + len(frame) > IPC_MAX_QUEUED_BYTES {
+        cl.closing = true
+        return
+    }
+    if cl.off > 0 {
+        pending := len(cl.out) - cl.off
+        copy(cl.out[:pending], cl.out[cl.off:])
+        resize(&cl.out, pending)
+        cl.off = 0
+    }
     append(&cl.out, ..frame)
     ipc_flush_client(cl)
 }

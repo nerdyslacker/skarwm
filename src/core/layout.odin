@@ -946,6 +946,17 @@ Edge_Drop_Target_At_Point :: proc(
     return best
 }
 
+Decoration_Drop_Target_At_Point :: proc(
+    m: ^Manager,
+    x, y: i32,
+    dragged: ^Client,
+    current: Drop_Target = {},
+) -> Drop_Target {
+    target := Drop_Target_At_Point(m, x, y, dragged)
+    if target.Kind != .None { return target }
+    return Edge_Drop_Target_At_Point(m, x, y, dragged, current)
+}
+
 // Tabbed_Drop_Target_At_Point resolves only an actual tiled window beneath the
 // pointer. Unlike directional drops it does not choose a nearby edge: the
 // complete destination window is the target and the dragged client is placed

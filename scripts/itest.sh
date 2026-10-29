@@ -150,6 +150,21 @@ sleep 1.2
 export DISPLAY="$DISP"
 xwininfo -root >/dev/null 2>&1 || die_display
 
+# A bad explicit socket path must never delete user data.
+socket_marker="${TMPDIR:-/tmp}/skarwm-itest-regular-file"
+printf '%s\n' keep >"$socket_marker"
+SKARWM_SOCKET="$socket_marker" SKARWM_CONFIG=/dev/null SKARWM_BAR=/bin/true ./build/skarwm >"$WM_LOG" 2>&1 &
+unsafe_socket_wm_pid=$!
+sleep 0.2
+kill "$unsafe_socket_wm_pid" 2>/dev/null || true
+wait "$unsafe_socket_wm_pid" 2>/dev/null || true
+if [ "$(cat "$socket_marker" 2>/dev/null)" = keep ]; then
+  pass "IPC refuses to replace a regular file"
+else
+  fail "IPC regular-file protection"
+fi
+rm -f "$socket_marker"
+
 # The shipped example must load from the preferred skarwm.rc discovery path,
 # even when the legacy filename is present beside it.
 mkdir -p "$XDGC/skarwm"

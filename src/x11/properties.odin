@@ -1,5 +1,7 @@
 package x11
 
+PROPERTY_MAX_BYTES :: u64(1 << 20)
+
 // Atom interning + property read helpers over the raw xcb layer.
 //
 // libxcb's icccm/ewmh helper headers are not installed on the target,
@@ -64,6 +66,10 @@ get_prop :: proc(c: ^Connection, window: u32, prop: u32, wanted_type: u32 = 0) -
         }
         nbytes := int(xcb_get_property_value_length(reply))
         if nbytes < 0 {
+            free_libc(reply)
+            return nil, false
+        }
+        if u64(nbytes) + u64(reply.bytes_after) > PROPERTY_MAX_BYTES {
             free_libc(reply)
             return nil, false
         }

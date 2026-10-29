@@ -110,7 +110,12 @@ Show_Drop :: proc(state: ^State, m: ^c.Manager, target: c.Drop_Target) {
 }
 
 Update_Drop :: proc(state: ^State, m: ^c.Manager, mouse_client: ^c.Client, x, y: i32) {
-    target := c.Drop_Target_At_Point(m, x, y, mouse_client, state.DropTarget)
+    target := c.Edge_Drop_Target_At_Point(m, x, y, mouse_client, state.DropTarget)
+    Update_Drop_Target(state, m, target)
+}
+
+Update_Decoration_Drop :: proc(state: ^State, m: ^c.Manager, mouse_client: ^c.Client, x, y: i32) {
+    target := c.Decoration_Drop_Target_At_Point(m, x, y, mouse_client, state.DropTarget)
     Update_Drop_Target(state, m, target)
 }
 

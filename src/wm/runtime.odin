@@ -293,8 +293,10 @@ event_loop :: proc() {
         to_drop: [dynamic]^Ipc_Client
         for i < len(pfds) {
             pd := pfds[i]
-            if pd.revents != {} {
-                cl := g_ipc.clients[i - base]
+            cl := g_ipc.clients[i - base]
+            if cl.closing {
+                append(&to_drop, cl)
+            } else if pd.revents != {} {
                 alive := true
                 if .IN in pd.revents { alive = ipc_service_client(cl) }
                 if alive && (.HUP in pd.revents || .ERR in pd.revents || .NVAL in pd.revents) {

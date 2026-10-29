@@ -170,7 +170,11 @@ if [ "$client_floating" = "true" ]; then pass "ordinary floating drag near edge 
 # first-column target and tiles the lone floating window on release.
 read -r solo_x solo_y solo_w solo_h < <(xwininfo -id "$frame" 2>/dev/null | awk '/Absolute upper-left X:/{x=$4}/Absolute upper-left Y:/{y=$4}/Width:/{w=$2}/Height:/{h=$2}END{print x,y,w,h}')
 xdotool windowactivate --sync "$client" >/dev/null 2>&1
-xdotool mousemove $((solo_x+120)) $((solo_y+12)) keydown Alt_L mousedown 1 mousemove 20 400 mouseup 1 keyup Alt_L >/dev/null 2>&1
+xdotool mousemove $((solo_x+120)) $((solo_y+12)) keydown Alt_L mousedown 1 >/dev/null 2>&1
+sleep 0.1
+xdotool mousemove 100 400 >/dev/null 2>&1
+sleep 0.1
+xdotool mouseup 1 keyup Alt_L >/dev/null 2>&1
 sleep 0.2
 windows=$(./build/skarwm-msg get-windows 2>/dev/null)
 client_floating=$(printf '%s\n' "$windows" | sed -nE 's/.*"id":'"$client"'[^}]*"floating":(true|false).*/\1/p')

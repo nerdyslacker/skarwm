@@ -1462,7 +1462,7 @@ decoration_activate_drag :: proc(cl: ^c.Client, root_x, root_y: i32) {
     g_wm.mouse_start = cl.FloatingRect
     if cl.Floating {
         if g_wm.mouse_decoration_tile_drag {
-            ui.Update_Drop(&g_wm.ui, g_wm.m, cl, root_x, root_y)
+            ui.Update_Decoration_Drop(&g_wm.ui, g_wm.m, cl, root_x, root_y)
         }
         return
     }
@@ -1471,7 +1471,7 @@ decoration_activate_drag :: proc(cl: ^c.Client, root_x, root_y: i32) {
     show_tiled_drag_preview(cl, root_x, root_y)
     raise_focused()
     if g_wm.mouse_decoration_tile_drag {
-        ui.Update_Drop(&g_wm.ui, g_wm.m, cl, root_x, root_y)
+        ui.Update_Decoration_Drop(&g_wm.ui, g_wm.m, cl, root_x, root_y)
     }
 }
 
@@ -1633,7 +1633,7 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
                 ui.Update_Tabbed_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
             } else if g_wm.mouse_decoration_drag {
                 if g_wm.mouse_decoration_tile_drag {
-                    ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+                    ui.Update_Decoration_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
                 }
             } else {
                 ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
@@ -1677,7 +1677,7 @@ on_motion :: proc(ev: ^x11.Motion_Notify_Event) {
                 ui.Update_Tabbed_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
             } else if g_wm.mouse_decoration_drag {
                 if g_wm.mouse_decoration_tile_drag {
-                    ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
+                    ui.Update_Decoration_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
                 }
             } else {
                 ui.Update_Drop(&g_wm.ui, g_wm.m, g_wm.mouse_client, i32(ev.root_x), i32(ev.root_y))
@@ -1725,7 +1725,7 @@ on_motion :: proc(ev: ^x11.Motion_Notify_Event) {
     cl.FloatingRect = r
     reflow_immediate()
     if g_wm.mouse_decoration_drag && g_wm.mouse_decoration_tile_drag && !g_wm.mouse_resize {
-        ui.Update_Drop(&g_wm.ui, g_wm.m, cl, i32(ev.root_x), i32(ev.root_y))
+        ui.Update_Decoration_Drop(&g_wm.ui, g_wm.m, cl, i32(ev.root_x), i32(ev.root_y))
     }
 }
 
@@ -1786,9 +1786,15 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
         } else if !g_wm.mouse_decoration_drag || g_wm.mouse_decoration_tile_drag {
             // Re-resolve the destination at release in case the final motion
             // event arrived just before the button event.
-            target = c.Drop_Target_At_Point(
-                g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, target,
-            )
+            if g_wm.mouse_decoration_drag {
+                target = c.Decoration_Drop_Target_At_Point(
+                    g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, target,
+                )
+            } else {
+                target = c.Edge_Drop_Target_At_Point(
+                    g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, target,
+                )
+            }
             moved = c.Move_Client_To_Drop(g_wm.m, cl, target)
         }
         if moved {
@@ -1818,7 +1824,7 @@ on_button_release :: proc(ev: ^x11.Button_Press_Event) {
         target := g_wm.ui.DropTarget
         ui.Hide_Drop(&g_wm.ui)
         if g_wm.mouse_decoration_tile_drag {
-            target = c.Drop_Target_At_Point(
+            target = c.Decoration_Drop_Target_At_Point(
                 g_wm.m, i32(ev.root_x), i32(ev.root_y), cl, target,
             )
             decoration_tile_floating_drag(cl, target)

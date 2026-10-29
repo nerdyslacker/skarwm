@@ -1198,7 +1198,7 @@ test_single_floater_drop_target :: proc() {
     c.Arrange_All(m)
 
     out := c.Active_Output(m)
-    target := c.Drop_Target_At_Point(
+    target := c.Decoration_Drop_Target_At_Point(
         m, out.Geom.X + 10, out.Geom.Y + out.Geom.H / 2, floater,
     )
     eq(target.Kind, c.Drop_Kind.New_Column,
