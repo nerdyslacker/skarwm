@@ -1518,7 +1518,7 @@ decoration_button_press :: proc(cl: ^c.Client, ev: ^x11.Button_Press_Event) {
             else { ui.Show_Decoration_Audio_Popup(&g_wm.ui, g_wm.m, cl) }
         case .Audio_Slider:
             if volume, ok := ui.Decoration_Audio_Value_At(&g_wm.ui, g_wm.m, ev.event, i32(ev.event_x)); ok {
-                audio_preview(cl, volume, false)
+                audio_preview(cl, volume, false, false)
                 g_wm.audio_pointer_client = cl
                 g_wm.audio_pointer_xid = ev.event
             }
@@ -1570,7 +1570,7 @@ decoration_audio_popup_press :: proc(cl: ^c.Client, ev: ^x11.Button_Press_Event)
     }
     if hit != .Audio_Slider { return }
     if volume, ok := ui.Decoration_Audio_Value_At(&g_wm.ui, g_wm.m, ev.event, i32(ev.event_x)); ok {
-        audio_preview(cl, volume, false)
+        audio_preview(cl, volume, false, false)
         g_wm.audio_pointer_client = cl
         g_wm.audio_pointer_xid = ev.event
     }
@@ -1723,7 +1723,7 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
 on_motion :: proc(ev: ^x11.Motion_Notify_Event) {
     if cl := g_wm.audio_pointer_client; cl != nil {
         if volume, ok := ui.Decoration_Audio_Value_At(&g_wm.ui, g_wm.m, g_wm.audio_pointer_xid, i32(ev.event_x)); ok {
-            audio_preview(cl, volume, false)
+            audio_preview(cl, volume, false, false)
         }
         return
     }
@@ -1853,6 +1853,9 @@ decoration_tile_floating_drag :: proc(cl: ^c.Client, target: c.Drop_Target) -> b
 
 on_button_release :: proc(ev: ^x11.Button_Press_Event) {
     if g_wm.audio_pointer_client != nil {
+        if model := audio_model_for_window(g_wm.audio_pointer_client.Xid); model != nil {
+            audio_preview(g_wm.audio_pointer_client, model.Volume, false, true)
+        }
         g_wm.audio_pointer_client = nil
         g_wm.audio_pointer_xid = 0
         x11.xcb_ungrab_pointer(g_wm.conn, x11.CURRENT_TIME)

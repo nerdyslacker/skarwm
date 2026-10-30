@@ -88,9 +88,39 @@ main :: proc() {
     }
     ok(audio.Match_Window(unnamed, duplicate_windows) == 0, "multi-window process is ambiguous")
     ok(audio.Match_Window(unnamed, windows) == 10, "unique verified process match")
+    child := audio.Stream_Candidate{Index = 2, Process = audio.Verified_Process{PID=101, Start_Time=56, Executable="cliamp"}, Valid=true}
+    child.Ancestors[0] = {PID=proc_a.PID, Start_Time=proc_a.Start_Time}
+    child.Ancestor_Count = 1
+    ok(audio.Match_Window(child, windows) == 10, "verified terminal child maps to its terminal window")
+    ok(audio.Match_Window(child, duplicate_windows) == 0, "terminal child remains hidden when one ancestor owns multiple windows")
+    child.Ancestors[0].Start_Time += 1
+    ok(audio.Match_Window(child, windows) == 0, "stale terminal ancestor is rejected")
 
     stream_a := audio.Stream{Index = 1, Channels = 2, Volume_Writable = true}
     stream_a.Volume[0], stream_a.Volume[1] = 32_768, 32_768
+    balanced := audio.Stream{Index = 9, Channels = 2, Volume_Writable = true}
+    balanced.Volume[0], balanced.Volume[1] = 16_384, 32_768
+    scaled, channels := audio.Scale_Stream_Volume(&balanced, 32_768, 65_536)
+    ok(channels == 2 && scaled[0] == 8_192 && scaled[1] == 16_384, "volume scaling preserves channel balance")
+    scaled, _ = audio.Scale_Stream_Volume(&balanced, 131_072, 32_768)
+    ok(scaled[0] == 32_768 && scaled[1] == 65_536, "volume scaling caps at 100 percent without flattening balance")
+    silent := audio.Stream{Index = 10, Channels = 2, Volume_Writable = true}
+    scaled, _ = audio.Scale_Stream_Volume(&silent, 32_768, 0)
+    ok(scaled[0] == 32_768 && scaled[1] == 32_768, "silent streams can be raised without division by zero")
+    queued: audio.State
+    queued.Enabled, queued.Available, queued.Connected = true, true, true
+    queued.Streams = make([dynamic]audio.Stream)
+    queued.Controls = make([dynamic]audio.Control)
+    append(&queued.Streams, audio.Stream{Index=9, Generation=4, Channels=2, Volume=balanced.Volume, Volume_Writable=true})
+    ok(audio.Queue_Stream_Volume(&queued, 9, 4, 32_768, 65_536, false), "drag update queues for the live stream generation")
+    ok(audio.Queue_Stream_Volume(&queued, 9, 4, 16_384, 32_768, true), "final drag update replaces the pending update")
+    ok(len(queued.Controls) == 1 && queued.Controls[0].Volume[0] == 4_096 && queued.Controls[0].Volume[1] == 8_192,
+       "coalesced drag updates retain relative channel levels")
+    ok(audio.Queue_Stream_Mute(&queued, 9, 4, true) && queued.Controls[0].Set_Mute, "mute shares the per-stream command queue")
+    ok(!audio.Queue_Stream_Volume(&queued, 9, 3, 0, 65_536, true), "stale stream generations cannot be controlled")
+    ok(audio.Poll_Timeout_Ms(&queued) >= 0, "pending controls wake the host poll loop")
+    delete(queued.Streams)
+    delete(queued.Controls)
     stream_b := audio.Stream{Index = 2, Channels = 2, Volume_Writable = true, Muted = true}
     stream_b.Volume[0], stream_b.Volume[1] = 65_536, 65_536
     streams := []audio.Stream{stream_a, stream_b}

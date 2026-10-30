@@ -61,6 +61,23 @@ Request :: struct {
     List: bool,
 }
 
+Control :: struct {
+    Index: u32,
+    Generation, Serial: u64,
+    Channels: u8,
+    Volume: [32]u32,
+    Set_Volume, Mute, Set_Mute: bool,
+    Due, Refresh_Due, Expires: time.Tick,
+}
+
+Control_Request :: struct {
+    Owner: ^State,
+    Context: ^Pulse_Context,
+    Epoch, Generation, Serial: u64,
+    Index: u32,
+    Volume: bool,
+}
+
 State :: struct {
     Enabled, Available, Connected: bool,
     Revision, Epoch, Serial, Next_Generation: u64,
@@ -73,11 +90,27 @@ State :: struct {
     Times: [dynamic]^Time_Event,
     Defers: [dynamic]^Defer_Event,
     Requests: [dynamic]^Request,
+    Controls: [dynamic]Control,
+    Control_Requests: [dynamic]^Control_Request,
     Poll_Events: [dynamic]^IO_Event,
     Reset_Pending: bool,
     Reconnect_Due: time.Tick,
     Reconnect_Delay_Ms: i32,
     Odin_Context: runtime.Context,
+}
+
+Scale_Stream_Volume :: proc(stream: ^Stream, target, reference: u32) -> (values: [32]u32, channels: u8) {
+    if stream == nil || stream.Channels == 0 { return }
+    channels = min(stream.Channels, u8(32))
+    capped_target := min(target, u32(65_536))
+    for i in 0 ..< int(channels) {
+        if reference == 0 { values[i] = capped_target }
+        else {
+            scaled := (u64(stream.Volume[i])*u64(capped_target)+u64(reference)/2)/u64(reference)
+            values[i] = u32(min(u64(65_536), scaled))
+        }
+    }
+    return
 }
 
 clone_cstring :: proc(value: cstring) -> string {
@@ -99,12 +132,71 @@ Clear_Streams :: proc(state: ^State) {
     for &stream in state.Streams { free_stream(&stream) }
     clear(&state.Streams)
     clear(&state.Versions)
+    clear(&state.Controls)
     state.Revision += 1
 }
 
 stream_index :: proc(state: ^State, index: u32) -> int {
     for stream, i in state.Streams { if stream.Index == index { return i } }
     return -1
+}
+
+control_index :: proc(state: ^State, index: u32) -> int {
+    for control, i in state.Controls { if control.Index == index { return i } }
+    return -1
+}
+
+remove_control :: proc(state: ^State, index: int) {
+    if index >= 0 && index < len(state.Controls) { unordered_remove(&state.Controls, index) }
+}
+
+Queue_Stream_Volume :: proc(state: ^State, index: u32, generation: u64, target, reference: u32, final: bool) -> bool {
+    if state == nil || !state.Connected { return false }
+    stream_i := stream_index(state, index)
+    if stream_i < 0 || state.Streams[stream_i].Generation != generation || !state.Streams[stream_i].Volume_Writable { return false }
+    i := control_index(state, index)
+    source := state.Streams[stream_i]
+    if i >= 0 && state.Controls[i].Generation == generation && state.Controls[i].Set_Volume {
+        source.Channels = state.Controls[i].Channels
+        copy(source.Volume[:], state.Controls[i].Volume[:])
+    }
+    values, channels := Scale_Stream_Volume(&source, target, reference)
+    if channels == 0 { return false }
+    if i < 0 {
+        append(&state.Controls, Control{Index=index, Generation=generation})
+        i = len(state.Controls)-1
+    } else if state.Controls[i].Generation != generation {
+        state.Controls[i] = Control{Index=index, Generation=generation}
+    }
+    control := &state.Controls[i]
+    control.Channels, control.Volume, control.Set_Volume = channels, values, true
+    control.Serial += 1
+    now := time.tick_now()
+    control.Due = now if final else time.tick_add(now, 16*time.Millisecond)
+    control.Refresh_Due = {}
+    control.Expires = time.tick_add(now, 2*time.Second)
+    return true
+}
+
+Queue_Stream_Mute :: proc(state: ^State, index: u32, generation: u64, muted: bool) -> bool {
+    if state == nil || !state.Connected { return false }
+    stream_i := stream_index(state, index)
+    if stream_i < 0 || state.Streams[stream_i].Generation != generation { return false }
+    i := control_index(state, index)
+    if i < 0 {
+        append(&state.Controls, Control{Index=index, Generation=generation})
+        i = len(state.Controls)-1
+    } else if state.Controls[i].Generation != generation {
+        state.Controls[i] = Control{Index=index, Generation=generation}
+    }
+    control := &state.Controls[i]
+    control.Mute, control.Set_Mute = muted, true
+    control.Serial += 1
+    now := time.tick_now()
+    control.Due = now
+    control.Refresh_Due = {}
+    control.Expires = time.tick_add(now, 2*time.Second)
+    return true
 }
 
 version_index :: proc(state: ^State, index: u32) -> int {
@@ -126,11 +218,41 @@ Note_Stream_Event :: proc(state: ^State, index: u32) -> u64 {
 }
 
 Remove_Stream :: proc(state: ^State, index: u32) {
+    remove_control(state, control_index(state, index))
     i := stream_index(state, index)
     if i < 0 { return }
     free_stream(&state.Streams[i])
     unordered_remove(&state.Streams, i)
     state.Revision += 1
+}
+
+apply_control_preview :: proc(state: ^State, stream: ^Stream) {
+    i := control_index(state, stream.Index)
+    if i < 0 { return }
+    live_i := stream_index(state, stream.Index)
+    if live_i < 0 || state.Streams[live_i].Generation != state.Controls[i].Generation {
+        remove_control(state, i)
+        return
+    }
+    control := &state.Controls[i]
+    if control.Set_Volume {
+        matched := stream.Channels == control.Channels
+        if matched {
+            for channel in 0 ..< int(control.Channels) {
+                if stream.Volume[channel] != control.Volume[channel] { matched = false; break }
+            }
+        }
+        if matched { control.Set_Volume = false }
+        else {
+            stream.Channels = control.Channels
+            copy(stream.Volume[:], control.Volume[:])
+        }
+    }
+    if control.Set_Mute {
+        if stream.Muted == control.Mute { control.Set_Mute = false }
+        else { stream.Muted = control.Mute }
+    }
+    if !control.Set_Volume && !control.Set_Mute { remove_control(state, i) }
 }
 
 Replace_Stream :: proc(state: ^State, stream: Stream) {
@@ -189,7 +311,9 @@ apply_info :: proc(request: ^Request, info: ^Pulse_Sink_Input_Info) {
     } else if info.index != request.Index || Stream_Event_Serial(state, info.index) != request.Serial {
         return
     }
-    Replace_Stream(state, stream_from_info(state, info))
+    stream := stream_from_info(state, info)
+    apply_control_preview(state, &stream)
+    Replace_Stream(state, stream)
 }
 
 sink_input_cb :: proc "c" (ctx: ^Pulse_Context, info: ^Pulse_Sink_Input_Info, eol: i32, userdata: rawptr) {
@@ -220,6 +344,75 @@ start_request :: proc(state: ^State, index: u32, list: bool) {
         return
     }
     state.Symbols.operation_unref(operation)
+}
+
+finish_control_request :: proc(request: ^Control_Request, success: bool) {
+    if request == nil || request.Owner == nil { return }
+    state := request.Owner
+    for pending, i in state.Control_Requests {
+        if pending == request { unordered_remove(&state.Control_Requests, i); break }
+    }
+    if !success && request.Context == state.Context && request.Epoch == state.Epoch {
+        i := control_index(state, request.Index)
+        if i >= 0 && state.Controls[i].Generation == request.Generation && state.Controls[i].Serial == request.Serial {
+            if request.Volume { state.Controls[i].Set_Volume = false }
+            else { state.Controls[i].Set_Mute = false }
+            if !state.Controls[i].Set_Volume && !state.Controls[i].Set_Mute { remove_control(state, i) }
+            start_request(state, request.Index, false)
+        }
+    }
+    free(request)
+}
+
+control_success_cb :: proc "c" (ctx: ^Pulse_Context, success: i32, userdata: rawptr) {
+    request := (^Control_Request)(userdata)
+    if request == nil { return }
+    context = request.Owner.Odin_Context
+    finish_control_request(request, success != 0)
+}
+
+send_control :: proc(state: ^State, control: Control, volume: bool) {
+    request := new(Control_Request)
+    request^ = {Owner=state, Context=state.Context, Epoch=state.Epoch, Generation=control.Generation,
+                Serial=control.Serial, Index=control.Index, Volume=volume}
+    append(&state.Control_Requests, request)
+    operation: ^Pulse_Operation
+    if volume {
+        value := Pulse_CVolume{channels=control.Channels, values=control.Volume}
+        operation = state.Symbols.context_set_sink_input_volume(state.Context, control.Index, &value, control_success_cb, request)
+    } else {
+        operation = state.Symbols.context_set_sink_input_mute(state.Context, control.Index, 1 if control.Mute else 0, control_success_cb, request)
+    }
+    if operation == nil { finish_control_request(request, false); return }
+    state.Symbols.operation_unref(operation)
+}
+
+run_controls :: proc(state: ^State, now: time.Tick) {
+    if !state.Connected || state.Context == nil { return }
+    for i := len(state.Controls)-1; i >= 0; i -= 1 {
+        control := state.Controls[i]
+        stream_i := stream_index(state, control.Index)
+        if stream_i < 0 || state.Streams[stream_i].Generation != control.Generation {
+            remove_control(state, i)
+            continue
+        }
+        if control.Expires != {} && time.tick_diff(control.Expires, now) >= 0 {
+            start_request(state, control.Index, false)
+            remove_control(state, i)
+            continue
+        }
+        if control.Due != {} && time.tick_diff(control.Due, now) >= 0 {
+            if control.Set_Volume { send_control(state, control, true) }
+            if control.Set_Mute { send_control(state, control, false) }
+            if i < len(state.Controls) && state.Controls[i].Index == control.Index {
+                state.Controls[i].Due = {}
+                state.Controls[i].Refresh_Due = time.tick_add(now, 250*time.Millisecond)
+            }
+        } else if control.Refresh_Due != {} && time.tick_diff(control.Refresh_Due, now) >= 0 {
+            start_request(state, control.Index, false)
+            state.Controls[i].Refresh_Due = time.tick_add(now, 250*time.Millisecond)
+        }
+    }
 }
 
 subscribe_cb :: proc "c" (ctx: ^Pulse_Context, event_type: i32, index: u32, userdata: rawptr) {
@@ -362,6 +555,8 @@ Init :: proc(state: ^State, enabled: bool) -> bool {
     state.Times = make([dynamic]^Time_Event, 0, 4)
     state.Defers = make([dynamic]^Defer_Event, 0, 4)
     state.Requests = make([dynamic]^Request, 0, 4)
+    state.Controls = make([dynamic]Control, 0, 4)
+    state.Control_Requests = make([dynamic]^Control_Request, 0, 4)
     state.Poll_Events = make([dynamic]^IO_Event, 0, 4)
     init_api(state)
     state.Available = load_pulse(&state.Symbols)
@@ -388,6 +583,12 @@ disconnect :: proc(state: ^State) {
             unordered_remove(&state.Requests, i)
         }
     }
+    for i := len(state.Control_Requests)-1; i >= 0; i -= 1 {
+        if state.Control_Requests[i].Context == old_context {
+            free(state.Control_Requests[i])
+            unordered_remove(&state.Control_Requests, i)
+        }
+    }
     state.Connected = false
     Clear_Streams(state)
 }
@@ -407,7 +608,9 @@ Shutdown :: proc(state: ^State) {
     for event in state.Defers { if event.Alive { defer_free((^Pulse_Defer_Event)(event)) } }
     sweep_events(state)
     for request in state.Requests { free(request) }
-    delete(state.Streams); delete(state.Versions); delete(state.IO); delete(state.Times); delete(state.Defers); delete(state.Requests); delete(state.Poll_Events)
+    for request in state.Control_Requests { free(request) }
+    delete(state.Streams); delete(state.Versions); delete(state.IO); delete(state.Times); delete(state.Defers); delete(state.Requests)
+    delete(state.Controls); delete(state.Control_Requests); delete(state.Poll_Events)
     unload_pulse(&state.Symbols)
     state^ = {}
 }
@@ -458,6 +661,15 @@ Poll_Timeout_Ms :: proc(state: ^State) -> i32 {
         ms := i32((remaining + time.Millisecond - 1)/time.Millisecond)
         if timeout < 0 || ms < timeout { timeout = ms }
     }
+    for control in state.Controls {
+        deadlines := [3]time.Tick{control.Due, control.Refresh_Due, control.Expires}
+        for deadline in deadlines {
+            if deadline == {} { continue }
+            remaining := max(time.Duration(0), time.tick_diff(now, deadline))
+            ms := i32((remaining + time.Millisecond - 1)/time.Millisecond)
+            if timeout < 0 || ms < timeout { timeout = ms }
+        }
+    }
     if state.Reconnect_Due != {} {
         remaining := max(time.Duration(0), time.tick_diff(now, state.Reconnect_Due))
         ms := i32((remaining + time.Millisecond - 1)/time.Millisecond)
@@ -469,6 +681,7 @@ Poll_Timeout_Ms :: proc(state: ^State) -> i32 {
 Run_Due :: proc(state: ^State) {
     if state == nil || !state.Enabled || !state.Available { return }
     now := time.tick_now()
+    run_controls(state, now)
     for event in state.Times {
         if event.Alive && event.Enabled && time.tick_diff(event.Deadline, now) >= 0 {
             event.Enabled = false

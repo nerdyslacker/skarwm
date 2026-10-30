@@ -23,24 +23,34 @@ Audio_Verified_Stream :: struct {
     Candidate: audio.Stream_Candidate,
 }
 
-process_start_time :: proc(pid: i64) -> (u64, bool) {
+process_stat :: proc(pid: i64) -> (parent_pid: i64, start_time: u64, ok: bool) {
     path := fmt.tprintf("/proc/%d/stat", pid)
     data, err := os.read_entire_file(path, context.temp_allocator)
-    if err != nil || len(data) == 0 { return 0, false }
+    if err != nil || len(data) == 0 { return 0, 0, false }
     text := string(data)
     close := -1
     for i := len(text)-1; i >= 0; i -= 1 { if text[i] == ')' { close = i; break } }
-    if close < 0 || close+2 >= len(text) { return 0, false }
+    if close < 0 || close+2 >= len(text) { return 0, 0, false }
     fields := text[close+2:]
     for index in 0 ..< 20 {
-        field, ok := strings.fields_iterator(&fields)
-        if !ok { return 0, false }
+        field, found := strings.fields_iterator(&fields)
+        if !found { return 0, 0, false }
+        if index == 1 {
+            value, parsed := strconv.parse_i64(field)
+            if !parsed { return 0, 0, false }
+            parent_pid = value
+        }
         if index == 19 {
             value, parsed := strconv.parse_u64(field)
-            return value, parsed && value != 0
+            return parent_pid, value, parsed && value != 0
         }
     }
-    return 0, false
+    return 0, 0, false
+}
+
+process_start_time :: proc(pid: i64) -> (u64, bool) {
+    _, start, ok := process_stat(pid)
+    return start, ok
 }
 
 process_uid_matches :: proc(pid: i64) -> bool {
@@ -191,6 +201,17 @@ verified_stream :: proc(stream: ^audio.Stream) -> audio.Stream_Candidate {
     }
     candidate.Process = process
     candidate.Window_XID = parse_stream_xid(stream.Window_XID)
+    pid := stream.Process_ID
+    for candidate.Ancestor_Count < u8(len(candidate.Ancestors)) {
+        parent, _, found := process_stat(pid)
+        if !found || parent <= 1 || !process_uid_matches(parent) { break }
+        _, before, stable := process_stat(parent)
+        _, after, same := process_stat(parent)
+        if !stable || !same || before != after { break }
+        candidate.Ancestors[candidate.Ancestor_Count] = {PID = parent, Start_Time = before}
+        candidate.Ancestor_Count += 1
+        pid = parent
+    }
     candidate.Valid = true
     return candidate
 }
@@ -235,12 +256,23 @@ audio_reconcile :: proc() {
     g_wm.audio_mapping_dirty = false
 }
 
-audio_preview :: proc(cl: ^c.Client, volume: u32, toggle_mute: bool) {
+audio_preview :: proc(cl: ^c.Client, volume: u32, toggle_mute: bool, final := true) {
     if cl == nil { return }
     model := audio_model_for_window(cl.Xid)
     if model == nil { return }
-    model.Volume = min(volume, u32(65_536))
-    if toggle_mute { model.Muted = !model.Muted; model.Mixed_Mute = false }
+    target := min(volume, u32(65_536))
+    reference := model.Volume
+    desired_mute := !model.Muted
+    for index in model.Stream_Indices {
+        for &stream in g_wm.audio_state.Streams {
+            if stream.Index != index { continue }
+            if toggle_mute { _ = audio.Queue_Stream_Mute(&g_wm.audio_state, index, stream.Generation, desired_mute) }
+            else { _ = audio.Queue_Stream_Volume(&g_wm.audio_state, index, stream.Generation, target, reference, final) }
+            break
+        }
+    }
+    model.Volume = target
+    if toggle_mute { model.Muted = desired_mute; model.Mixed_Mute = false }
     ui.Set_Decoration_Audio(&g_wm.ui, g_wm.m, cl, true, model.Volume, model.Muted, model.Mixed_Mute)
 }
 

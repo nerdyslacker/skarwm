@@ -6,6 +6,11 @@ Verified_Process :: struct {
     Executable: string,
 }
 
+Process_Ref :: struct {
+    PID: i64,
+    Start_Time: u64,
+}
+
 Window_Candidate :: struct {
     XID: u32,
     Process: Verified_Process,
@@ -15,6 +20,8 @@ Window_Candidate :: struct {
 Stream_Candidate :: struct {
     Index, Window_XID: u32,
     Process: Verified_Process,
+    Ancestors: [32]Process_Ref,
+    Ancestor_Count: u8,
     Valid: bool,
 }
 
@@ -30,11 +37,21 @@ process_equal :: proc(a, b: Verified_Process) -> bool {
         a.Executable != "" && a.Executable == b.Executable
 }
 
+process_is_ancestor :: proc(process: Verified_Process, stream: Stream_Candidate) -> bool {
+    if process.PID <= 0 || process.Start_Time == 0 { return false }
+    for i in 0 ..< int(stream.Ancestor_Count) {
+        ancestor := stream.Ancestors[i]
+        if ancestor.PID == process.PID && ancestor.Start_Time == process.Start_Time { return true }
+    }
+    return false
+}
+
 Match_Window :: proc(stream: Stream_Candidate, windows: []Window_Candidate) -> u32 {
     if !stream.Valid { return 0 }
     if stream.Window_XID != 0 {
         for window in windows {
-            if window.XID == stream.Window_XID && window.Eligible && process_equal(stream.Process, window.Process) {
+            if window.XID == stream.Window_XID && window.Eligible &&
+               (process_equal(stream.Process, window.Process) || process_is_ancestor(window.Process, stream)) {
                 return window.XID
             }
         }
@@ -42,7 +59,7 @@ Match_Window :: proc(stream: Stream_Candidate, windows: []Window_Candidate) -> u
     }
     match: u32
     for window in windows {
-        if !window.Eligible || !process_equal(stream.Process, window.Process) { continue }
+        if !window.Eligible || (!process_equal(stream.Process, window.Process) && !process_is_ancestor(window.Process, stream)) { continue }
         if match != 0 { return 0 }
         match = window.XID
     }
