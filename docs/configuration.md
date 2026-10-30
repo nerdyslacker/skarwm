@@ -192,13 +192,15 @@ Rules use a substring match against `class`, `instance`, or `title`. Effects are
 `decorate true|false`; the first matching rule is used. A decoration rule
 overrides the global `decorations_enabled` value for that client.
 
-Titlebar audio matching fails closed. A Pulse stream must identify the same
-live local process as the X11 window, including its process start time and
-executable. An exact Pulse X11 window ID is used only after that verification.
-For terminal and helper processes, a same-user stream may also match a verified
-ancestor process that owns exactly one decorated window. Reused PIDs, remote
-streams, and multi-window ambiguity are hidden; application names alone are
-never used. Multiple verified writable streams for one window are grouped,
+Titlebar audio matching fails closed. When Pulse supplies process metadata,
+skarwm verifies the live local PID, start time, executable, host, and machine.
+Native PipeWire streams can lose their PID in the Pulse compatibility view; in
+that case skarwm accepts the stream only when its application identity resolves
+to exactly one same-user local process. An exact Pulse X11 window ID is used
+only after process verification. For terminal and helper processes, the stream
+may match a verified ancestor process that owns exactly one decorated window.
+Reused PIDs, remote streams, duplicate processes, and multi-window ambiguity
+are hidden. Multiple verified writable streams for one window are grouped,
 with the highest channel-average volume displayed and mixed mute state retained.
 
 Click the speaker to mute, click or drag the slider to set volume, and use the
@@ -206,6 +208,40 @@ mouse wheel over the widget for `decoration_audio_volume_step` changes. These
 actions affect only the matched Pulse sink inputs, never the default sink or
 master output. Relative channel and grouped-stream levels are preserved where
 possible, and volume is capped at 100%.
+
+The widget appears only while a matched playback stream exists. An idle
+terminal therefore has no widget; start playback in the terminal (including a
+TUI player) to make it appear. Xephyr does not isolate PulseAudio or
+PipeWire-Pulse, so it does not prevent discovery. After rebuilding, restart the
+nested skarwm process. For matching diagnostics, run:
+
+```sh
+make
+SKARWM_LOG=debug make xephyr
+```
+
+Look for `titlebar audio:` messages in the launching terminal. They report
+whether the stream was verified, rejected for incomplete or non-local process
+metadata, or left unmatched.
+
+### Titlebar audio verification
+
+| Check | Result |
+| --- | --- |
+| Disabled by default | No audio connection, subscription, timer, or decoration resource is created. |
+| PipeWire-Pulse playback | VLC, Elisa, native PipeWire mpv, and mpv inside kitty were matched and rendered in a nested X server. |
+| Controls | Slider changes persisted on the sink input; speaker click muted it; master volume remained unchanged. |
+| Idle cost, disabled / enabled | 0 CPU ticks over 5 seconds in both cases; RSS 3,180 / 5,364 KiB. |
+| 500 IPC window queries, disabled / enabled | 418 / 433 ms; one WM CPU tick in both cases. |
+| Core and audio tests | 997 core and 38 audio tests passed. |
+| X11 regression tests | 131 main, 28 XRandR, and 18 decoration checks passed. |
+
+Native PulseAudio was not available for this verification. Matching also
+intentionally hides PID-less streams whose application identity matches zero or
+multiple local processes, detached players outside the window owner's process
+ancestry, remote streams, and ambiguous owners of multiple decorated windows.
+A paused stream remains visible while the server keeps it; the widget
+disappears when the last matching stream is removed.
 
 skarwm watches the main configuration and its imports, including editor saves
 that replace a file. `Super+Shift+r` runs `reload_config` on demand. Reload is

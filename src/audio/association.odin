@@ -1,5 +1,7 @@
 package audio
 
+import "core:strings"
+
 Verified_Process :: struct {
     PID: i64,
     Start_Time: u64,
@@ -23,6 +25,21 @@ Stream_Candidate :: struct {
     Ancestors: [32]Process_Ref,
     Ancestor_Count: u8,
     Valid: bool,
+}
+
+Application_Matches_Process :: proc(executable, binary, application_id: string) -> bool {
+    if executable == "" { return false }
+    binary_base := binary
+    for i := len(binary_base)-1; i >= 0; i -= 1 {
+        if binary_base[i] == '/' { binary_base = binary_base[i+1:]; break }
+    }
+    if binary_base != "" && strings.equal_fold(executable, binary_base) { return true }
+    id := application_id
+    if strings.has_suffix(id, ".desktop") { id = id[:len(id)-len(".desktop")] }
+    for i := len(id)-1; i >= 0; i -= 1 {
+        if id[i] == '.' || id[i] == '/' { id = id[i+1:]; break }
+    }
+    return id != "" && strings.equal_fold(executable, id)
 }
 
 Window_Model :: struct {

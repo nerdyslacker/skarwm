@@ -95,6 +95,10 @@ main :: proc() {
     ok(audio.Match_Window(child, duplicate_windows) == 0, "terminal child remains hidden when one ancestor owns multiple windows")
     child.Ancestors[0].Start_Time += 1
     ok(audio.Match_Window(child, windows) == 0, "stale terminal ancestor is rejected")
+    ok(audio.Application_Matches_Process("mpv", "", "mpv"), "PipeWire application ID identifies mpv")
+    ok(audio.Application_Matches_Process("elisa", "", "org.kde.elisa"), "reverse-domain application ID identifies Elisa")
+    ok(audio.Application_Matches_Process("vlc", "/usr/bin/vlc", "org.VideoLAN.VLC"), "binary metadata identifies VLC")
+    ok(!audio.Application_Matches_Process("mpv", "", "org.kde.elisa"), "unrelated application metadata is rejected")
 
     stream_a := audio.Stream{Index = 1, Channels = 2, Volume_Writable = true}
     stream_a.Volume[0], stream_a.Volume[1] = 32_768, 32_768

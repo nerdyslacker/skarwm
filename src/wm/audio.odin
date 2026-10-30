@@ -2,6 +2,7 @@ package wm
 
 import audio "../audio"
 import c "../core"
+import logger "../log"
 import ui "../ui"
 import x11 "../x11"
 
@@ -129,6 +130,7 @@ audio_refresh_window :: proc(cl: ^c.Client) {
     if pid, ok := x11.get_cardinal32(g_wm.conn, cl.Xid, atom("_NET_WM_PID"), atom("CARDINAL")); ok && pid > 0 {
         next.Process, next.Valid = read_process_identity(i64(pid))
     }
+    if !next.Valid { logger.Debug("titlebar audio: window has no verifiable local process", cl.Xid, cl.Title) }
     if existing >= 0 { free_window_meta(&g_wm.audio_windows[existing]); g_wm.audio_windows[existing] = next }
     else { append(&g_wm.audio_windows, next) }
     g_wm.audio_mapping_dirty = true
@@ -157,6 +159,7 @@ audio_mapping_init :: proc() {
     g_wm.audio_host = local_hostname()
     g_wm.audio_machine_id = local_machine_id()
     g_wm.audio_mapping_dirty = true
+    logger.Debug("titlebar audio: enabled for host", g_wm.audio_host)
     audio_refresh_all_windows()
 }
 
@@ -184,24 +187,54 @@ parse_stream_xid :: proc(value: string) -> u32 {
     return u32(parsed)
 }
 
+find_application_process :: proc(stream: ^audio.Stream) -> (audio.Verified_Process, bool) {
+    entries, err := os.read_directory_by_path("/proc", -1, context.temp_allocator)
+    if err != nil { return {}, false }
+    match: audio.Verified_Process
+    for entry in entries {
+        pid, parsed := strconv.parse_i64(entry.name)
+        if !parsed || pid <= 1 { continue }
+        process, ok := read_process_identity(pid)
+        if !ok { continue }
+        if !audio.Application_Matches_Process(process.Executable, stream.Process_Binary, stream.Application_ID) {
+            delete(process.Executable)
+            continue
+        }
+        if match.PID != 0 {
+            delete(match.Executable)
+            delete(process.Executable)
+            return {}, false
+        }
+        match = process
+    }
+    return match, match.PID != 0
+}
+
 verified_stream :: proc(stream: ^audio.Stream) -> audio.Stream_Candidate {
     candidate := audio.Stream_Candidate{Index = stream.Index}
-    if stream.Process_ID <= 0 || stream.Process_Binary == "" || stream.Process_Host == "" ||
-       g_wm.audio_host == "" || stream.Process_Host != g_wm.audio_host {
+    if stream.Process_Host != "" && (g_wm.audio_host == "" || stream.Process_Host != g_wm.audio_host) {
+        logger.Debug("titlebar audio: ignored non-local stream", stream.Index, stream.Process_Host)
         return candidate
     }
     if stream.Machine_ID != "" && g_wm.audio_machine_id != "" && stream.Machine_ID != g_wm.audio_machine_id {
+        logger.Debug("titlebar audio: ignored stream from another machine", stream.Index)
         return candidate
     }
     process, ok := read_process_identity(stream.Process_ID)
-    if !ok { return candidate }
-    if process.Executable != path_base(stream.Process_Binary) {
+    if stream.Process_ID <= 0 { process, ok = find_application_process(stream) }
+    if !ok {
+        logger.Debug("titlebar audio: ignored stream without one unique local process", stream.Index, stream.Application_ID)
+        return candidate
+    }
+    identity_matches := audio.Application_Matches_Process(process.Executable, stream.Process_Binary, stream.Application_ID)
+    if !identity_matches {
+        logger.Debug("titlebar audio: ignored application identity mismatch", stream.Index, process.Executable, stream.Application_ID)
         delete(process.Executable)
         return candidate
     }
     candidate.Process = process
     candidate.Window_XID = parse_stream_xid(stream.Window_XID)
-    pid := stream.Process_ID
+    pid := process.PID
     for candidate.Ancestor_Count < u8(len(candidate.Ancestors)) {
         parent, _, found := process_stat(pid)
         if !found || parent <= 1 || !process_uid_matches(parent) { break }
@@ -213,6 +246,8 @@ verified_stream :: proc(stream: ^audio.Stream) -> audio.Stream_Candidate {
         pid = parent
     }
     candidate.Valid = true
+    logger.Debug("titlebar audio: verified stream", stream.Index, stream.Application_Name,
+                 "pid", process.PID, "ancestors", candidate.Ancestor_Count)
     return candidate
 }
 
@@ -244,6 +279,8 @@ audio_reconcile :: proc() {
     for meta, i in g_wm.audio_streams { streams[i] = meta.Candidate }
     audio.Free_Window_Models(&g_wm.audio_models)
     g_wm.audio_models = audio.Build_Window_Models(g_wm.audio_state.Streams[:], streams, windows)
+    logger.Debug("titlebar audio: reconcile streams", len(g_wm.audio_state.Streams),
+                 "windows", len(windows), "mapped", len(g_wm.audio_models))
     for cl in g_wm.m.Clients {
         model := audio_model_for_window(cl.Xid)
         if model == nil {
