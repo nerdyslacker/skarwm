@@ -50,6 +50,7 @@ for changes. A single `skarwm.rc` works without imports.
 | `decoration_border_width : 1` | Painted decoration frame width, `0..32`. |
 | `decoration_resize_hit_width : 4` | Edge/corner input target width, `1..32`; independent of the painted width. |
 | `decoration_show_title : true` | Draw the client title when the decoration renderer is enabled. |
+| `decoration_audio_enabled : false` | Opt in to per-application audio discovery for decorated windows. Missing PulseAudio or pipewire-pulse is harmless. |
 | `decoration_color_source : active-border` | Style source: `active-border`, `accent`, or `explicit`. |
 | `decoration_accent : #89B4FA` | Accent used by the `accent` source. |
 | `decoration_active_background : #313244` | Explicit active titlebar background. |

@@ -33,7 +33,8 @@ import x11 "../x11"
 //   - settings: mod_key (alias modkey), inner_gap, outer_gap, gap (seeds both),
 //     border_width, corner_radius, norm_outer_border (unfocused colour), sel_outer_border
 //     (focused colour), focus_follows_mouse, animations,
-//     animation_duration_ms, animation_fps, animation_easing, bar_enabled,
+//     animation_duration_ms, animation_fps, animation_easing,
+//     decoration_audio_enabled, bar_enabled,
 //     bar_position, bar_height, bar_foreground, bar_background,
 //     bar_tag_count, bar_tag_foreground, bar_tag_background,
 //     bar_block_foreground, bar_block_background. Legacy decorative/titlebar keys
@@ -172,6 +173,7 @@ Load_Scratch :: struct {
     decoration_enabled_set, decoration_titlebar_height_set: bool,
     decoration_border_width_set, decoration_resize_hit_width_set: bool,
     decoration_show_title_set, decoration_color_source_set: bool,
+    decoration_audio_enabled_set: bool,
     decoration_accent_set, decoration_active_background_set: bool,
     decoration_inactive_background_set, decoration_active_foreground_set: bool,
     decoration_inactive_foreground_set, decoration_active_border_set: bool,
@@ -684,6 +686,7 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.decoration_border_width_set { r.cfg.Decoration.BorderWidth = sc.decoration.BorderWidth }
     if sc.decoration_resize_hit_width_set { r.cfg.Decoration.ResizeHitWidth = sc.decoration.ResizeHitWidth }
     if sc.decoration_show_title_set { r.cfg.Decoration.ShowTitle = sc.decoration.ShowTitle }
+    if sc.decoration_audio_enabled_set { r.cfg.Decoration.AudioEnabled = sc.decoration.AudioEnabled }
     if sc.decoration_color_source_set { r.cfg.Decoration.ColorSource = sc.decoration.ColorSource }
     if sc.decoration_accent_set { r.cfg.Decoration.Accent = sc.decoration.Accent }
     if sc.decoration_active_background_set { r.cfg.Decoration.ActiveBackground = sc.decoration.ActiveBackground }
@@ -871,6 +874,11 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         v, ok := parse_bool_value(value)
         if !ok { append(errs, fmt.aprintf("decoration_show_title: expected true/false, got %q", value)); return false }
         sc.decoration.ShowTitle = v; sc.decoration_show_title_set = true
+        return true
+    case "decoration_audio_enabled":
+        v, ok := parse_bool_value(value)
+        if !ok { append(errs, fmt.aprintf("decoration_audio_enabled: expected true/false, got %q", value)); return false }
+        sc.decoration.AudioEnabled = v; sc.decoration_audio_enabled_set = true
         return true
     case "decoration_color_source":
         switch quoted_trim(value) {
@@ -1883,6 +1891,7 @@ cfg_apply :: proc(r: ^Config_Result, label: string) {
         if !cl.Dock { cl.Decorated = decoration_for_client(cl) }
     }
     ui.Sync_Decorations(&g_wm.ui, g_wm.m)
+    audio_sync_config()
 
     release_bar_blocks(&g_wm.bar_blocks)
     g_wm.bar_blocks = r.bar_blocks

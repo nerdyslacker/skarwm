@@ -1,6 +1,7 @@
 package wm
 
 import process "../process"
+import audio "../audio"
 import ui "../ui"
 import rendering "../rendering"
 import logger "../log"
@@ -77,6 +78,7 @@ Wm :: struct {
     bar_blocks: [dynamic]Raw_Bar_Block,
     virtual_screens: [dynamic]Virtual_Screen_Profile,
     workspace_layouts: [dynamic]Workspace_Layout_Rule,
+    audio: audio.State,
 }
 
 g_wm: Wm

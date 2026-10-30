@@ -1,7 +1,8 @@
 # skarwm build.
 #
-# Required at *runtime*:   libxcb + libxcb-randr + libxcb-shape; the optional
-#                          bar additionally uses libX11 + libXft/fontconfig
+# Required at *runtime*:   libxcb + libxcb-randr + libxcb-shape; titlebar audio
+#                          loads libpulse.so.0 only when explicitly enabled; the
+#                          optional bar additionally uses libX11 + libXft/fontconfig
 # Required at *build* time: odin
 #
 # Configuration is a plain-text rc file — there is no embedded
@@ -58,6 +59,7 @@ install: build/skarwm build/skarwm-msg build/skarwm-bar
 	install -Dm644 assets/example.rc $(DESTDIR)$(SKARWMDIR)/skarwm.rc
 
 test: build/skarwm build/skarwm-msg build/skarwm-bar
+	odin run tests/audio_tests
 	odin run tests/core_tests
 	scripts/itest.sh
 	scripts/itest-randr.sh

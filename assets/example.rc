@@ -11,7 +11,7 @@ border_width : 2
 corner_radius : 0
 norm_outer_border : #504D47
 sel_outer_border  : #FCE8C3
-decorations_enabled : false
+decorations_enabled : true
 decoration_titlebar_height : 20
 decoration_border_width : 1
 decoration_resize_hit_width : 4

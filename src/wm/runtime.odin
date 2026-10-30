@@ -1,6 +1,7 @@
 package wm
 
 import process "../process"
+import audio "../audio"
 import ui "../ui"
 import rendering "../rendering"
 import logger "../log"
@@ -131,6 +132,7 @@ wm_startup :: proc() -> bool {
 
 cleanup_all :: proc() {
     cfg_watch_shutdown()
+    audio.Shutdown(&g_wm.audio)
     bar_shutdown()
     randr_shutdown()
     ui.Hide_Drop(&g_wm.ui)
@@ -227,6 +229,7 @@ event_loop :: proc() {
         n := 1
         if g_ipc.listen >= 0 { n += 1 }
         n += len(g_ipc.clients)
+        n += audio.IO_Count(&g_wm.audio)
         pfds := make([]posix.pollfd, n)
         pfds[0] = posix.pollfd{fd = xfd, events = {.IN}}
         i := 1
@@ -240,6 +243,8 @@ event_loop :: proc() {
             pfds[i] = posix.pollfd{fd = cl.fd, events = events}
             i += 1
         }
+        audio_start := i
+        _ = audio.Append_Poll_FDs(&g_wm.audio, pfds, audio_start)
 
         timeout := rendering.Poll_Timeout_Ms(&g_wm.rendering)
         notice_timeout := ui.Notice_Poll_Timeout_Ms(&g_wm.ui)
@@ -265,6 +270,10 @@ event_loop :: proc() {
         bar_timeout := bar_poll_timeout_ms()
         if timeout < 0 || (bar_timeout >= 0 && bar_timeout < timeout) {
             timeout = bar_timeout
+        }
+        audio_timeout := audio.Poll_Timeout_Ms(&g_wm.audio)
+        if timeout < 0 || (audio_timeout >= 0 && audio_timeout < timeout) {
+            timeout = audio_timeout
         }
         if posix.poll(raw_data(pfds), posix.nfds_t(len(pfds)), timeout) < 0 {
             delete(pfds) // EINTR or a signal: repoll
@@ -295,7 +304,7 @@ event_loop :: proc() {
         // have appended clients beyond the set, so walk only what we built.
         base := i
         to_drop: [dynamic]^Ipc_Client
-        for i < len(pfds) {
+        for i < audio_start {
             pd := pfds[i]
             cl := g_ipc.clients[i - base]
             if cl.closing {
@@ -313,6 +322,7 @@ event_loop :: proc() {
         }
         for cl in to_drop { ipc_drop_client(cl) } // removed after the walk
         delete(to_drop)
+        audio.Dispatch_Poll(&g_wm.audio, pfds, audio_start)
         delete(pfds)
         // A busy X or IPC stream cannot starve animation frames: check the
         // monotonic deadline after dispatch as well as through poll's timeout.
@@ -323,6 +333,16 @@ event_loop :: proc() {
         randr_run_due()
         cfg_watch_run_due()
         bar_run_due()
+        audio.Run_Due(&g_wm.audio)
+    }
+}
+
+audio_sync_config :: proc() {
+    enabled := g_wm.m != nil && g_wm.m.Cfg.Decoration.Enabled && g_wm.m.Cfg.Decoration.AudioEnabled
+    if enabled == g_wm.audio.Enabled { return }
+    audio.Shutdown(&g_wm.audio)
+    if enabled && !audio.Init(&g_wm.audio, true) {
+        logger.Warn("titlebar audio unavailable; libpulse client library was not found")
     }
 }
 
