@@ -51,6 +51,9 @@ for changes. A single `skarwm.rc` works without imports.
 | `decoration_resize_hit_width : 4` | Edge/corner input target width, `1..32`; independent of the painted width. |
 | `decoration_show_title : true` | Draw the client title when the decoration renderer is enabled. |
 | `decoration_audio_enabled : false` | Opt in to per-application audio discovery for decorated windows. Missing PulseAudio or pipewire-pulse is harmless. |
+| `decoration_audio_show_percentage : true` | Show the volume percentage when the titlebar has room. |
+| `decoration_audio_slider_width : 90` | Inline volume slider width in logical pixels, `70..100`. |
+| `decoration_audio_volume_step : 5` | Percentage-point change for the mouse wheel, `1..25`. |
 | `decoration_color_source : active-border` | Style source: `active-border`, `accent`, or `explicit`. |
 | `decoration_accent : #89B4FA` | Accent used by the `accent` source. |
 | `decoration_active_background : #313244` | Explicit active titlebar background. |

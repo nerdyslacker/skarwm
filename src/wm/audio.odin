@@ -2,6 +2,7 @@ package wm
 
 import audio "../audio"
 import c "../core"
+import ui "../ui"
 import x11 "../x11"
 
 import "core:fmt"
@@ -124,6 +125,7 @@ audio_refresh_window :: proc(cl: ^c.Client) {
 }
 
 audio_forget_window :: proc(xid: u32) {
+    if g_wm.audio_pointer_client != nil && g_wm.audio_pointer_client.Xid == xid { cancel_pointer_operation() }
     for meta, i in g_wm.audio_windows {
         if meta.XID != xid { continue }
         free_window_meta(&g_wm.audio_windows[i])
@@ -149,6 +151,9 @@ audio_mapping_init :: proc() {
 }
 
 audio_mapping_shutdown :: proc() {
+    if g_wm.m != nil {
+        for cl in g_wm.m.Clients { ui.Set_Decoration_Audio(&g_wm.ui, g_wm.m, cl, false, 0, false, false) }
+    }
     for &meta in g_wm.audio_windows { free_window_meta(&meta) }
     for &meta in g_wm.audio_streams { free_stream_meta(&meta) }
     delete(g_wm.audio_windows)
@@ -218,8 +223,25 @@ audio_reconcile :: proc() {
     for meta, i in g_wm.audio_streams { streams[i] = meta.Candidate }
     audio.Free_Window_Models(&g_wm.audio_models)
     g_wm.audio_models = audio.Build_Window_Models(g_wm.audio_state.Streams[:], streams, windows)
+    for cl in g_wm.m.Clients {
+        model := audio_model_for_window(cl.Xid)
+        if model == nil {
+            if g_wm.audio_pointer_client == cl { cancel_pointer_operation() }
+            ui.Set_Decoration_Audio(&g_wm.ui, g_wm.m, cl, false, 0, false, false)
+        }
+        else { ui.Set_Decoration_Audio(&g_wm.ui, g_wm.m, cl, true, model.Volume, model.Muted, model.Mixed_Mute) }
+    }
     g_wm.audio_seen_revision = g_wm.audio_state.Revision
     g_wm.audio_mapping_dirty = false
+}
+
+audio_preview :: proc(cl: ^c.Client, volume: u32, toggle_mute: bool) {
+    if cl == nil { return }
+    model := audio_model_for_window(cl.Xid)
+    if model == nil { return }
+    model.Volume = min(volume, u32(65_536))
+    if toggle_mute { model.Muted = !model.Muted; model.Mixed_Mute = false }
+    ui.Set_Decoration_Audio(&g_wm.ui, g_wm.m, cl, true, model.Volume, model.Muted, model.Mixed_Mute)
 }
 
 audio_model_for_window :: proc(xid: u32) -> ^audio.Window_Model {

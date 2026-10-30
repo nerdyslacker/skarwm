@@ -173,7 +173,8 @@ Load_Scratch :: struct {
     decoration_enabled_set, decoration_titlebar_height_set: bool,
     decoration_border_width_set, decoration_resize_hit_width_set: bool,
     decoration_show_title_set, decoration_color_source_set: bool,
-    decoration_audio_enabled_set: bool,
+    decoration_audio_enabled_set, decoration_audio_show_percentage_set: bool,
+    decoration_audio_slider_width_set, decoration_audio_volume_step_set: bool,
     decoration_accent_set, decoration_active_background_set: bool,
     decoration_inactive_background_set, decoration_active_foreground_set: bool,
     decoration_inactive_foreground_set, decoration_active_border_set: bool,
@@ -687,6 +688,9 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.decoration_resize_hit_width_set { r.cfg.Decoration.ResizeHitWidth = sc.decoration.ResizeHitWidth }
     if sc.decoration_show_title_set { r.cfg.Decoration.ShowTitle = sc.decoration.ShowTitle }
     if sc.decoration_audio_enabled_set { r.cfg.Decoration.AudioEnabled = sc.decoration.AudioEnabled }
+    if sc.decoration_audio_show_percentage_set { r.cfg.Decoration.AudioShowPercentage = sc.decoration.AudioShowPercentage }
+    if sc.decoration_audio_slider_width_set { r.cfg.Decoration.AudioSliderWidth = sc.decoration.AudioSliderWidth }
+    if sc.decoration_audio_volume_step_set { r.cfg.Decoration.AudioVolumeStep = sc.decoration.AudioVolumeStep }
     if sc.decoration_color_source_set { r.cfg.Decoration.ColorSource = sc.decoration.ColorSource }
     if sc.decoration_accent_set { r.cfg.Decoration.Accent = sc.decoration.Accent }
     if sc.decoration_active_background_set { r.cfg.Decoration.ActiveBackground = sc.decoration.ActiveBackground }
@@ -879,6 +883,21 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
         v, ok := parse_bool_value(value)
         if !ok { append(errs, fmt.aprintf("decoration_audio_enabled: expected true/false, got %q", value)); return false }
         sc.decoration.AudioEnabled = v; sc.decoration_audio_enabled_set = true
+        return true
+    case "decoration_audio_show_percentage":
+        v, ok := parse_bool_value(value)
+        if !ok { append(errs, fmt.aprintf("decoration_audio_show_percentage: expected true/false, got %q", value)); return false }
+        sc.decoration.AudioShowPercentage = v; sc.decoration_audio_show_percentage_set = true
+        return true
+    case "decoration_audio_slider_width":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 70 || n > 100 { append(errs, fmt.aprintf("decoration_audio_slider_width: expected 70..100, got %q", value)); return false }
+        sc.decoration.AudioSliderWidth = n; sc.decoration_audio_slider_width_set = true
+        return true
+    case "decoration_audio_volume_step":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 1 || n > 25 { append(errs, fmt.aprintf("decoration_audio_volume_step: expected 1..25, got %q", value)); return false }
+        sc.decoration.AudioVolumeStep = n; sc.decoration_audio_volume_step_set = true
         return true
     case "decoration_color_source":
         switch quoted_trim(value) {

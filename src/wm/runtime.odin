@@ -419,6 +419,8 @@ handle_event :: proc(ev: ^x11.Event) {
             ui.Draw_Notice(&g_wm.ui, g_wm.m)
         } else if ui.Is_Reminder_Panel_Window(&g_wm.ui, xid) {
             ui.Draw_Reminder_Panel(&g_wm.ui, g_wm.m)
+        } else if ui.Decoration_Audio_Popup_Client(&g_wm.ui, xid) != nil {
+            ui.Draw_Decoration_Audio_Popup(&g_wm.ui, g_wm.m)
         } else if ui.Decoration_Client(&g_wm.ui, xid) != nil {
             ui.Draw_Decoration(&g_wm.ui, g_wm.m, xid)
         } else {

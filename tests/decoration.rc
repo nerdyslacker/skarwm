@@ -10,6 +10,9 @@ decoration_border_width : 1
 decoration_resize_hit_width : 4
 decoration_show_title : true
 decoration_audio_enabled : true
+decoration_audio_show_percentage : true
+decoration_audio_slider_width : 90
+decoration_audio_volume_step : 5
 decoration_color_source : explicit
 decoration_active_background : #313244
 decoration_inactive_background : #1E1E2E

@@ -17,6 +17,9 @@ Decoration_Config :: struct {
     ResizeHitWidth: i32,
     ShowTitle: bool,
     AudioEnabled: bool,
+    AudioShowPercentage: bool,
+    AudioSliderWidth: i32,
+    AudioVolumeStep: i32,
     ColorSource: Decoration_Color_Source,
     Accent: u32,
     ActiveBackground: u32,
@@ -35,6 +38,9 @@ Default_Decoration_Config :: proc() -> Decoration_Config {
         ResizeHitWidth = 4,
         ShowTitle = true,
         AudioEnabled = false,
+        AudioShowPercentage = true,
+        AudioSliderWidth = 90,
+        AudioVolumeStep = 5,
         ColorSource = .Active_Border,
         Accent = 0x89B4FA,
         ActiveBackground = 0x313244,
@@ -117,12 +123,76 @@ Decoration_Hit :: enum u8 {
     Resize_Top, Resize_Bottom, Resize_Left, Resize_Right,
     Resize_Top_Left, Resize_Top_Right, Resize_Bottom_Left, Resize_Bottom_Right,
     Minimize, Maximize, Close,
+    Audio_Mute, Audio_Slider, Audio_Compact,
+}
+
+Decoration_Audio_Mode :: enum u8 {
+    Hidden,
+    Inline,
+    Inline_No_Percentage,
+    Compact,
+}
+
+Decoration_Audio_Layout :: struct {
+    Mode: Decoration_Audio_Mode,
+    Bounds, Speaker, Slider, Percentage: Rect,
+}
+
+rect_contains :: proc(rect: Rect, x, y: i32) -> bool {
+    return rect.W > 0 && rect.H > 0 && x >= rect.X && y >= rect.Y && x < rect.X+rect.W && y < rect.Y+rect.H
+}
+
+// Audio controls occupy the title row immediately before the three standard
+// buttons. The title keeps a small drag target before controls collapse.
+Decoration_Audio_Layout_For :: proc(frame_w, frame_h: i32, cfg: Decoration_Config, visible: bool) -> Decoration_Audio_Layout {
+    if !visible || frame_w <= 0 || frame_h <= 0 { return {} }
+    b := max(i32(0), cfg.BorderWidth)
+    title_h := min(max(i32(0), cfg.TitlebarHeight), max(i32(0), frame_h-2*b))
+    if title_h <= 0 { return {} }
+    button_w := max(i32(1), cfg.TitlebarHeight)
+    right := frame_w - b - 3*button_w
+    available := right - (b + 48)
+    speaker_w := title_h
+    slider_w := max(i32(1), cfg.AudioSliderWidth*title_h/20)
+    percent_w := 30*title_h/20
+    gap := max(i32(2), title_h/5)
+    full_w := speaker_w + gap + slider_w
+    if cfg.AudioShowPercentage { full_w += gap + percent_w }
+
+    result: Decoration_Audio_Layout
+    width := full_w
+    if available >= full_w {
+        result.Mode = .Inline
+    } else if available >= speaker_w+gap+slider_w {
+        result.Mode = .Inline_No_Percentage
+        width = speaker_w+gap+slider_w
+    } else if available >= speaker_w {
+        result.Mode = .Compact
+        width = speaker_w
+    } else {
+        return {}
+    }
+    result.Bounds = {X = right-width, Y = b, W = width, H = title_h}
+    result.Speaker = {X = result.Bounds.X, Y = b, W = speaker_w, H = title_h}
+    if result.Mode == .Inline || result.Mode == .Inline_No_Percentage {
+        result.Slider = {X = result.Speaker.X+speaker_w+gap, Y = b, W = slider_w, H = title_h}
+    }
+    if result.Mode == .Inline && cfg.AudioShowPercentage {
+        result.Percentage = {X = result.Slider.X+slider_w+gap, Y = b, W = percent_w, H = title_h}
+    }
+    return result
+}
+
+Decoration_Audio_Volume_At :: proc(slider: Rect, x: i32) -> u32 {
+    if slider.W <= 0 { return 0 }
+    position := clamp(x-slider.X, i32(0), slider.W)
+    return u32(u64(position)*65_536/u64(slider.W))
 }
 
 // Hit testing uses frame-local coordinates.  Resize zones win at corners and
 // may be wider than the painted border. Buttons are square titlebar-height
 // targets ordered minimize/maximize/close from left to right.
-Decoration_Hit_Test :: proc(frame_w, frame_h, x, y: i32, cfg: Decoration_Config) -> Decoration_Hit {
+Decoration_Hit_Test :: proc(frame_w, frame_h, x, y: i32, cfg: Decoration_Config, audio_visible := false) -> Decoration_Hit {
     if x < 0 || y < 0 || x >= frame_w || y >= frame_h { return .None }
     hit := max(i32(1), cfg.ResizeHitWidth)
     left, right := x < hit, x >= frame_w-hit
@@ -143,5 +213,10 @@ Decoration_Hit_Test :: proc(frame_w, frame_h, x, y: i32, cfg: Decoration_Config)
     if from_right <= button_w { return .Close }
     if from_right <= 2*button_w { return .Maximize }
     if from_right <= 3*button_w { return .Minimize }
+    audio := Decoration_Audio_Layout_For(frame_w, frame_h, cfg, audio_visible)
+    if rect_contains(audio.Speaker, x, y) {
+        return .Audio_Compact if audio.Mode == .Compact else .Audio_Mute
+    }
+    if rect_contains(audio.Slider, x, y) { return .Audio_Slider }
     return .Title
 }

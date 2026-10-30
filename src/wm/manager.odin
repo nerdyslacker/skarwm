@@ -85,6 +85,8 @@ Wm :: struct {
     audio_host, audio_machine_id: string,
     audio_seen_revision: u64,
     audio_mapping_dirty: bool,
+    audio_pointer_client: ^c.Client,
+    audio_pointer_xid: u32,
 }
 
 g_wm: Wm
@@ -622,7 +624,7 @@ get_text_prop :: proc(conn: ^x11.Connection, win, prop, type_id: u32) -> (string
 // unmanage removes the window from the model and frees it, returning the
 // replacement focus (already applied to X) — or nil if none.
 unmanage :: proc(cl: ^c.Client) {
-    if g_wm.mouse_client == cl || g_wm.tiled_resize.Active { cancel_pointer_operation() }
+    if g_wm.mouse_client == cl || g_wm.audio_pointer_client == cl || g_wm.tiled_resize.Active { cancel_pointer_operation() }
     dock := cl.Dock
     ws := cl.Ws // captured for the empty-workspace announcement below
     was_focused := g_wm.m.Focused == cl
@@ -1488,15 +1490,42 @@ decoration_activate_drag :: proc(cl: ^c.Client, root_x, root_y: i32) {
 }
 
 decoration_button_press :: proc(cl: ^c.Client, ev: ^x11.Button_Press_Event) {
-    if cl == nil || ev.detail != 1 || !on_current_ws(cl) { return }
+    if cl == nil || !on_current_ws(cl) { return }
     old := g_wm.m.Focused
     if old != cl {
         c.Focus_Client(g_wm.m, cl)
         reflow_immediate()
         ipc_broadcast_focus_change(old, cl)
     }
-    frame := c.Decoration_Layout_Frame_Rect(cl.Geom, g_wm.m.Cfg.BorderWidth)
-    hit := c.Decoration_Hit_Test(frame.W, frame.H, i32(ev.event_x), i32(ev.event_y), g_wm.m.Cfg.Decoration)
+    hit := ui.Decoration_Audio_Hit(&g_wm.ui, g_wm.m, ev.event, i32(ev.event_x), i32(ev.event_y))
+    if hit == .Audio_Mute || hit == .Audio_Slider || hit == .Audio_Compact {
+        model := audio_model_for_window(cl.Xid)
+        if model == nil { return }
+        if ev.detail == 4 || ev.detail == 5 {
+            step := u32(65_536*g_wm.m.Cfg.Decoration.AudioVolumeStep/100)
+            volume := model.Volume
+            if ev.detail == 4 { volume = min(u32(65_536), volume+step) }
+            else { volume = volume-step if volume > step else 0 }
+            audio_preview(cl, volume, false)
+            return
+        }
+        if ev.detail != 1 { return }
+        #partial switch hit {
+        case .Audio_Mute:
+            audio_preview(cl, model.Volume, true)
+        case .Audio_Compact:
+            if g_wm.ui.DecorationAudioPopupClient == cl { ui.Hide_Decoration_Audio_Popup(&g_wm.ui) }
+            else { ui.Show_Decoration_Audio_Popup(&g_wm.ui, g_wm.m, cl) }
+        case .Audio_Slider:
+            if volume, ok := ui.Decoration_Audio_Value_At(&g_wm.ui, g_wm.m, ev.event, i32(ev.event_x)); ok {
+                audio_preview(cl, volume, false)
+                g_wm.audio_pointer_client = cl
+                g_wm.audio_pointer_xid = ev.event
+            }
+        }
+        return
+    }
+    if ev.detail != 1 { return }
     switch hit {
     case .Close:
         close_client(cl)
@@ -1518,7 +1547,32 @@ decoration_button_press :: proc(cl: ^c.Client, ev: ^x11.Button_Press_Event) {
         } else if !cl.Floating {
             begin_tiled_resize(cl, i32(ev.root_x), i32(ev.root_y))
         }
-    case .None:
+    case .None, .Audio_Mute, .Audio_Slider, .Audio_Compact:
+    }
+}
+
+decoration_audio_popup_press :: proc(cl: ^c.Client, ev: ^x11.Button_Press_Event) {
+    model := audio_model_for_window(cl.Xid)
+    if model == nil { ui.Hide_Decoration_Audio_Popup(&g_wm.ui); return }
+    if ev.detail == 4 || ev.detail == 5 {
+        step := u32(65_536*g_wm.m.Cfg.Decoration.AudioVolumeStep/100)
+        volume := model.Volume
+        if ev.detail == 4 { volume = min(u32(65_536), volume+step) }
+        else { volume = volume-step if volume > step else 0 }
+        audio_preview(cl, volume, false)
+        return
+    }
+    if ev.detail != 1 { return }
+    hit := ui.Decoration_Audio_Popup_Hit(&g_wm.ui, i32(ev.event_x), i32(ev.event_y))
+    if hit == .Audio_Mute {
+        audio_preview(cl, model.Volume, true)
+        return
+    }
+    if hit != .Audio_Slider { return }
+    if volume, ok := ui.Decoration_Audio_Value_At(&g_wm.ui, g_wm.m, ev.event, i32(ev.event_x)); ok {
+        audio_preview(cl, volume, false)
+        g_wm.audio_pointer_client = cl
+        g_wm.audio_pointer_xid = ev.event
     }
 }
 
@@ -1528,6 +1582,10 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
     cancel_preview_hover(false)
     g_wm.preview_hover_locked = true
     g_wm.preview_hover_target = 0
+    if cl := ui.Decoration_Audio_Popup_Client(&g_wm.ui, ev.event); cl != nil {
+        decoration_audio_popup_press(cl, ev)
+        return
+    }
     if field, ok := ui.Reminder_Input_At_Window(&g_wm.ui, ev.event); ok {
         ui.Set_Reminder_Field(&g_wm.ui, g_wm.m, field)
         return
@@ -1545,9 +1603,13 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
         return
     }
     if cl := ui.Decoration_Client(&g_wm.ui, ev.event); cl != nil {
+        if g_wm.ui.DecorationAudioPopupClient != nil && g_wm.ui.DecorationAudioPopupClient != cl {
+            ui.Hide_Decoration_Audio_Popup(&g_wm.ui)
+        }
         decoration_button_press(cl, ev)
         return
     }
+    ui.Hide_Decoration_Audio_Popup(&g_wm.ui)
     clean := ev.state & ~(g_wm.lock | g_wm.numlock)
     modified := g_wm.primary_mod != 0 && clean & g_wm.primary_mod == g_wm.primary_mod
     if tab := ui.Tab_Client(&g_wm.ui, ev.event); tab != nil {
@@ -1659,6 +1721,12 @@ on_button_press :: proc(ev: ^x11.Button_Press_Event) {
 }
 
 on_motion :: proc(ev: ^x11.Motion_Notify_Event) {
+    if cl := g_wm.audio_pointer_client; cl != nil {
+        if volume, ok := ui.Decoration_Audio_Value_At(&g_wm.ui, g_wm.m, g_wm.audio_pointer_xid, i32(ev.event_x)); ok {
+            audio_preview(cl, volume, false)
+        }
+        return
+    }
     cl := g_wm.mouse_client
     if cl == nil {
         if ui.Decoration_Client(&g_wm.ui, ev.event) != nil {
@@ -1784,6 +1852,12 @@ decoration_tile_floating_drag :: proc(cl: ^c.Client, target: c.Drop_Target) -> b
 }
 
 on_button_release :: proc(ev: ^x11.Button_Press_Event) {
+    if g_wm.audio_pointer_client != nil {
+        g_wm.audio_pointer_client = nil
+        g_wm.audio_pointer_xid = 0
+        x11.xcb_ungrab_pointer(g_wm.conn, x11.CURRENT_TIME)
+        return
+    }
     cl := g_wm.mouse_client
     if cl != nil && g_wm.mouse_tiled_drag {
         old_output := cl.Out
@@ -1862,6 +1936,8 @@ cancel_pointer_operation :: proc() {
     g_wm.mouse_decoration_event_x = 0
     g_wm.mouse_preview = {}
     g_wm.tiled_resize = {}
+    g_wm.audio_pointer_client = nil
+    g_wm.audio_pointer_xid = 0
 }
 
 NOTIFY_MODE_NORMAL :: u8(0)

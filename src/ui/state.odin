@@ -14,6 +14,9 @@ Tab_Decoration :: struct {
 Frame_Decoration :: struct {
     Xid: u32,
     Client: ^c.Client,
+    AudioVisible: bool,
+    AudioVolume: u32,
+    AudioMuted, AudioMixed: bool,
 }
 
 State :: struct {
@@ -26,6 +29,9 @@ State :: struct {
     Decorations: [dynamic]Frame_Decoration,
     DecorationCursors: [9]u32, // normal + eight directional resize cursors
     DecorationCursorFont: u32,
+    DecorationAudioPopup: u32,
+    DecorationAudioPopupClient: ^c.Client,
+    DecorationAudioPopupRect: c.Rect,
     TabGC, TabFont: u32,
     HelpWindow: u32,
     NoticeWindow: u32,
