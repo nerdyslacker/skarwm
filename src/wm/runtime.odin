@@ -132,7 +132,8 @@ wm_startup :: proc() -> bool {
 
 cleanup_all :: proc() {
     cfg_watch_shutdown()
-    audio.Shutdown(&g_wm.audio)
+    audio_mapping_shutdown()
+    audio.Shutdown(&g_wm.audio_state)
     bar_shutdown()
     randr_shutdown()
     ui.Hide_Drop(&g_wm.ui)
@@ -229,7 +230,7 @@ event_loop :: proc() {
         n := 1
         if g_ipc.listen >= 0 { n += 1 }
         n += len(g_ipc.clients)
-        n += audio.IO_Count(&g_wm.audio)
+        n += audio.IO_Count(&g_wm.audio_state)
         pfds := make([]posix.pollfd, n)
         pfds[0] = posix.pollfd{fd = xfd, events = {.IN}}
         i := 1
@@ -244,7 +245,7 @@ event_loop :: proc() {
             i += 1
         }
         audio_start := i
-        _ = audio.Append_Poll_FDs(&g_wm.audio, pfds, audio_start)
+        _ = audio.Append_Poll_FDs(&g_wm.audio_state, pfds, audio_start)
 
         timeout := rendering.Poll_Timeout_Ms(&g_wm.rendering)
         notice_timeout := ui.Notice_Poll_Timeout_Ms(&g_wm.ui)
@@ -271,7 +272,7 @@ event_loop :: proc() {
         if timeout < 0 || (bar_timeout >= 0 && bar_timeout < timeout) {
             timeout = bar_timeout
         }
-        audio_timeout := audio.Poll_Timeout_Ms(&g_wm.audio)
+        audio_timeout := audio.Poll_Timeout_Ms(&g_wm.audio_state)
         if timeout < 0 || (audio_timeout >= 0 && audio_timeout < timeout) {
             timeout = audio_timeout
         }
@@ -322,7 +323,7 @@ event_loop :: proc() {
         }
         for cl in to_drop { ipc_drop_client(cl) } // removed after the walk
         delete(to_drop)
-        audio.Dispatch_Poll(&g_wm.audio, pfds, audio_start)
+        audio.Dispatch_Poll(&g_wm.audio_state, pfds, audio_start)
         delete(pfds)
         // A busy X or IPC stream cannot starve animation frames: check the
         // monotonic deadline after dispatch as well as through poll's timeout.
@@ -333,17 +334,23 @@ event_loop :: proc() {
         randr_run_due()
         cfg_watch_run_due()
         bar_run_due()
-        audio.Run_Due(&g_wm.audio)
+        audio.Run_Due(&g_wm.audio_state)
+        audio_reconcile()
     }
 }
 
 audio_sync_config :: proc() {
     enabled := g_wm.m != nil && g_wm.m.Cfg.Decoration.Enabled && g_wm.m.Cfg.Decoration.AudioEnabled
-    if enabled == g_wm.audio.Enabled { return }
-    audio.Shutdown(&g_wm.audio)
-    if enabled && !audio.Init(&g_wm.audio, true) {
+    if enabled == g_wm.audio_state.Enabled {
+        if enabled { audio_refresh_all_windows(); audio_reconcile() }
+        return
+    }
+    audio_mapping_shutdown()
+    audio.Shutdown(&g_wm.audio_state)
+    if enabled && !audio.Init(&g_wm.audio_state, true) {
         logger.Warn("titlebar audio unavailable; libpulse client library was not found")
     }
+    if enabled { audio_mapping_init(); audio_reconcile() }
 }
 
 handle_event :: proc(ev: ^x11.Event) {

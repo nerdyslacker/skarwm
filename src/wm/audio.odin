@@ -1,0 +1,228 @@
+package wm
+
+import audio "../audio"
+import c "../core"
+import x11 "../x11"
+
+import "core:fmt"
+import "core:os"
+import "core:strconv"
+import "core:strings"
+import "core:sys/posix"
+
+Audio_Window :: struct {
+    XID: u32,
+    Process: audio.Verified_Process,
+    Valid, Eligible: bool,
+}
+
+Audio_Verified_Stream :: struct {
+    Index: u32,
+    Generation: u64,
+    Candidate: audio.Stream_Candidate,
+}
+
+process_start_time :: proc(pid: i64) -> (u64, bool) {
+    path := fmt.tprintf("/proc/%d/stat", pid)
+    data, err := os.read_entire_file(path, context.temp_allocator)
+    if err != nil || len(data) == 0 { return 0, false }
+    text := string(data)
+    close := -1
+    for i := len(text)-1; i >= 0; i -= 1 { if text[i] == ')' { close = i; break } }
+    if close < 0 || close+2 >= len(text) { return 0, false }
+    fields := text[close+2:]
+    for index in 0 ..< 20 {
+        field, ok := strings.fields_iterator(&fields)
+        if !ok { return 0, false }
+        if index == 19 {
+            value, parsed := strconv.parse_u64(field)
+            return value, parsed && value != 0
+        }
+    }
+    return 0, false
+}
+
+process_uid_matches :: proc(pid: i64) -> bool {
+    path := fmt.tprintf("/proc/%d/status", pid)
+    data, err := os.read_entire_file(path, context.temp_allocator)
+    if err != nil { return false }
+    lines := string(data)
+    for {
+        line, ok := strings.split_lines_iterator(&lines)
+        if !ok { break }
+        if !strings.has_prefix(line, "Uid:") { continue }
+        fields := line
+        _, _ = strings.fields_iterator(&fields)
+        expected := u64(posix.getuid())
+        for _ in 0 ..< 4 {
+            field, found := strings.fields_iterator(&fields)
+            if !found { return false }
+            value, parsed := strconv.parse_u64(field)
+            if !parsed || value != expected { return false }
+        }
+        return true
+    }
+    return false
+}
+
+path_base :: proc(path: string) -> string {
+    for i := len(path)-1; i >= 0; i -= 1 { if path[i] == '/' { return path[i+1:] } }
+    return path
+}
+
+read_process_identity :: proc(pid: i64) -> (audio.Verified_Process, bool) {
+    when ODIN_OS != .Linux { return {}, false }
+    if pid <= 0 || !process_uid_matches(pid) { return {}, false }
+    before, ok := process_start_time(pid)
+    if !ok { return {}, false }
+    link, err := os.read_link(fmt.tprintf("/proc/%d/exe", pid), context.allocator)
+    if err != nil || link == "" { return {}, false }
+    defer delete(link)
+    after, same := process_start_time(pid)
+    if !same || before != after { return {}, false }
+    executable := strings.clone(path_base(link))
+    if executable == "" { return {}, false }
+    return audio.Verified_Process{PID = pid, Start_Time = before, Executable = executable}, true
+}
+
+local_hostname :: proc() -> string {
+    buf: [256]u8
+    if posix.gethostname(&buf[0], len(buf)) != nil { return "" }
+    n := 0
+    for n < len(buf) && buf[n] != 0 { n += 1 }
+    return strings.clone(string(buf[:n]))
+}
+
+local_machine_id :: proc() -> string {
+    data, err := os.read_entire_file("/etc/machine-id", context.temp_allocator)
+    if err != nil { return "" }
+    value := strings.trim_space(string(data))
+    return strings.clone(value)
+}
+
+free_window_meta :: proc(meta: ^Audio_Window) {
+    if meta.Process.Executable != "" { delete(meta.Process.Executable) }
+    meta^ = {}
+}
+
+free_stream_meta :: proc(meta: ^Audio_Verified_Stream) {
+    if meta.Candidate.Process.Executable != "" { delete(meta.Candidate.Process.Executable) }
+    meta^ = {}
+}
+
+audio_refresh_window :: proc(cl: ^c.Client) {
+    if cl == nil || !g_wm.audio_state.Enabled { return }
+    existing := -1
+    for meta, i in g_wm.audio_windows { if meta.XID == cl.Xid { existing = i; break } }
+    next := Audio_Window{XID = cl.Xid, Eligible = cl.Decorated && !cl.Dock}
+    if pid, ok := x11.get_cardinal32(g_wm.conn, cl.Xid, atom("_NET_WM_PID"), atom("CARDINAL")); ok && pid > 0 {
+        next.Process, next.Valid = read_process_identity(i64(pid))
+    }
+    if existing >= 0 { free_window_meta(&g_wm.audio_windows[existing]); g_wm.audio_windows[existing] = next }
+    else { append(&g_wm.audio_windows, next) }
+    g_wm.audio_mapping_dirty = true
+}
+
+audio_forget_window :: proc(xid: u32) {
+    for meta, i in g_wm.audio_windows {
+        if meta.XID != xid { continue }
+        free_window_meta(&g_wm.audio_windows[i])
+        unordered_remove(&g_wm.audio_windows, i)
+        g_wm.audio_mapping_dirty = true
+        return
+    }
+}
+
+audio_refresh_all_windows :: proc() {
+    if !g_wm.audio_state.Enabled || g_wm.m == nil { return }
+    for cl in g_wm.m.Clients { if !cl.Dock { audio_refresh_window(cl) } }
+}
+
+audio_mapping_init :: proc() {
+    g_wm.audio_windows = make([dynamic]Audio_Window, 0, 16)
+    g_wm.audio_streams = make([dynamic]Audio_Verified_Stream, 0, 8)
+    g_wm.audio_models = make([dynamic]audio.Window_Model, 0, 4)
+    g_wm.audio_host = local_hostname()
+    g_wm.audio_machine_id = local_machine_id()
+    g_wm.audio_mapping_dirty = true
+    audio_refresh_all_windows()
+}
+
+audio_mapping_shutdown :: proc() {
+    for &meta in g_wm.audio_windows { free_window_meta(&meta) }
+    for &meta in g_wm.audio_streams { free_stream_meta(&meta) }
+    delete(g_wm.audio_windows)
+    delete(g_wm.audio_streams)
+    audio.Free_Window_Models(&g_wm.audio_models)
+    if g_wm.audio_host != "" { delete(g_wm.audio_host) }
+    if g_wm.audio_machine_id != "" { delete(g_wm.audio_machine_id) }
+    g_wm.audio_windows, g_wm.audio_streams = nil, nil
+    g_wm.audio_host, g_wm.audio_machine_id = "", ""
+    g_wm.audio_seen_revision = 0
+    g_wm.audio_mapping_dirty = false
+}
+
+parse_stream_xid :: proc(value: string) -> u32 {
+    if value == "" { return 0 }
+    parsed, ok := strconv.parse_u64(value)
+    if !ok || parsed == 0 || parsed > u64(max(u32)) { return 0 }
+    return u32(parsed)
+}
+
+verified_stream :: proc(stream: ^audio.Stream) -> audio.Stream_Candidate {
+    candidate := audio.Stream_Candidate{Index = stream.Index}
+    if stream.Process_ID <= 0 || stream.Process_Binary == "" || stream.Process_Host == "" ||
+       g_wm.audio_host == "" || stream.Process_Host != g_wm.audio_host {
+        return candidate
+    }
+    if stream.Machine_ID != "" && g_wm.audio_machine_id != "" && stream.Machine_ID != g_wm.audio_machine_id {
+        return candidate
+    }
+    process, ok := read_process_identity(stream.Process_ID)
+    if !ok { return candidate }
+    if process.Executable != path_base(stream.Process_Binary) {
+        delete(process.Executable)
+        return candidate
+    }
+    candidate.Process = process
+    candidate.Window_XID = parse_stream_xid(stream.Window_XID)
+    candidate.Valid = true
+    return candidate
+}
+
+audio_reconcile :: proc() {
+    if !g_wm.audio_state.Enabled || (!g_wm.audio_mapping_dirty && g_wm.audio_seen_revision == g_wm.audio_state.Revision) { return }
+    for i := len(g_wm.audio_streams)-1; i >= 0; i -= 1 {
+        live := false
+        for stream in g_wm.audio_state.Streams {
+            if stream.Index == g_wm.audio_streams[i].Index && stream.Generation == g_wm.audio_streams[i].Generation { live = true; break }
+        }
+        if !live { free_stream_meta(&g_wm.audio_streams[i]); unordered_remove(&g_wm.audio_streams, i) }
+    }
+    for &stream in g_wm.audio_state.Streams {
+        found := false
+        for meta in g_wm.audio_streams {
+            if meta.Index == stream.Index && meta.Generation == stream.Generation { found = true; break }
+        }
+        if !found {
+            append(&g_wm.audio_streams, Audio_Verified_Stream{
+                Index = stream.Index, Generation = stream.Generation, Candidate = verified_stream(&stream),
+            })
+        }
+    }
+    windows := make([]audio.Window_Candidate, len(g_wm.audio_windows), context.temp_allocator)
+    for meta, i in g_wm.audio_windows {
+        windows[i] = audio.Window_Candidate{XID = meta.XID, Process = meta.Process, Eligible = meta.Valid && meta.Eligible}
+    }
+    streams := make([]audio.Stream_Candidate, len(g_wm.audio_streams), context.temp_allocator)
+    for meta, i in g_wm.audio_streams { streams[i] = meta.Candidate }
+    audio.Free_Window_Models(&g_wm.audio_models)
+    g_wm.audio_models = audio.Build_Window_Models(g_wm.audio_state.Streams[:], streams, windows)
+    g_wm.audio_seen_revision = g_wm.audio_state.Revision
+    g_wm.audio_mapping_dirty = false
+}
+
+audio_model_for_window :: proc(xid: u32) -> ^audio.Window_Model {
+    for &model in g_wm.audio_models { if model.Window_XID == xid { return &model } }
+    return nil
+}

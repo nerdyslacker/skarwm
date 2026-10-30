@@ -189,6 +189,15 @@ Rules use a substring match against `class`, `instance`, or `title`. Effects are
 `decorate true|false`; the first matching rule is used. A decoration rule
 overrides the global `decorations_enabled` value for that client.
 
+Titlebar audio matching fails closed. A Pulse stream must identify the same
+live local process as the X11 window, including its process start time and
+executable. An exact Pulse X11 window ID is used only after that verification.
+Without one, the process must own exactly one decorated window. Browser helper
+processes, reused PIDs, remote streams, and multi-window ambiguity are hidden;
+application names alone are never used. Multiple verified writable streams for
+one window are grouped, with the highest channel-average volume displayed and
+mixed mute state retained.
+
 skarwm watches the main configuration and its imports, including editor saves
 that replace a file. `Super+Shift+r` runs `reload_config` on demand. Reload is
 atomic: malformed input leaves the active configuration unchanged.

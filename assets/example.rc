@@ -16,6 +16,7 @@ decoration_titlebar_height : 20
 decoration_border_width : 1
 decoration_resize_hit_width : 4
 decoration_show_title : true
+# decoration_audio_enabled : true
 decoration_color_source : active-border
 # decoration_accent : #89B4FA
 # decoration_active_background : #313244

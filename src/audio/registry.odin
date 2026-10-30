@@ -17,7 +17,7 @@ Stream :: struct {
     Index, Client: u32,
     Generation: u64,
     Process_ID: i64,
-    Application_ID, Application_Name, Process_Binary, Window_XID: string,
+    Application_ID, Application_Name, Process_Binary, Process_Host, Machine_ID, Window_XID: string,
     Channels: u8,
     Volume: [32]u32,
     Muted, Corked, Volume_Writable: bool,
@@ -89,6 +89,8 @@ free_stream :: proc(stream: ^Stream) {
     if stream.Application_ID != "" { delete(stream.Application_ID) }
     if stream.Application_Name != "" { delete(stream.Application_Name) }
     if stream.Process_Binary != "" { delete(stream.Process_Binary) }
+    if stream.Process_Host != "" { delete(stream.Process_Host) }
+    if stream.Machine_ID != "" { delete(stream.Machine_ID) }
     if stream.Window_XID != "" { delete(stream.Window_XID) }
     stream^ = {}
 }
@@ -132,12 +134,17 @@ Remove_Stream :: proc(state: ^State, index: u32) {
 }
 
 Replace_Stream :: proc(state: ^State, stream: Stream) {
+    next := stream
     i := stream_index(state, stream.Index)
     if i >= 0 {
+        old := &state.Streams[i]
+        same_identity := old.Process_ID == stream.Process_ID && old.Process_Binary == stream.Process_Binary &&
+            old.Process_Host == stream.Process_Host && old.Machine_ID == stream.Machine_ID && old.Window_XID == stream.Window_XID
+        if same_identity { next.Generation = old.Generation }
         free_stream(&state.Streams[i])
-        state.Streams[i] = stream
+        state.Streams[i] = next
     } else {
-        append(&state.Streams, stream)
+        append(&state.Streams, next)
     }
     state.Revision += 1
 }
@@ -161,6 +168,8 @@ stream_from_info :: proc(state: ^State, info: ^Pulse_Sink_Input_Info) -> Stream 
     stream.Application_ID = prop(state, info.proplist, "application.id")
     stream.Application_Name = prop(state, info.proplist, "application.name")
     stream.Process_Binary = prop(state, info.proplist, "application.process.binary")
+    stream.Process_Host = prop(state, info.proplist, "application.process.host")
+    stream.Machine_ID = prop(state, info.proplist, "application.process.machine_id")
     stream.Window_XID = prop(state, info.proplist, "window.x11.xid")
     if info.has_volume != 0 {
         stream.Channels = min(info.volume.channels, u8(32))

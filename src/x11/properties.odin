@@ -89,6 +89,23 @@ get_prop :: proc(c: ^Connection, window: u32, prop: u32, wanted_type: u32 = 0) -
     }
 }
 
+// Process association is security-sensitive: accept exactly one CARDINAL, not
+// arbitrary bytes that happen to contain a plausible PID.
+get_cardinal32 :: proc(c: ^Connection, window, prop, cardinal_atom: u32) -> (u32, bool) {
+    if c == nil || prop == 0 || cardinal_atom == 0 { return 0, false }
+    e: ^Error
+    reply := xcb_get_property_reply(c, xcb_get_property(c, 0, window, prop, cardinal_atom, 0, 1), &e)
+    if e != nil { free_libc(e); return 0, false }
+    if reply == nil { return 0, false }
+    defer free_libc(reply)
+    if reply.type_ != cardinal_atom || reply.format != ATOM_FORMAT_32 || reply.value_len != 1 || reply.bytes_after != 0 {
+        return 0, false
+    }
+    value := (^u32)(xcb_get_property_value(reply))
+    if value == nil { return 0, false }
+    return value^, true
+}
+
 // get_atom_name returns an owned copy of an atom's server-side name. XCB's
 // generated accessor is used because variable-length reply payloads are not a
 // public struct-layout contract.

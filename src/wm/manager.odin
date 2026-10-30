@@ -78,7 +78,13 @@ Wm :: struct {
     bar_blocks: [dynamic]Raw_Bar_Block,
     virtual_screens: [dynamic]Virtual_Screen_Profile,
     workspace_layouts: [dynamic]Workspace_Layout_Rule,
-    audio: audio.State,
+    audio_state: audio.State,
+    audio_windows: [dynamic]Audio_Window,
+    audio_streams: [dynamic]Audio_Verified_Stream,
+    audio_models: [dynamic]audio.Window_Model,
+    audio_host, audio_machine_id: string,
+    audio_seen_revision: u64,
+    audio_mapping_dirty: bool,
 }
 
 g_wm: Wm
@@ -306,6 +312,7 @@ manage :: proc(xid: u32, float_override: bool, requested_output: ^c.Output = nil
         floating = floating || fl
     }
     c.Add_Managed(m, ws, cl, floating, tab_target)
+    audio_refresh_window(cl)
     ui.Ensure_Decoration(&g_wm.ui, m, cl)
     if cl.Dialog && cl.Floating {
         cl.FloatingRect = initial_dialog_rect(cl, transient_parent)
@@ -625,6 +632,7 @@ unmanage :: proc(cl: ^c.Client) {
     ewmh_client_unmanaged(cl) // WM_STATE Withdrawn + _NET_CLIENT_LIST refresh
     rendering.Forget(&g_wm.rendering, cl.Xid)
     ui.Destroy_Decoration(&g_wm.ui, cl)
+    audio_forget_window(cl.Xid)
     // drop events so the X server stops notifying us about this window
     c.Free_Client(cl)
     if dock {
@@ -1931,9 +1939,16 @@ apply_float_configure :: proc(cl: ^c.Client, ev: ^x11.Configure_Request_Event) {
 on_property_notify :: proc(ev: ^x11.Property_Notify_Event) {
     cl := g_wm.m.ByXid[ev.window]
     if cl == nil { return }
+    if ev.atom == atom("_NET_WM_PID") {
+        audio_refresh_window(cl)
+        audio_reconcile()
+        return
+    }
     if ev.atom == atom("_NET_WM_WINDOW_TYPE") {
         if !cl.Dock && read_window_type(cl) {
             promote_client_to_dock(cl)
+            audio_forget_window(cl.Xid)
+            audio_reconcile()
         } else if !cl.Dialog && read_dialog_type(cl) {
             cl.Dialog = true
             promote_client_to_dialog(cl)
