@@ -130,6 +130,13 @@ audio_refresh_window :: proc(cl: ^c.Client) {
     if pid, ok := x11.get_cardinal32(g_wm.conn, cl.Xid, atom("_NET_WM_PID"), atom("CARDINAL")); ok && pid > 0 {
         next.Process, next.Valid = read_process_identity(i64(pid))
     }
+    // Some toolkits (nare among them) never publish _NET_WM_PID; the X server's
+    // X-Resource record still names the owning local process.
+    if !next.Valid {
+        if pid, ok := x11.client_pid(g_wm.conn, cl.Xid); ok {
+            next.Process, next.Valid = read_process_identity(i64(pid))
+        }
+    }
     if !next.Valid { logger.Debug("titlebar audio: window has no verifiable local process", cl.Xid, cl.Title) }
     if existing >= 0 { free_window_meta(&g_wm.audio_windows[existing]); g_wm.audio_windows[existing] = next }
     else { append(&g_wm.audio_windows, next) }

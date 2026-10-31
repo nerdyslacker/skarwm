@@ -70,31 +70,85 @@ main :: proc() {
         {XID = 10, Process = proc_a, Eligible = true},
     }
     exact := audio.Stream_Candidate{Index = 1, Window_XID = 10, Process = proc_a, Valid = true}
-    ok(audio.Match_Window(exact, windows) == 10, "verified XID and process match")
+    owner, only_xid, matched := audio.Match_Owner(exact, windows)
+    ok(matched && owner.PID == 100 && only_xid == 10, "verified XID and process match")
     wrong_process := exact
     wrong_process.Process.Start_Time = 56
-    ok(audio.Match_Window(wrong_process, windows) == 0, "PID reuse is rejected")
+    _, _, matched = audio.Match_Owner(wrong_process, windows)
+    ok(!matched, "PID reuse is rejected")
     helper := exact
     helper.Process.PID = 101
-    ok(audio.Match_Window(helper, windows) == 0, "browser helper PID is not guessed")
+    _, _, matched = audio.Match_Owner(helper, windows)
+    ok(!matched, "browser helper PID is not guessed")
     missing_pid := exact
     missing_pid.Valid = false
-    ok(audio.Match_Window(missing_pid, windows) == 0, "missing window process metadata is rejected")
+    _, _, matched = audio.Match_Owner(missing_pid, windows)
+    ok(!matched, "missing window process metadata is rejected")
     unnamed := exact
     unnamed.Window_XID = 0
     duplicate_windows := []audio.Window_Candidate{
         {XID = 10, Process = proc_a, Eligible = true},
         {XID = 11, Process = proc_a, Eligible = true},
     }
-    ok(audio.Match_Window(unnamed, duplicate_windows) == 0, "multi-window process is ambiguous")
-    ok(audio.Match_Window(unnamed, windows) == 10, "unique verified process match")
+    owner, only_xid, matched = audio.Match_Owner(unnamed, duplicate_windows)
+    ok(matched && owner.PID == 100 && only_xid == 0, "multi-window process is matched at application level")
+    owner, only_xid, matched = audio.Match_Owner(unnamed, windows)
+    ok(matched && owner.PID == 100 && only_xid == 0, "unique verified process match")
+    grouped_models := audio.Build_Window_Models([]audio.Stream{{Index = 5, Channels = 1, Volume_Writable = true}},
+        []audio.Stream_Candidate{{Index = 5, Process = proc_a, Valid = true}}, duplicate_windows)
+    ok(len(grouped_models) == 2 && len(grouped_models[0].Stream_Indices) == 1 && len(grouped_models[1].Stream_Indices) == 1,
+       "same-process windows share application audio")
+    audio.Free_Window_Models(&grouped_models)
     child := audio.Stream_Candidate{Index = 2, Process = audio.Verified_Process{PID=101, Start_Time=56, Executable="cliamp"}, Valid=true}
     child.Ancestors[0] = {PID=proc_a.PID, Start_Time=proc_a.Start_Time}
     child.Ancestor_Count = 1
-    ok(audio.Match_Window(child, windows) == 10, "verified terminal child maps to its terminal window")
-    ok(audio.Match_Window(child, duplicate_windows) == 0, "terminal child remains hidden when one ancestor owns multiple windows")
+    owner, _, matched = audio.Match_Owner(child, windows)
+    ok(matched && owner.PID == 100, "verified terminal child maps to its terminal window")
+    owner, _, matched = audio.Match_Owner(child, duplicate_windows)
+    ok(matched && owner.PID == 100, "terminal child groups onto the owning terminal windows")
     child.Ancestors[0].Start_Time += 1
-    ok(audio.Match_Window(child, windows) == 0, "stale terminal ancestor is rejected")
+    _, _, matched = audio.Match_Owner(child, windows)
+    ok(!matched, "stale terminal ancestor is rejected")
+    launcher := audio.Verified_Process{PID = 300, Start_Time = 99, Executable = "dolphin"}
+    player := audio.Verified_Process{PID = 301, Start_Time = 98, Executable = "mpv"}
+    launched := audio.Stream_Candidate{Index = 6, Process = player, Valid = true}
+    launched.Ancestors[0] = {PID = launcher.PID, Start_Time = launcher.Start_Time}
+    launched.Ancestor_Count = 1
+    launched_windows := []audio.Window_Candidate{
+        {XID = 30, Process = launcher, Eligible = true},
+        {XID = 31, Process = player, Eligible = true},
+    }
+    owner, only_xid, matched = audio.Match_Owner(launched, launched_windows)
+    ok(matched && owner.PID == player.PID && only_xid == 0, "player process wins over the launcher ancestor")
+    launched_models := audio.Build_Window_Models([]audio.Stream{{Index = 6, Channels = 1, Volume_Writable = true}},
+        []audio.Stream_Candidate{launched}, launched_windows)
+    ok(len(launched_models) == 1 && launched_models[0].Window_XID == 31,
+       "only the player window receives the launcher-child stream")
+    audio.Free_Window_Models(&launched_models)
+    far := audio.Verified_Process{PID = 400, Start_Time = 90, Executable = "launcher"}
+    near_ancestor := audio.Verified_Process{PID = 401, Start_Time = 91, Executable = "terminal"}
+    nested := audio.Stream_Candidate{Index = 7, Process = audio.Verified_Process{PID = 402, Start_Time = 92, Executable = "cliamp"}, Valid = true}
+    nested.Ancestors[0] = {PID = near_ancestor.PID, Start_Time = near_ancestor.Start_Time}
+    nested.Ancestors[1] = {PID = far.PID, Start_Time = far.Start_Time}
+    nested.Ancestor_Count = 2
+    nested_windows := []audio.Window_Candidate{
+        {XID = 40, Process = far, Eligible = true},
+        {XID = 41, Process = near_ancestor, Eligible = true},
+    }
+    owner, _, matched = audio.Match_Owner(nested, nested_windows)
+    ok(matched && owner.PID == near_ancestor.PID, "nearest ancestor wins over a farther launcher window")
+    client_meta := audio.Client_Meta{Index = 3, Process_ID = 402, Application_ID = "org.kde.elisa",
+        Process_Binary = "elisa", Process_Host = "host", Machine_ID = "machine"}
+    filled := audio.Stream{Index = 8}
+    ok(audio.Apply_Client_Meta(&filled, client_meta), "client metadata fills missing stream fields")
+    ok(filled.Process_ID == 402 && filled.Process_Binary == "elisa" && filled.Application_ID == "org.kde.elisa" &&
+       filled.Process_Host == "host" && filled.Machine_ID == "machine", "client metadata merges into the stream")
+    delete(filled.Process_Binary); delete(filled.Application_ID); delete(filled.Process_Host); delete(filled.Machine_ID)
+    kept := audio.Stream{Index = 9, Process_ID = 500, Process_Binary = "stream-binary", Application_ID = "stream-id",
+        Process_Host = "stream-host", Machine_ID = "stream-machine"}
+    ok(!audio.Apply_Client_Meta(&kept, client_meta), "stream metadata wins over client metadata")
+    ok(kept.Process_ID == 500 && kept.Process_Binary == "stream-binary" && kept.Application_ID == "stream-id" &&
+       kept.Process_Host == "stream-host" && kept.Machine_ID == "stream-machine", "existing stream identity is preserved")
     ok(audio.Application_Matches_Process("mpv", "", "mpv"), "PipeWire application ID identifies mpv")
     ok(audio.Application_Matches_Process("elisa", "", "org.kde.elisa"), "reverse-domain application ID identifies Elisa")
     ok(audio.Application_Matches_Process("vlc", "/usr/bin/vlc", "org.VideoLAN.VLC"), "binary metadata identifies VLC")

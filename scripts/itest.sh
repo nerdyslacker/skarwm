@@ -151,6 +151,16 @@ sleep 1.2
 export DISPLAY="$DISP"
 xwininfo -root >/dev/null 2>&1 || die_display
 
+# X-Resource fallback: a window without _NET_WM_PID still resolves its owner.
+if [ ! -x build/x11-tests ] || find src/x11 tests/x11_tests -name '*.odin' -newer build/x11-tests | grep -q .; then
+  odin build tests/x11_tests -out:build/x11-tests || { say "FATAL: x11 test build failed"; exit 1; }
+fi
+if out=$(./build/x11-tests 2>&1); then
+  pass "$out"
+else
+  fail "$out"
+fi
+
 # A bad explicit socket path must never delete user data.
 socket_marker="${TMPDIR:-/tmp}/skarwm-itest-regular-file"
 printf '%s\n' keep >"$socket_marker"

@@ -1,6 +1,6 @@
 # skarwm build.
 #
-# Required at *runtime*:   libxcb + libxcb-randr + libxcb-shape; titlebar audio
+# Required at *runtime*:   libxcb + libxcb-randr + libxcb-shape + libxcb-res; titlebar audio
 #                          loads libpulse.so.0 only when explicitly enabled; the
 #                          optional bar additionally uses libX11 + libXft/fontconfig
 # Required at *build* time: odin

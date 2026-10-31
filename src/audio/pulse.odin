@@ -69,6 +69,14 @@ Pulse_CVolume :: struct {
     values: [32]u32,
 }
 
+Pulse_Client_Info :: struct {
+    index: u32,
+    name: cstring,
+    owner_module: u32,
+    driver: cstring,
+    proplist: ^Pulse_Proplist,
+}
+
 Pulse_Sink_Input_Info :: struct {
     index: u32,
     name: cstring,
@@ -91,6 +99,7 @@ Pulse_Sink_Input_Info :: struct {
 }
 
 #assert(size_of(Pulse_Mainloop_API) == 112)
+#assert(size_of(Pulse_Client_Info) == 40)
 #assert(size_of(Pulse_Sample_Spec) == 12)
 #assert(size_of(Pulse_Channel_Map) == 132)
 #assert(size_of(Pulse_CVolume) == 132)
@@ -100,6 +109,7 @@ Pulse_Context_Notify_CB :: proc "c" (^Pulse_Context, rawptr)
 Pulse_Context_Success_CB :: proc "c" (^Pulse_Context, i32, rawptr)
 Pulse_Subscribe_CB :: proc "c" (^Pulse_Context, i32, u32, rawptr)
 Pulse_Sink_Input_CB :: proc "c" (^Pulse_Context, ^Pulse_Sink_Input_Info, i32, rawptr)
+Pulse_Client_CB :: proc "c" (^Pulse_Context, ^Pulse_Client_Info, i32, rawptr)
 
 Pulse_Symbols :: struct {
     context_new: proc "c" (^Pulse_Mainloop_API, cstring) -> ^Pulse_Context `dynlib:"pa_context_new"`,
@@ -112,6 +122,7 @@ Pulse_Symbols :: struct {
     context_subscribe: proc "c" (^Pulse_Context, u32, Pulse_Context_Success_CB, rawptr) -> ^Pulse_Operation `dynlib:"pa_context_subscribe"`,
     context_get_sink_input_info_list: proc "c" (^Pulse_Context, Pulse_Sink_Input_CB, rawptr) -> ^Pulse_Operation `dynlib:"pa_context_get_sink_input_info_list"`,
     context_get_sink_input_info: proc "c" (^Pulse_Context, u32, Pulse_Sink_Input_CB, rawptr) -> ^Pulse_Operation `dynlib:"pa_context_get_sink_input_info"`,
+    context_get_client_info: proc "c" (^Pulse_Context, u32, Pulse_Client_CB, rawptr) -> ^Pulse_Operation `dynlib:"pa_context_get_client_info"`,
     context_set_sink_input_volume: proc "c" (^Pulse_Context, u32, ^Pulse_CVolume, Pulse_Context_Success_CB, rawptr) -> ^Pulse_Operation `dynlib:"pa_context_set_sink_input_volume"`,
     context_set_sink_input_mute: proc "c" (^Pulse_Context, u32, i32, Pulse_Context_Success_CB, rawptr) -> ^Pulse_Operation `dynlib:"pa_context_set_sink_input_mute"`,
     operation_unref: proc "c" (^Pulse_Operation) `dynlib:"pa_operation_unref"`,
@@ -121,7 +132,7 @@ Pulse_Symbols :: struct {
 
 load_pulse :: proc(symbols: ^Pulse_Symbols) -> bool {
     count, ok := dynlib.initialize_symbols(symbols, "libpulse.so.0", handle_field_name = "_handle")
-    return ok && count == 14
+    return ok && count == 15
 }
 
 unload_pulse :: proc(symbols: ^Pulse_Symbols) {

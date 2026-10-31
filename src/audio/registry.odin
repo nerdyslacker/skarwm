@@ -23,6 +23,19 @@ Stream :: struct {
     Muted, Corked, Volume_Writable: bool,
 }
 
+Client_Meta :: struct {
+    Index: u32,
+    Process_ID: i64,
+    Application_ID, Process_Binary, Process_Host, Machine_ID: string,
+}
+
+Client_Request :: struct {
+    Owner: ^State,
+    Context: ^Pulse_Context,
+    Epoch: u64,
+    Index: u32,
+}
+
 Index_Version :: struct { Index: u32, Serial: u64 }
 
 IO_Event :: struct {
@@ -85,11 +98,13 @@ State :: struct {
     API: Pulse_Mainloop_API,
     Context: ^Pulse_Context,
     Streams: [dynamic]Stream,
+    Clients: [dynamic]Client_Meta,
     Versions: [dynamic]Index_Version,
     IO: [dynamic]^IO_Event,
     Times: [dynamic]^Time_Event,
     Defers: [dynamic]^Defer_Event,
     Requests: [dynamic]^Request,
+    Client_Requests: [dynamic]^Client_Request,
     Controls: [dynamic]Control,
     Control_Requests: [dynamic]^Control_Request,
     Poll_Events: [dynamic]^IO_Event,
@@ -128,12 +143,87 @@ free_stream :: proc(stream: ^Stream) {
     stream^ = {}
 }
 
+free_client_meta :: proc(meta: ^Client_Meta) {
+    if meta.Application_ID != "" { delete(meta.Application_ID) }
+    if meta.Process_Binary != "" { delete(meta.Process_Binary) }
+    if meta.Process_Host != "" { delete(meta.Process_Host) }
+    if meta.Machine_ID != "" { delete(meta.Machine_ID) }
+    meta^ = {}
+}
+
+clear_clients :: proc(state: ^State) {
+    for &meta in state.Clients { free_client_meta(&meta) }
+    clear(&state.Clients)
+}
+
 Clear_Streams :: proc(state: ^State) {
     for &stream in state.Streams { free_stream(&stream) }
     clear(&state.Streams)
     clear(&state.Versions)
     clear(&state.Controls)
+    clear_clients(state)
     state.Revision += 1
+}
+
+client_meta_index :: proc(state: ^State, index: u32) -> int {
+    for meta, i in state.Clients { if meta.Index == index { return i } }
+    return -1
+}
+
+client_request_pending :: proc(state: ^State, index: u32) -> bool {
+    for request in state.Client_Requests { if request.Index == index { return true } }
+    return false
+}
+
+client_referenced :: proc(state: ^State, index: u32) -> bool {
+    for stream in state.Streams { if stream.Client == index { return true } }
+    return false
+}
+
+prune_client :: proc(state: ^State, index: u32) {
+    if index == 0 || client_referenced(state, index) { return }
+    i := client_meta_index(state, index)
+    if i >= 0 { free_client_meta(&state.Clients[i]); unordered_remove(&state.Clients, i) }
+}
+
+// ALSA and other PipeWire compatibility clients can omit process metadata from
+// the sink input while exposing it on the Pulse client object.
+Apply_Client_Meta :: proc(stream: ^Stream, meta: Client_Meta) -> bool {
+    changed := false
+    if stream.Process_ID <= 0 && meta.Process_ID > 0 {
+        stream.Process_ID = meta.Process_ID
+        changed = true
+    }
+    if stream.Process_Binary == "" && meta.Process_Binary != "" {
+        stream.Process_Binary = strings.clone(meta.Process_Binary)
+        changed = true
+    }
+    if stream.Application_ID == "" && meta.Application_ID != "" {
+        stream.Application_ID = strings.clone(meta.Application_ID)
+        changed = true
+    }
+    if stream.Process_Host == "" && meta.Process_Host != "" {
+        stream.Process_Host = strings.clone(meta.Process_Host)
+        changed = true
+    }
+    if stream.Machine_ID == "" && meta.Machine_ID != "" {
+        stream.Machine_ID = strings.clone(meta.Machine_ID)
+        changed = true
+    }
+    return changed
+}
+
+store_client_meta :: proc(state: ^State, meta: Client_Meta) {
+    i := client_meta_index(state, meta.Index)
+    if i >= 0 { free_client_meta(&state.Clients[i]); state.Clients[i] = meta }
+    else { append(&state.Clients, meta) }
+    for &stream in state.Streams {
+        if stream.Client != meta.Index { continue }
+        if !Apply_Client_Meta(&stream, meta) { continue }
+        state.Next_Generation += 1
+        stream.Generation = state.Next_Generation
+        state.Revision += 1
+    }
 }
 
 stream_index :: proc(state: ^State, index: u32) -> int {
@@ -221,9 +311,11 @@ Remove_Stream :: proc(state: ^State, index: u32) {
     remove_control(state, control_index(state, index))
     i := stream_index(state, index)
     if i < 0 { return }
+    client := state.Streams[i].Client
     free_stream(&state.Streams[i])
     unordered_remove(&state.Streams, i)
     state.Revision += 1
+    prune_client(state, client)
 }
 
 apply_control_preview :: proc(state: ^State, stream: ^Stream) {
@@ -263,8 +355,10 @@ Replace_Stream :: proc(state: ^State, stream: Stream) {
         same_identity := old.Process_ID == stream.Process_ID && old.Process_Binary == stream.Process_Binary &&
             old.Process_Host == stream.Process_Host && old.Machine_ID == stream.Machine_ID && old.Window_XID == stream.Window_XID
         if same_identity { next.Generation = old.Generation }
+        old_client := old.Client
         free_stream(&state.Streams[i])
         state.Streams[i] = next
+        if old_client != next.Client { prune_client(state, old_client) }
     } else {
         append(&state.Streams, next)
     }
@@ -312,8 +406,13 @@ apply_info :: proc(request: ^Request, info: ^Pulse_Sink_Input_Info) {
         return
     }
     stream := stream_from_info(state, info)
+    client_i := client_meta_index(state, stream.Client)
+    if client_i >= 0 { _ = Apply_Client_Meta(&stream, state.Clients[client_i]) }
     apply_control_preview(state, &stream)
     Replace_Stream(state, stream)
+    if client_i < 0 && (stream.Process_ID <= 0 || (stream.Process_Binary == "" && stream.Application_ID == "")) {
+        request_client_info(state, stream.Client)
+    }
 }
 
 sink_input_cb :: proc "c" (ctx: ^Pulse_Context, info: ^Pulse_Sink_Input_Info, eol: i32, userdata: rawptr) {
@@ -324,6 +423,33 @@ sink_input_cb :: proc "c" (ctx: ^Pulse_Context, info: ^Pulse_Sink_Input_Info, eo
     if eol != 0 {
         for pending, i in request.Owner.Requests {
             if pending == request { unordered_remove(&request.Owner.Requests, i); break }
+        }
+        free(request)
+    }
+}
+
+client_info_cb :: proc "c" (ctx: ^Pulse_Context, info: ^Pulse_Client_Info, eol: i32, userdata: rawptr) {
+    request := (^Client_Request)(userdata)
+    if request == nil { return }
+    state := request.Owner
+    context = state.Odin_Context
+    if eol == 0 && info != nil && ctx == state.Context && request.Epoch == state.Epoch &&
+       info.index == request.Index && client_referenced(state, info.index) {
+        meta := Client_Meta{Index = info.index}
+        pid_text := prop(state, info.proplist, "application.process.id")
+        if pid_text != "" {
+            if pid, ok := strconv.parse_i64(pid_text); ok { meta.Process_ID = pid }
+            delete(pid_text)
+        }
+        meta.Application_ID = prop(state, info.proplist, "application.id")
+        meta.Process_Binary = prop(state, info.proplist, "application.process.binary")
+        meta.Process_Host = prop(state, info.proplist, "application.process.host")
+        meta.Machine_ID = prop(state, info.proplist, "application.process.machine_id")
+        store_client_meta(state, meta)
+    }
+    if eol != 0 {
+        for pending, i in state.Client_Requests {
+            if pending == request { unordered_remove(&state.Client_Requests, i); break }
         }
         free(request)
     }
@@ -340,6 +466,21 @@ start_request :: proc(state: ^State, index: u32, list: bool) {
     else { operation = state.Symbols.context_get_sink_input_info(state.Context, index, sink_input_cb, request) }
     if operation == nil {
         for pending, i in state.Requests { if pending == request { unordered_remove(&state.Requests, i); break } }
+        free(request)
+        return
+    }
+    state.Symbols.operation_unref(operation)
+}
+
+request_client_info :: proc(state: ^State, index: u32) {
+    if state.Context == nil || index == 0 { return }
+    if client_meta_index(state, index) >= 0 || client_request_pending(state, index) { return }
+    request := new(Client_Request)
+    request^ = Client_Request{Owner = state, Context = state.Context, Epoch = state.Epoch, Index = index}
+    append(&state.Client_Requests, request)
+    operation := state.Symbols.context_get_client_info(state.Context, index, client_info_cb, request)
+    if operation == nil {
+        for pending, i in state.Client_Requests { if pending == request { unordered_remove(&state.Client_Requests, i); break } }
         free(request)
         return
     }
@@ -550,11 +691,13 @@ Init :: proc(state: ^State, enabled: bool) -> bool {
     state.Enabled = enabled
     if !enabled { return true }
     state.Streams = make([dynamic]Stream, 0, 8)
+    state.Clients = make([dynamic]Client_Meta, 0, 8)
     state.Versions = make([dynamic]Index_Version, 0, 8)
     state.IO = make([dynamic]^IO_Event, 0, 4)
     state.Times = make([dynamic]^Time_Event, 0, 4)
     state.Defers = make([dynamic]^Defer_Event, 0, 4)
     state.Requests = make([dynamic]^Request, 0, 4)
+    state.Client_Requests = make([dynamic]^Client_Request, 0, 4)
     state.Controls = make([dynamic]Control, 0, 4)
     state.Control_Requests = make([dynamic]^Control_Request, 0, 4)
     state.Poll_Events = make([dynamic]^IO_Event, 0, 4)
@@ -589,6 +732,12 @@ disconnect :: proc(state: ^State) {
             unordered_remove(&state.Control_Requests, i)
         }
     }
+    for i := len(state.Client_Requests)-1; i >= 0; i -= 1 {
+        if state.Client_Requests[i].Context == old_context {
+            free(state.Client_Requests[i])
+            unordered_remove(&state.Client_Requests, i)
+        }
+    }
     state.Connected = false
     Clear_Streams(state)
 }
@@ -609,8 +758,10 @@ Shutdown :: proc(state: ^State) {
     sweep_events(state)
     for request in state.Requests { free(request) }
     for request in state.Control_Requests { free(request) }
-    delete(state.Streams); delete(state.Versions); delete(state.IO); delete(state.Times); delete(state.Defers); delete(state.Requests)
-    delete(state.Controls); delete(state.Control_Requests); delete(state.Poll_Events)
+    for request in state.Client_Requests { free(request) }
+    clear_clients(state)
+    delete(state.Streams); delete(state.Clients); delete(state.Versions); delete(state.IO); delete(state.Times); delete(state.Defers); delete(state.Requests)
+    delete(state.Controls); delete(state.Control_Requests); delete(state.Client_Requests); delete(state.Poll_Events)
     unload_pulse(&state.Symbols)
     state^ = {}
 }

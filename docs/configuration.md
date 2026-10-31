@@ -194,14 +194,24 @@ overrides the global `decorations_enabled` value for that client.
 
 Titlebar audio matching fails closed. When Pulse supplies process metadata,
 skarwm verifies the live local PID, start time, executable, host, and machine.
-Native PipeWire streams can lose their PID in the Pulse compatibility view; in
-that case skarwm accepts the stream only when its application identity resolves
-to exactly one same-user local process. An exact Pulse X11 window ID is used
-only after process verification. For terminal and helper processes, the stream
-may match a verified ancestor process that owns exactly one decorated window.
-Reused PIDs, remote streams, duplicate processes, and multi-window ambiguity
-are hidden. Multiple verified writable streams for one window are grouped,
-with the highest channel-average volume displayed and mixed mute state retained.
+When the sink input omits it (for example PipeWire's ALSA compatibility
+bridge), skarwm requests the same identity from the Pulse client object and
+accepts it only after that verification. Native PipeWire streams can also lose
+their PID in the Pulse view; then skarwm accepts the stream only when its
+application identity resolves to exactly one same-user local process. An exact
+Pulse X11 window ID is used only after process verification. A stream's own
+verified process takes precedence over any ancestor, so a player launched from
+a file manager controls the player window, not the launcher. Without a window
+of its own, the stream attaches to the nearest verified ancestor process that
+owns a decorated window, which covers terminal and browser helper processes.
+A window whose toolkit never publishes `_NET_WM_PID` (nare is one) is
+attributed through the X server's X-Resource record for its owning client,
+which does not depend on client cooperation.
+Every eligible decorated window of the owning process shows the same stream, so
+multi-window applications share one control. Reused PIDs, remote streams,
+duplicate processes, and streams with no verified window owner are hidden.
+Multiple verified writable streams for one window are grouped, with the highest
+channel-average volume displayed and mixed mute state retained.
 
 Click the speaker to mute, click or drag the slider to set volume, and use the
 mouse wheel over the widget for `decoration_audio_volume_step` changes. These
@@ -229,19 +239,21 @@ metadata, or left unmatched.
 | Check | Result |
 | --- | --- |
 | Disabled by default | No audio connection, subscription, timer, or decoration resource is created. |
-| PipeWire-Pulse playback | VLC, Elisa, native PipeWire mpv, and mpv inside kitty were matched and rendered in a nested X server. |
+| PipeWire-Pulse playback | VLC, Elisa, native PipeWire mpv, mpv launched from a file manager while it stayed open, the cliamp TUI via PipeWire's ALSA bridge, and mpv inside kitty were matched and rendered in a nested X server. |
+| Window without `_NET_WM_PID` | cliamp in nare and aethertune's mpv child were matched through the X-Resource fallback in nested Xvnc. |
 | Controls | Slider changes persisted on the sink input; speaker click muted it; master volume remained unchanged. |
 | Idle cost, disabled / enabled | 0 CPU ticks over 5 seconds in both cases; RSS 3,180 / 5,364 KiB. |
 | 500 IPC window queries, disabled / enabled | 418 / 433 ms; one WM CPU tick in both cases. |
-| Core and audio tests | 997 core and 38 audio tests passed. |
-| X11 regression tests | 131 main, 28 XRandR, and 18 decoration checks passed. |
+| Core and audio tests | 1002 core and 46 audio tests passed. |
+| X11 regression tests | 132 main, 28 XRandR, and 19 decoration checks passed. |
 
 Native PulseAudio was not available for this verification. Matching also
 intentionally hides PID-less streams whose application identity matches zero or
 multiple local processes, detached players outside the window owner's process
-ancestry, remote streams, and ambiguous owners of multiple decorated windows.
-A paused stream remains visible while the server keeps it; the widget
-disappears when the last matching stream is removed.
+ancestry (such as a daemonized `mpd` or a player under a tmux server), remote
+streams, and streams whose owning process has no decorated window. A paused
+stream remains visible while the server keeps it; the widget disappears when
+the last matching stream is removed.
 
 skarwm watches the main configuration and its imports, including editor saves
 that replace a file. `Super+Shift+r` runs `reload_config` on demand. Reload is
