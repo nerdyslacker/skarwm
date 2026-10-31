@@ -458,6 +458,11 @@ test_decoration :: proc() {
     eq(c.Decoration_Client_Rect(frame, cfg), client, "frame/client geometry round trips")
     eq(c.Decoration_Layout_Frame_Rect(client, 2), c.Rect{X = 98, Y = 78, W = 644, H = 484},
        "decoration frame consumes the existing reserved-border tile")
+    eq(c.Decoration_Corner_Inset(12, 0), i32(9), "corner inset starts inside the rounded clip")
+    eq(c.Decoration_Corner_Inset(12, 1), i32(7), "corner inset follows the arc")
+    eq(c.Decoration_Corner_Inset(12, 11), i32(1), "corner inset closes at the last arc row")
+    eq(c.Decoration_Corner_Inset(12, 12), i32(0), "corner inset ends at the straight edge")
+    eq(c.Decoration_Corner_Inset(4, 0), i32(3), "small radii use the same pixel-center sampling")
 
     eq(c.Decoration_Hit_Test(frame.W, frame.H, 0, 0, cfg), c.Decoration_Hit.Resize_Top_Left, "top-left resize target")
     eq(c.Decoration_Hit_Test(frame.W, frame.H, frame.W-1, frame.H-1, cfg), c.Decoration_Hit.Resize_Bottom_Right, "bottom-right resize target")

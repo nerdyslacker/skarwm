@@ -1,5 +1,7 @@
 package core
 
+import "core:math"
+
 // Pure decoration policy and geometry.  X11 frame lifecycle/rendering belongs
 // to the wm package; keeping these transforms here gives layout, input and
 // tests one definition of the client/frame coordinate contract.
@@ -116,6 +118,15 @@ Decoration_Layout_Frame_Rect :: proc(layout_geom: Rect, reserved_border: i32) ->
     b := max(i32(0), reserved_border)
     return Rect{X = layout_geom.X-b, Y = layout_geom.Y-b,
                 W = max(i32(1), layout_geom.W+2*b), H = max(i32(1), layout_geom.H+2*b)}
+}
+
+// Visible-span inset for a row `edge` pixels from a rounded corner. The X Shape
+// mask and decoration painting share it so the border follows the clip.
+Decoration_Corner_Inset :: proc(radius, edge: i32) -> i32 {
+    if edge >= radius { return 0 }
+    r := f64(radius)
+    dy := r - (f64(edge) + 0.5)
+    return i32(math.ceil(r - math.sqrt(max(f64(0), r * r - dy * dy))))
 }
 
 Decoration_Hit :: enum u8 {

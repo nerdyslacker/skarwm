@@ -47,7 +47,7 @@ for changes. A single `skarwm.rc` works without imports.
 | `sel_outer_border : #FF5F00` | Focused border colour. |
 | `decorations_enabled : false` | Opt in to skarwm-owned client titlebars and frames. |
 | `decoration_titlebar_height : 20` | Compact titlebar height in pixels, `16..128`. |
-| `decoration_border_width : 1` | Painted decoration frame width, `0..32`. |
+| `decoration_border_width : border_width` | Painted decoration frame width, `0..32`; inherits `border_width` when omitted. |
 | `decoration_resize_hit_width : 4` | Edge/corner input target width, `1..32`; independent of the painted width. |
 | `decoration_show_title : true` | Draw the client title when the decoration renderer is enabled. |
 | `decoration_audio_enabled : false` | Opt in to per-application audio discovery for decorated windows. Missing PulseAudio or pipewire-pulse is harmless. |

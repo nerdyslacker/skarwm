@@ -76,11 +76,42 @@ if xwininfo -id "$frame" -shape 2>/dev/null | grep -q 'Window shape extents' \
 else
   fail "rounded decoration frame shape"
 fi
+# The active border must follow the shape-clipped corner arc. Straight border
+# strips alone leave the clipped corner rows in the frame background.
+xdotool mousemove 640 20 click 1 >/dev/null 2>&1
+sleep 0.2
+if python3 - "$frame" <<'PY'
+import sys
+from Xlib import display, X
+
+conn = display.Display()
+frame = conn.create_resource_object("window", int(sys.argv[1]))
+height = frame.get_geometry().height
+arc = ((7, 1), (5, 2), (4, 3), (3, 4), (2, 5), (1, 11),
+       (7, height-2), (5, height-3), (4, height-4), (3, height-5),
+       (2, height-6), (1, height-12))
+inside = ((10, 3, 0x313244), (10, height-3, 0x1E1E2E))
+failed = []
+checks = [(x, y, 0x89B4FA) for x, y in arc] + list(inside)
+for x, y, want in checks:
+    image = frame.get_image(x, y, 1, 1, X.ZPixmap, 0xffffffff)
+    color = image.data[2] << 16 | image.data[1] << 8 | image.data[0]
+    if color != want:
+        failed.append("(%d,%d)=%06X" % (x, y, color))
+if failed:
+    print(" ".join(failed))
+    sys.exit(1)
+PY
+then
+  pass "rounded decoration corner keeps the active border color"
+else
+  fail "rounded decoration corner border colors"
+fi
 ./build/skarwm-msg corner-radius 0 >/dev/null 2>&1
 sleep 0.2
 client_geom=$(xwininfo -id "$client" 2>/dev/null | awk '/Width:/{w=$2}/Height:/{h=$2}/Absolute upper-left X:/{x=$4}/Absolute upper-left Y:/{y=$4}END{printf "%sx%s+%s+%s",w,h,x,y}')
 frame_geom=$(xwininfo -id "$frame" 2>/dev/null | awk '/Width:/{w=$2}/Height:/{h=$2}/Absolute upper-left X:/{x=$4}/Absolute upper-left Y:/{y=$4}END{printf "%sx%s+%s+%s",w,h,x,y}')
-if [ "$client_geom" = "1256x759+12+29" ] && [ "$frame_geom" = "1264x784+8+8" ]; then
+if [ "$client_geom" = "1256x758+12+30" ] && [ "$frame_geom" = "1264x784+8+8" ]; then
   pass "frame/client geometry uses the complete layout tile"
 else
   fail "geometry client=$client_geom frame=$frame_geom"

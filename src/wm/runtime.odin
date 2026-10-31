@@ -90,6 +90,7 @@ wm_startup :: proc() -> bool {
     g_wm.ran_startups = make([dynamic]string, 0, 4)
     ui.Init(&g_wm.ui, g_wm.conn, g_wm.root, g_wm.white_pixel, &g_wm.atoms)
     rendering.Init(&g_wm.rendering, g_wm.conn)
+    g_wm.ui.ShapeAvailable = g_wm.rendering.ShapeAvailable
     g_wm.lock = x11.MOD_MASK_LOCK
 
     // Claim the screen. If a WM already has a SubstructureRedirect grab on the

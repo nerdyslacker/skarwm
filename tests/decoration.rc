@@ -3,10 +3,10 @@ mod_key : super
 outer_gap : 8
 inner_gap : 8
 border_width : 2
+# decoration_border_width is omitted on purpose: it inherits border_width.
 animations : false
 decorations_enabled : true
 decoration_titlebar_height : 20
-decoration_border_width : 1
 decoration_resize_hit_width : 4
 decoration_show_title : true
 decoration_audio_enabled : true

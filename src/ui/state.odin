@@ -33,6 +33,7 @@ State :: struct {
     DecorationAudioPopupClient: ^c.Client,
     DecorationAudioPopupRect: c.Rect,
     TabGC, TabFont: u32,
+    ShapeAvailable: bool, // frame corners are shape-clipped only when true
     HelpWindow: u32,
     NoticeWindow: u32,
     NoticeText: string,

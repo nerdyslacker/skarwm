@@ -684,7 +684,12 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.unfocused_set { r.cfg.UnfocusedBorder = sc.unfocused }
     if sc.decoration_enabled_set { r.cfg.Decoration.Enabled = sc.decoration.Enabled }
     if sc.decoration_titlebar_height_set { r.cfg.Decoration.TitlebarHeight = sc.decoration.TitlebarHeight }
-    if sc.decoration_border_width_set { r.cfg.Decoration.BorderWidth = sc.decoration.BorderWidth }
+    if sc.decoration_border_width_set {
+        r.cfg.Decoration.BorderWidth = sc.decoration.BorderWidth
+    } else {
+        // Decorated frames inherit the normal border unless explicitly overridden.
+        r.cfg.Decoration.BorderWidth = r.cfg.BorderWidth
+    }
     if sc.decoration_resize_hit_width_set { r.cfg.Decoration.ResizeHitWidth = sc.decoration.ResizeHitWidth }
     if sc.decoration_show_title_set { r.cfg.Decoration.ShowTitle = sc.decoration.ShowTitle }
     if sc.decoration_audio_enabled_set { r.cfg.Decoration.AudioEnabled = sc.decoration.AudioEnabled }

@@ -7,8 +7,6 @@ import c "../core"
 // X Shape-backed rounded client corners and per-output presentation. Shape
 // regions never change the client geometry or application surface dimensions.
 
-import "core:math"
-
 Shape_Rectangle :: struct {
     x, y: i16,
     width, height: u16,
@@ -61,14 +59,7 @@ shape_init :: proc(state: ^State, conn: ^x11.Connection) {
 
 rounded_inset :: proc(radius, row, height: i32) -> i32 {
     edge := min(row, height - 1 - row)
-    return rounded_edge_inset(radius, edge)
-}
-
-rounded_edge_inset :: proc(radius, edge: i32) -> i32 {
-    if edge >= radius { return 0 }
-    r := f64(radius)
-    dy := r - (f64(edge) + 0.5)
-    return i32(math.ceil(r - math.sqrt(max(f64(0), r * r - dy * dy))))
+    return c.Decoration_Corner_Inset(radius, edge)
 }
 
 shape_rounded_rectangle :: proc(conn: ^x11.Connection, xid: u32, kind: u8, x, y, width, height, radius: i32) {
@@ -125,7 +116,7 @@ shape_bottom_rounded_rectangle :: proc(
     band_y := i32(0)
     band_inset := i32(0)
     for row in 1 ..< height {
-        inset := rounded_edge_inset(r, height - 1 - row)
+        inset := c.Decoration_Corner_Inset(r, height - 1 - row)
         if inset == band_inset { continue }
         append(&rects, Shape_Rectangle{
             x = i16(x + band_inset), y = i16(y + band_y),

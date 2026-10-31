@@ -358,6 +358,25 @@ Draw_Decoration :: proc(state: ^State, m: ^c.Manager, xid: u32) {
         x11.xcb_poly_fill_rectangle(state.Conn, xid, state.TabGC, 4, &rects[0])
     }
 
+    radius := clamp(m.Cfg.CornerRadius, i32(0), min(w, h)/2)
+    if state.ShapeAvailable && b > 0 && radius > b {
+        corner_rects := make([dynamic]x11.Rectangle, 0, 4*int(radius-b))
+        defer delete(corner_rects)
+        for row := b; row < radius; row += 1 {
+            outer := c.Decoration_Corner_Inset(radius, row)
+            inner := b + c.Decoration_Corner_Inset(radius-b, row-b)
+            if inner <= outer { continue }
+            rows := [2]i16{i16(row), i16(h-1-row)}
+            for y in rows {
+                append(&corner_rects, x11.Rectangle{x=i16(outer), y=y, width=u16(inner-outer), height=1})
+                append(&corner_rects, x11.Rectangle{x=i16(w-inner), y=y, width=u16(inner-outer), height=1})
+            }
+        }
+        if len(corner_rects) > 0 {
+            x11.xcb_poly_fill_rectangle(state.Conn, xid, state.TabGC, u32(len(corner_rects)), raw_data(corner_rects))
+        }
+    }
+
     text_vals := [2]u32{colors.Foreground, colors.Background}
     x11.xcb_change_gc(state.Conn, state.TabGC, x11.GC_FOREGROUND | x11.GC_BACKGROUND, &text_vals[0])
     baseline := i16(b + max(i32(12), (title_h+10)/2))
