@@ -137,9 +137,9 @@ trap cleanup EXIT
 # ---------------------------------------------------------------------------
 say "== skarwm integration test (display $DISP) =="
 
-if [ ! -x build/skarwm ] || find src -name '*.odin' -newer build/skarwm | grep -q .; then
+if [ ! -x build/skarwm ] || [ Makefile -nt build/skarwm ] || find src -name '*.odin' -newer build/skarwm | grep -q .; then
   say "rebuilding…"
-  odin build src -out:build/skarwm || { say "FATAL: odin build failed"; exit 1; }
+  odin build src -o:size -out:build/skarwm || { say "FATAL: odin build failed"; exit 1; }
 fi
 if [ ! -x build/skarwm-msg ] || find cmd/skarwm-msg src/core -name '*.odin' -newer build/skarwm-msg | grep -q .; then
   odin build cmd/skarwm-msg -out:build/skarwm-msg || { say "FATAL: skarwm-msg build failed"; exit 1; }

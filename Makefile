@@ -31,9 +31,9 @@ SKARWMDIR := $(SYSCONFDIR)/skarwm
 all: build/skarwm build/skarwm-msg build/skarwm-bar
 
 # release build
-build/skarwm: $(ODIN_SRCS)
+build/skarwm: $(ODIN_SRCS) Makefile
 	@mkdir -p build
-	$(ODIN) build src -o:speed -out:$@
+	$(ODIN) build src -o:size -out:$@
 
 build/skarwm-msg: $(shell find cmd/skarwm-msg src/core -name '*.odin')
 	@mkdir -p build

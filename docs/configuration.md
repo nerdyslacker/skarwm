@@ -242,8 +242,10 @@ metadata, or left unmatched.
 | PipeWire-Pulse playback | VLC, Elisa, native PipeWire mpv, mpv launched from a file manager while it stayed open, the cliamp TUI via PipeWire's ALSA bridge, and mpv inside kitty were matched and rendered in a nested X server. |
 | Window without `_NET_WM_PID` | cliamp in nare and aethertune's mpv child were matched through the X-Resource fallback in nested Xvnc. |
 | Controls | Slider changes persisted on the sink input; speaker click muted it; master volume remained unchanged. |
-| Idle cost, disabled / enabled | 0 CPU ticks over 5 seconds in both cases; RSS 3,180 / 5,364 KiB. |
-| 500 IPC window queries, disabled / enabled | 418 / 433 ms; one WM CPU tick in both cases. |
+| Startup, disabled / enabled | Median 13 / 30 ms across five fresh processes. |
+| Idle cost, disabled / enabled | Median 1 / 0 CPU ticks over 5 seconds; RSS 3,276 / 5,380 KiB. |
+| 1,000 IPC window queries, disabled / enabled | Median 2,357 / 2,282 ms and 12 / 11 WM CPU ticks; the difference stayed inside run-to-run variance. |
+| Playback redraws, disabled / enabled | 4 / 6 full titlebar draws. Enabled mode added two full draws for show/hide and 11 audio-region draws for initial state plus 10 volume changes. |
 | Core and audio tests | 1002 core and 46 audio tests passed. |
 | X11 regression tests | 132 main, 28 XRandR, and 19 decoration checks passed. |
 
