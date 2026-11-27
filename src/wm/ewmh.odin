@@ -62,7 +62,7 @@ Ewmh_State :: struct {
     last_count:   i32, // _NET_NUMBER_OF_DESKTOPS advertised (-1 = unset)
     win_desktop: map[u32]u32, // xid -> last _NET_WM_DESKTOP written
     win_state:    map[u32]u8, // xid -> modal/fullscreen/maximized/above bits last written
-    win_mapped:   map[u32]bool, // xid -> WM_STATE Normal has been written
+    win_wm_state: map[u32]i32, // xid -> last ICCCM WM_STATE written
     workarea:   []u32, // last _NET_WORKAREA written (nil = never)
     viewport:   []u32, // last _NET_DESKTOP_VIEWPORT written
     names:      []byte, // last NUL-separated _NET_DESKTOP_NAMES payload
@@ -72,6 +72,7 @@ Ewmh_State :: struct {
 
 WM_STATE_WITHDRAWN :: i32(0) // ICCCM state values; the WM sets Normal when a
 WM_STATE_NORMAL     :: i32(1) // client is mapped and Withdrawn when it leaves.
+WM_STATE_ICONIC     :: i32(3)
 
 // Max workspace id addressable through a _NET_CURRENT_DESKTOP/_NET_WM_DESKTOP
 // client message (desktop index + 1). Guards against garbage input creating an
@@ -91,7 +92,7 @@ ewmh_init :: proc() {
     st.last_count = -1
     st.win_desktop = make(map[u32]u32)
     st.win_state = make(map[u32]u8)
-    st.win_mapped = make(map[u32]bool)
+    st.win_wm_state = make(map[u32]i32)
 
     // _NET_SUPPORTING_WM_CHECK child: a tiny, unmapped InputOutput window that
     // names the WM. Both root and child point at the child; the child carries
@@ -165,7 +166,7 @@ ewmh_free :: proc() {
     }
     if st.win_desktop != nil do delete(st.win_desktop)
     if st.win_state != nil do delete(st.win_state)
-    if st.win_mapped != nil do delete(st.win_mapped)
+    if st.win_wm_state != nil do delete(st.win_wm_state)
     if st.workarea != nil do delete(st.workarea)
     if st.viewport != nil do delete(st.viewport)
     if st.names != nil do delete(st.names)
@@ -442,21 +443,30 @@ ewmh_client_became_dock :: proc(cl: ^c.Client) {
 // dedupe caches so a later re-manage of the same xid starts clean.
 ewmh_client_unmanaged :: proc(cl: ^c.Client) {
     st := &g_wm.ewmh
-    if was_mapped, ok := st.win_mapped[cl.Xid]; ok && was_mapped {
+    if _, ok := st.win_wm_state[cl.Xid]; ok {
         ewmh_set_wm_state(cl, WM_STATE_WITHDRAWN)
     }
     delete_key(&st.win_desktop, cl.Xid)
     delete_key(&st.win_state, cl.Xid)
-    delete_key(&st.win_mapped, cl.Xid)
+    delete_key(&st.win_wm_state, cl.Xid)
     ewmh_push_client_list()
 }
 
 // ewmh_mark_mapped records that the window was mapped (WM_STATE Normal) — call
 // exactly when the map request is issued for a not-yet-mapped client.
 ewmh_mark_mapped :: proc(cl: ^c.Client) {
-    if _, ok := g_wm.ewmh.win_mapped[cl.Xid]; ok { return }
-    g_wm.ewmh.win_mapped[cl.Xid] = true
+    if _, ok := g_wm.ewmh.win_wm_state[cl.Xid]; ok { return }
+    g_wm.ewmh.win_wm_state[cl.Xid] = WM_STATE_NORMAL
     ewmh_set_wm_state(cl, WM_STATE_NORMAL)
+}
+
+ewmh_push_wm_state :: proc(cl: ^c.Client) {
+    state, mapped := g_wm.ewmh.win_wm_state[cl.Xid]
+    if !mapped { return }
+    wanted := WM_STATE_ICONIC if cl.Minimized else WM_STATE_NORMAL
+    if state == wanted { return }
+    g_wm.ewmh.win_wm_state[cl.Xid] = wanted
+    ewmh_set_wm_state(cl, wanted)
 }
 
 // ewmh_pulse reconciles everything that can drift between structural events.
@@ -469,6 +479,7 @@ ewmh_pulse :: proc() {
     for cl in m.Clients {
         ewmh_push_client(cl)
         ewmh_push_state(cl)
+        ewmh_push_wm_state(cl)
     }
 }
 
@@ -691,6 +702,7 @@ ewmh_activate :: proc(cl: ^c.Client) {
     old_focus := m.Focused
     ws := cl.Ws
     if ws == nil { return }
+    if cl.Minimized { c.Set_Minimized(m, cl, false) }
 
     if cl.Out != nil {
         if oi := c.Output_Index(m, cl.Out); oi >= 0 { m.Active = oi }

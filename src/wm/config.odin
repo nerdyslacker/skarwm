@@ -162,6 +162,8 @@ Load_Scratch :: struct {
     bar_enabled: bool,
     bar_position: c.Bar_Position,
     bar_height, bar_tag_count, bar_font_size: i32,
+    bar_workspace_mode: c.Bar_Workspace_Mode,
+    bar_window_inactive_width, bar_window_active_max_width: i32,
     bar_font: string,
     bar_font_weight: c.Bar_Font_Weight,
     bar_foreground, bar_background: u32,
@@ -180,6 +182,7 @@ Load_Scratch :: struct {
     decoration_inactive_foreground_set, decoration_active_border_set: bool,
     decoration_inactive_border_set: bool,
     bar_enabled_set, bar_position_set, bar_height_set, bar_tag_count_set: bool,
+    bar_workspace_mode_set, bar_window_inactive_width_set, bar_window_active_max_width_set: bool,
     bar_font_set, bar_font_size_set, bar_font_weight_set: bool,
     bar_foreground_set, bar_background_set: bool,
     bar_tag_foreground_set, bar_tag_background_set: bool,
@@ -716,6 +719,9 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.bar_foreground_set { r.cfg.BarForeground = sc.bar_foreground }
     if sc.bar_background_set { r.cfg.BarBackground = sc.bar_background }
     if sc.bar_tag_count_set { r.cfg.BarWorkspaceCount = sc.bar_tag_count }
+    if sc.bar_workspace_mode_set { r.cfg.BarWorkspaceMode = sc.bar_workspace_mode }
+    if sc.bar_window_inactive_width_set { r.cfg.BarWindowInactiveWidth = sc.bar_window_inactive_width }
+    if sc.bar_window_active_max_width_set { r.cfg.BarWindowActiveMaxWidth = sc.bar_window_active_max_width }
     if sc.bar_tag_foreground_set { r.cfg.BarWorkspaceForeground = sc.bar_tag_foreground }
     if sc.bar_tag_background_set { r.cfg.BarWorkspaceBackground = sc.bar_tag_background }
     if sc.bar_block_foreground_set { r.cfg.BarBlockForeground = sc.bar_block_foreground }
@@ -1042,6 +1048,33 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
             return false
         }
         sc.bar_tag_count = n; sc.bar_tag_count_set = true
+        return true
+    case "bar_workspace_mode":
+        switch quoted_trim(value) {
+        case "classic":    sc.bar_workspace_mode = .Classic
+        case "separate":   sc.bar_workspace_mode = .Separate
+        case "integrated": sc.bar_workspace_mode = .Integrated
+        case:
+            append(errs, fmt.aprintf("bar_workspace_mode: expected classic/separate/integrated, got %q", value))
+            return false
+        }
+        sc.bar_workspace_mode_set = true
+        return true
+    case "bar_window_inactive_width":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 4 || n > 64 {
+            append(errs, fmt.aprintf("bar_window_inactive_width: expected 4..64, got %q", value))
+            return false
+        }
+        sc.bar_window_inactive_width = n; sc.bar_window_inactive_width_set = true
+        return true
+    case "bar_window_active_max_width":
+        n, ok := parse_i32_value(value)
+        if !ok || n < 40 || n > 1024 {
+            append(errs, fmt.aprintf("bar_window_active_max_width: expected 40..1024, got %q", value))
+            return false
+        }
+        sc.bar_window_active_max_width = n; sc.bar_window_active_max_width_set = true
         return true
     case "bar_tag_foreground", "bar_workspace_foreground":
         v, ok := parse_color(value)

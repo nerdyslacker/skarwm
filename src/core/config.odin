@@ -33,6 +33,9 @@ Config :: struct {
     BarForeground: u32,
     BarBackground: u32,
     BarWorkspaceCount: i32,
+    BarWorkspaceMode: Bar_Workspace_Mode,
+    BarWindowInactiveWidth: i32,
+    BarWindowActiveMaxWidth: i32,
     BarWorkspaceForeground: u32,
     BarWorkspaceBackground: u32,
     BarBlockForeground: u32,
@@ -41,6 +44,7 @@ Config :: struct {
 
 Bar_Position :: enum u8 { Top, Bottom }
 Bar_Font_Weight :: enum u8 { Normal, Medium, Bold }
+Bar_Workspace_Mode :: enum u8 { Classic, Separate, Integrated }
 
 Default_Config :: proc() -> Config {
     cfg := Config {
@@ -66,6 +70,9 @@ Default_Config :: proc() -> Config {
         BarForeground     = 0xE6E6E6,
         BarBackground     = 0x1E1E2E,
         BarWorkspaceCount = 8,
+        BarWorkspaceMode = .Classic,
+        BarWindowInactiveWidth = 12,
+        BarWindowActiveMaxWidth = 240,
         BarWorkspaceForeground = 0x262626,
         BarWorkspaceBackground = 0x5F87AF,
         BarBlockForeground = 0x262626,

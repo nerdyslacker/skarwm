@@ -14,6 +14,9 @@ bar_font : monospace
 bar_font_size : 11
 bar_font_weight : normal
 bar_tag_count : 8
+bar_workspace_mode : integrated
+bar_window_inactive_width : 12
+bar_window_active_max_width : 240
 ```
 
 The WM launches `skarwm-bar`, or the executable named by `$SKARWM_BAR`. During
@@ -50,6 +53,20 @@ logical screen. Wheel up/down cycles that screen's active workspace within the f
 does not derive a new workspace number from the hovered slot. The IPC client
 reconnects after WM restarts.
 
+`bar_workspace_mode` controls window presentation:
+
+- `classic` keeps the traditional workspace cells and focused title.
+- `separate` keeps workspace cells and turns the configured title block into an adaptive window strip.
+- `integrated` nests window buttons in the selected workspace and hides the duplicate title block.
+
+The selected window expands up to `bar_window_active_max_width`; other windows
+remain `bar_window_inactive_width` pixels wide. Minimized windows stay in the
+strip and use a horizontal marker. Clicking an inactive window focuses it,
+clicking the globally focused window minimizes it, and clicking a minimized
+window restores and focuses it. Actions are validated against the latest IPC
+snapshot on button release, so a focus change during a click cannot minimize
+the wrong client. Hovering any window button shows its full title.
+
 Foreground and background are configurable:
 
 ```rc
@@ -75,9 +92,11 @@ title in the centre.
 The layout block uses Nerd Font glyphs for Scrolling Tile, Vertical Scroller,
 Game Mode, Tabbed, Dwindle, Monocle, and Floating.
 
-The title block always fits and displays the complete focused-window title.
-It does not ellipsize the title or show a title tooltip. Hover a layout glyph
-to see its name.
+In classic mode the title block displays the complete focused-window title.
+In separate mode it renders the adaptive window strip. Integrated mode hides
+the title block because the workspace block already contains the strip. Hover
+a compact window button to see its full title, or a layout glyph to see the
+layout name.
 
 ```rc
 bar_block : workspaces : left

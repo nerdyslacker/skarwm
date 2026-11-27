@@ -1,10 +1,12 @@
 package main
 
 import x11 "../x11"
+import c "../core"
 
 import "core:fmt"
 import "core:strconv"
 import "core:strings"
+import "core:unicode/utf8"
 
 Block_Alignment :: enum u8 { Left, Center, Right }
 Block_Kind :: enum u8 { Workspaces, Workspace_Meta, Layout, Title, Clock, Battery, Script, Systray, Button, Audio, Bluetooth, Network }
@@ -31,10 +33,14 @@ Block :: struct {
     ForegroundSet, BackgroundSet: bool,
 }
 
+Hit_Target :: enum u8 { Block, Workspace, Window }
+
 Hitbox :: struct {
     X, Y, W, H: i32,
     BlockIndex: int,
     Payload: int,
+    Kind: Hit_Target,
+    Window: u32,
 }
 
 blocks_init :: proc(state: ^State) {
@@ -349,6 +355,107 @@ blend_colour :: proc(from, to: u32, to_parts: u32, total_parts: u32 = 100) -> u3
     return red << 16 | green << 8 | blue
 }
 
+active_workspace_id :: proc(state: ^State, window: ^Bar_Window) -> int {
+    for workspace in state.Workspaces {
+        if workspace.Output == window.Output && workspace.Active { return workspace.Id }
+    }
+    return 0
+}
+
+bar_window_eligible :: proc(client: ^Window_State, window: ^Bar_Window, workspace: int) -> bool {
+    return client != nil && client.Output == window.Output && client.Workspace == workspace &&
+        !client.Dock && !client.Scratchpad
+}
+
+window_strip_info :: proc(state: ^State, window: ^Bar_Window, workspace: int) -> (
+    count, selected, natural_active: i32,
+) {
+    selected = -1
+    for &client in state.WindowsState {
+        if !bar_window_eligible(&client, window, workspace) { continue }
+        if !client.Minimized && (client.Focused || client.WorkspaceFocused) {
+            selected = count
+            natural_active = text_width(state, client.Title) + 16
+        }
+        count += 1
+    }
+    return
+}
+
+window_strip_measure :: proc(state: ^State, window: ^Bar_Window, workspace: int) -> i32 {
+    count, selected, natural := window_strip_info(state, window, workspace)
+    if count <= 0 { return 0 }
+    compact := state.Config.WindowInactiveWidth
+    active := c.Resolve_Adaptive_Active_Width(
+        i32(0x7fffffff), count, selected, compact,
+        state.Config.WindowActiveMaxWidth, natural,
+    )
+    return compact*count + max(i32(0), active-compact)
+}
+
+title_prefix_for_width :: proc(state: ^State, title: string, width: i32) -> string {
+    if width <= 0 { return "" }
+    if text_width(state, title) <= width { return title }
+    position, end := 0, 0
+    for position < len(title) {
+        _, size := utf8.decode_rune_in_string(title[position:])
+        if size <= 0 { break }
+        next := position + size
+        if text_width(state, title[:next]) > width { break }
+        end, position = next, next
+    }
+    return title[:end]
+}
+
+window_strip_draw :: proc(
+    block: ^Block, state: ^State, window: ^Bar_Window,
+    workspace: int, start_x, available: i32, block_index: int,
+) -> i32 {
+    count, selected, natural := window_strip_info(state, window, workspace)
+    if count <= 0 { return 0 }
+    compact := state.Config.WindowInactiveWidth
+    active := c.Resolve_Adaptive_Active_Width(
+        available, count, selected, compact, state.Config.WindowActiveMaxWidth, natural,
+    )
+    x, index := start_x, i32(0)
+    for &client in state.WindowsState {
+        if !bar_window_eligible(&client, window, workspace) { continue }
+        width := compact
+        if index == selected { width = max(compact, active) }
+        background := state.Config.Background
+        foreground := state.Config.Foreground
+        if client.Minimized {
+            foreground = blend_colour(foreground, background, 55)
+        } else if client.Urgent {
+            background = state.Config.WorkspaceBackground
+            foreground = state.Config.WorkspaceForeground
+        } else if client.Focused {
+            background = block_background(block, state)
+            foreground = block_foreground(block, state)
+        } else if client.WorkspaceFocused {
+            background = blend_colour(state.Config.Background, block_background(block, state), 45)
+        } else if window.HoverWindow == client.Id {
+            background = blend_colour(background, block_background(block, state), 30)
+        }
+        fill_rect(state, X_Drawable(window.Canvas), x, 2, width, window.Geom.H-4, background)
+        if index == selected && width > compact {
+            label := title_prefix_for_width(state, client.Title, width-12)
+            draw_text(state, window, x+6, label, foreground, client.Focused)
+        } else if client.Minimized {
+            fill_rect(state, X_Drawable(window.Canvas), x+3, window.Geom.H/2, max(i32(1), width-6), 2, foreground)
+        } else {
+            fill_rect(state, X_Drawable(window.Canvas), x+width/2-1, 6, 2, max(i32(2), window.Geom.H-12), foreground)
+        }
+        append(&window.Hits, Hitbox{
+            X = x, Y = 0, W = width, H = window.Geom.H,
+            BlockIndex = block_index, Kind = .Window, Window = client.Id,
+        })
+        x += width
+        index += 1
+    }
+    return x-start_x
+}
+
 workspace_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32 {
     _ = block
     width := i32(0)
@@ -356,6 +463,9 @@ workspace_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> 
         label := workspace_label(state, id, workspace_for_slot(state, window, id))
         ws := workspace_for_slot(state, window, id)
         width += workspace_width(state, label, ws != nil && ws.Occupied)
+        if state.Config.WorkspaceMode == .Integrated && ws != nil && ws.Active {
+            width += window_strip_measure(state, window, ws.Id)
+        }
         delete(label)
     }
     return width
@@ -370,6 +480,10 @@ workspace_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, start_
         label := workspace_label(state, id, ws)
         occupied := ws != nil && ws.Occupied
         width := workspace_width(state, label, occupied)
+        children_width := i32(0)
+        if state.Config.WorkspaceMode == .Integrated && ws != nil && ws.Active {
+            children_width = window_strip_measure(state, window, ws.Id)
+        }
         background := block.BackgroundSet ? base_background : state.Config.WorkspaceBackground
         foreground := block.ForegroundSet ? base_foreground : state.Config.WorkspaceForeground
         if ws != nil && ws.Active {
@@ -387,7 +501,7 @@ workspace_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, start_
                 foreground, background, 55,
             )
         }
-        fill_rect(state, X_Drawable(window.Canvas), x, 0, width, window.Geom.H, background)
+        fill_rect(state, X_Drawable(window.Canvas), x, 0, width+children_width, window.Geom.H, background)
         draw_text_centered(state, window, x, 0, width, window.Geom.H, label, foreground, occupied)
         if occupied {
             fill_rect(
@@ -397,9 +511,16 @@ workspace_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, start_
         }
         append(&window.Hits, Hitbox{
             X = x, Y = 0, W = width, H = window.Geom.H,
-            BlockIndex = block_index, Payload = id,
+            BlockIndex = block_index, Payload = id, Kind = .Workspace,
         })
-        x += width
+        if children_width > 0 {
+            drawn := window_strip_draw(
+                block, state, window, ws.Id, x+width,
+                max(i32(0), window.Geom.W-BAR_PAD-x-width), block_index,
+            )
+            children_width = drawn
+        }
+        x += width + children_width
         delete(label)
     }
 }
@@ -471,6 +592,10 @@ layout_glyph :: proc(layout: string) -> string {
 }
 
 indicator_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32 {
+    if block.Kind == .Title && state.Config.WorkspaceMode == .Integrated { return 0 }
+    if block.Kind == .Title && state.Config.WorkspaceMode == .Separate {
+        return window_strip_measure(state, window, active_workspace_id(state, window))
+    }
     label := indicator_label(block, state, window)
     defer delete(label)
     if label == "" { return 0 }
@@ -479,6 +604,13 @@ indicator_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> 
 }
 
 indicator_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, x: i32, block_index: int) {
+    if block.Kind == .Title && state.Config.WorkspaceMode == .Separate {
+        _ = window_strip_draw(
+            block, state, window, active_workspace_id(state, window), x,
+            max(i32(0), window.Geom.W-BAR_PAD-x), block_index,
+        )
+        return
+    }
     label := indicator_label(block, state, window)
     defer delete(label)
     if label == "" { return }

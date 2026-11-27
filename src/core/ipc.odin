@@ -59,7 +59,7 @@ Ipc_Action :: enum {
     Focus_Left, Focus_Right, Focus_Up, Focus_Down,
     Move_Left, Move_Right, Move_Up, Move_Down,
     Workspace, Workspace_On_Output, Workspace_Next, Workspace_Prev,
-    Focus_Window,
+    Focus_Window, Minimize_Window, Restore_Window,
     Move_To_Workspace, Move_To_Workspace_Next, Move_To_Workspace_Prev,
     Toggle_Floating, Toggle_Always_On_Top, Toggle_Fullscreen,
     Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
@@ -519,6 +519,10 @@ ipc_window_entry :: proc(sb: ^strings.Builder, m: ^Manager, cl: ^Client) {
     if cl.Out == nil { strings.write_string(sb, "null") } else { ipc_json_string(sb, cl.Out.Name) }
     strings.write_string(sb, `,"focused":`)
     json_bool(sb, m.Focused == cl)
+    strings.write_string(sb, `,"workspace_focused":`)
+    json_bool(sb, cl.Ws != nil && cl.Ws.Focus == cl)
+    strings.write_string(sb, `,"minimized":`)
+    json_bool(sb, cl.Minimized)
     strings.write_string(sb, `,"floating":`)
     json_bool(sb, cl.Floating)
     strings.write_string(sb, `,"always_on_top":`)
@@ -818,7 +822,9 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
         return {}, strings.clone("workspace output: expected workspace id and output name"), false
     }
 
-    if len(tokens) == 3 && tokens[0] == "focus" && tokens[1] == "window" {
+    if len(tokens) == 3 &&
+       (tokens[0] == "focus" || tokens[0] == "minimize" || tokens[0] == "restore") &&
+       tokens[1] == "window" {
         value: u64
         valid := len(tokens[2]) > 0
         for ch in tokens[2] {
@@ -827,7 +833,16 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
             if value > 0xffffffff { valid = false; break }
         }
         if valid && value > 0 {
-            return Ipc_Command{action = .Focus_Window, arg = int(value)}, "", true
+            action := Ipc_Action.Focus_Window
+            if tokens[0] == "minimize" { action = .Minimize_Window }
+            if tokens[0] == "restore" { action = .Restore_Window }
+            return Ipc_Command{action = action, arg = int(value)}, "", true
+        }
+        if tokens[0] == "minimize" {
+            return {}, strings.clone("minimize window: expected a positive X11 window id"), false
+        }
+        if tokens[0] == "restore" {
+            return {}, strings.clone("restore window: expected a positive X11 window id"), false
         }
         return {}, strings.clone("focus window: expected a positive X11 window id"), false
     }

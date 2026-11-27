@@ -77,6 +77,9 @@ for changes. A single `skarwm.rc` works without imports.
 | `bar_foreground : #E6E6E6` | Built-in bar text colour. |
 | `bar_background : #1E1E2E` | Built-in bar background colour. |
 | `bar_tag_count : 8` | Fixed workspace slots shown by the built-in bar and exported to EWMH pagers on every monitor, `1..64`. |
+| `bar_workspace_mode : classic` | `classic` keeps the existing workspace/title blocks, `separate` makes the title block an adaptive window strip, and `integrated` nests that strip in the selected workspace. |
+| `bar_window_inactive_width : 12` | Width of compact window buttons, `4..64` pixels. |
+| `bar_window_active_max_width : 240` | Maximum width of the expanded selected-window button, `40..1024` pixels. |
 | `bar_tag_foreground : #262626` | Workspace-slot text colour. |
 | `bar_tag_background : #5F87AF` | Workspace-slot wrapper colour. |
 | `bar_block_foreground : #262626` | Script/status block text colour. |
@@ -186,6 +189,10 @@ without rendering a block. Other blocks take an alignment followed by their
 label, colours, or command. Use `_` to inherit a global colour or omit a script
 label. See [Built-in bar](bar.md) for field order, examples, actions, limits,
 and failure handling.
+
+In `integrated` mode the `workspaces` block owns the window buttons and the
+`title` block is hidden. In `separate` mode the `title` block is required to
+show the adaptive window strip.
 
 Rules use a substring match against `class`, `instance`, or `title`. Effects are
 `workspace N`, `floating`, `floating true|false`, `decorate`, and

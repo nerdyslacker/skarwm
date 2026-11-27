@@ -326,7 +326,7 @@ Draw_Decoration :: proc(state: ^State, m: ^c.Manager, xid: u32) {
     decoration := decoration_frame(state, xid)
     if decoration == nil { return }
     cl := decoration.Client
-    if cl == nil || cl.DecorationFrame == 0 || cl.Fullscreen || cl.Stashed { return }
+    if cl == nil || cl.DecorationFrame == 0 || cl.Fullscreen || cl.Stashed || cl.Minimized { return }
     cfg := m.Cfg.Decoration
     frame := c.Decoration_Layout_Frame_Rect(cl.Geom, m.Cfg.BorderWidth)
     w, h := max(i32(1), frame.W), max(i32(1), frame.H)

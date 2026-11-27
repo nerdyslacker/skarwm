@@ -77,6 +77,7 @@ main :: proc() {
     test_borderless_layout()
     test_arrange_hidden()
     test_move_to_ws()
+    test_minimize_restore()
     test_scratchpads()
     test_dock_model()
     test_dock_geometry_and_struts()
@@ -100,6 +101,54 @@ main :: proc() {
         fmt.eprintln("UNIT TESTS FAILED")
         os.exit(1)
     }
+}
+
+test_minimize_restore :: proc() {
+    m := mk_man()
+    defer c.Destroy_Manager(m)
+    ws := c.Ensure_WS(m, 1)
+    c.Switch_WS_Id(m, 1)
+    a := add_tiled(m, 9001)
+    b := add_tiled(m, 9002)
+    d := add_tiled(m, 9003)
+    c.Focus_Client(m, b)
+    c.Move_Dir(m, .Left)
+    c.Focus_Client(m, d)
+    c.Move_Dir(m, .Left)
+    col := ws.Cols[0]
+    c.Set_Column_Layout(m, .Tabbed)
+    c.Focus_Client(m, b)
+
+    ok(c.Set_Minimized(m, b, true), "minimize focused tab")
+    ok(b.Minimized, "minimized state is authoritative")
+    _, scratchpad_created := c.Scratchpad_Register_Of(m, b)
+    ok(!scratchpad_created, "minimize does not create a scratchpad register")
+    eq(len(col.Wins), 3, "minimize retains column membership")
+    eq(col.Wins[0], a, "minimize preserves first tab position")
+    eq(col.Wins[1], b, "minimize preserves minimized tab position")
+    eq(col.Wins[2], d, "minimize preserves final tab position")
+    eq(m.Focused, d, "minimize selects the next visible tab")
+    ok(c.Focus_Dir(m, .Up), "directional focus skips a minimized tab")
+    eq(m.Focused, a, "focus lands on the next visible tab")
+    c.Focus_Client(m, d)
+    c.Arrange_All(m)
+    ok(b.Geom.X <= c.HIDE_X, "minimized tab is parked off-screen")
+    ok(d.Geom.X >= 0, "fallback tab remains visible")
+
+    ok(c.Set_Minimized(m, b, false), "restore minimized tab")
+    ok(!b.Minimized, "restore clears minimized state")
+    eq(m.Focused, b, "restore focuses the client")
+    eq(len(col.Wins), 3, "restore does not duplicate column membership")
+    eq(col.Wins[1], b, "restore keeps the original tab position")
+    c.Arrange_All(m)
+    ok(b.Geom.X >= 0, "restored tab is visible")
+
+    c.Set_Minimized(m, b, true)
+    c.Set_Minimized(m, d, true)
+    c.Set_Minimized(m, a, true)
+    ok(m.Focused == nil && col.Focus == nil, "minimizing every tab clears focus")
+    eq(len(col.Wins), 3, "fully minimized group retains every tab slot")
+    ok(c.Set_Minimized(m, d, false) && m.Focused == d, "any minimized tab can restore directly")
 }
 
 test_physical_topology :: proc() {
@@ -553,6 +602,9 @@ test_config :: proc() {
     eq(cfg.Decoration.AudioSliderWidth, i32(90), "default titlebar audio slider width")
     eq(cfg.Decoration.AudioVolumeStep, i32(5), "default titlebar audio wheel step")
     eq(cfg.BarPosition, c.Bar_Position.Top, "default bar position")
+    eq(cfg.BarWorkspaceMode, c.Bar_Workspace_Mode.Classic, "classic bar mode remains default")
+    eq(cfg.BarWindowInactiveWidth, i32(12), "compact bar window width defaults to 12")
+    eq(cfg.BarWindowActiveMaxWidth, i32(240), "expanded bar window width is bounded")
     eq(cfg.BarHeight, i32(26), "default bar height")
     eq(cfg.BarForeground, u32(0xE6E6E6), "default bar foreground")
     eq(cfg.BarBackground, u32(0x1E1E2E), "default bar background")
@@ -569,6 +621,22 @@ test_config :: proc() {
     eq(c.Resolve_Page_Width(1904, 8, 3), 948, "3+ columns keep the same page width")
     eq(2 * c.Resolve_Page_Width(1904, 8, 2) + 8, 1904, "two pages + one inner gap fill the screen")
     eq(c.Resolve_Page_Width(100, 8, 2), 60, "page width floored at 60 px")
+
+    eq(c.Resolve_Adaptive_Active_Width(300, 4, 1, 12, 240, 100), i32(100),
+        "selected window expands to its natural width")
+    eq(c.Resolve_Adaptive_Active_Width(60, 4, 1, 12, 240, 100), i32(24),
+        "selected window uses only remaining width")
+    eq(c.Resolve_Adaptive_Active_Width(30, 4, 1, 12, 240, 100), i32(12),
+        "compact buttons never shrink under pressure")
+    eq(c.Resolve_Adaptive_Active_Width(300, 4, -1, 12, 240, 100), i32(0),
+        "no selected window has no expanded width")
+    eq(c.Bar_Window_Click_Action(false, false), c.Bar_Window_Action.Focus,
+        "inactive window click focuses")
+    eq(c.Bar_Window_Click_Action(true, false), c.Bar_Window_Action.Minimize,
+        "focused window click minimizes")
+    eq(c.Bar_Window_Click_Action(false, true), c.Bar_Window_Action.Restore,
+        "minimized window click restores")
+
 }
 
 test_animation_math :: proc() {
@@ -2341,13 +2409,6 @@ test_scratchpads :: proc() {
     eq(b.FloatingRect, c.Rect{X = quake_work.WorkX + quake_work.WorkW - sidebar_width, Y = quake_work.WorkY, W = sidebar_width, H = quake_work.WorkH},
         "sidebar register applies sidebar geometry")
 
-    c.Focus_Client(m, a)
-    auto_register, auto_stashed := c.Scratchpad_Stash_Client(m, a)
-    ok(auto_stashed && auto_register == 1, "decoration minimize assigns the first free scratchpad register")
-    ok(a.Stashed && a.Ws == nil, "decoration scratchpad path uses normal stash lifecycle")
-    ok(c.Scratchpad_Toggle_Register(m, auto_register), "auto-assigned register restores through normal toggle")
-    ok(!a.Stashed && a.Ws == c.Current_WS(m), "auto-stashed client restores to the active workspace")
-
     c.Unmanage_Client(m, b)
     _, registered = c.Scratchpad_Register_Of(m, b)
     ok(!registered, "unmanage clears every register pointing at the client")
@@ -2779,6 +2840,7 @@ test_ipc_windows_payload :: proc() {
     defer delete(pl)
     eq(string(pl), `{"version":1,"windows":[{"id":42,"title":"A \"quoted\" title",` +
         `"class":"XTerm","instance":"xterm","workspace":1,"output":"eDP-1","focused":true,` +
+        `"workspace_focused":true,"minimized":false,` +
         `"floating":false,"always_on_top":false,"fullscreen":false,"scratchpad":false,"scratchpad_register":null,"scratchpad_registers":[],"urgent":false,"column":0,` +
         `"column_layout":"stacked","tab_index":0,"tab_count":1,"tab_active":false,"dock":false,` +
         `"rect":{"x":10,"y":20,"width":800,"height":600}}]}`,
@@ -2900,6 +2962,14 @@ test_ipc_parse_command :: proc() {
     cmd, err, fine = c.ipc_parse_command(bytes_of(`focus window 4194309`))
     ok(fine && cmd.action == .Focus_Window && cmd.arg == 4194309,
        "focus window parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`minimize window 4194309`))
+    ok(fine && cmd.action == .Minimize_Window && cmd.arg == 4194309,
+       "minimize window parsed")
+    if err != "" do delete(err)
+    cmd, err, fine = c.ipc_parse_command(bytes_of(`restore window 4194309`))
+    ok(fine && cmd.action == .Restore_Window && cmd.arg == 4194309,
+       "restore window parsed")
     if err != "" do delete(err)
     cmd, err, fine = c.ipc_parse_command(bytes_of(`focus window nope`))
     ok(!fine, "focus window rejects non-numeric id")

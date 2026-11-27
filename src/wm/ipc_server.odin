@@ -445,6 +445,11 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
             ewmh_activate(cl)
         }
         return
+    case .Minimize_Window, .Restore_Window:
+        if cl := g_wm.m.ByXid[u32(cmd.arg)]; cl != nil && !cl.Dock && !cl.Stashed {
+            set_client_minimized(cl, cmd.action == .Minimize_Window)
+        }
+        return
     case .Set_Gaps:
         gap := i32(cmd.arg)
         g_wm.m.Cfg.Gap = 0

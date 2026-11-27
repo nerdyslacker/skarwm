@@ -33,6 +33,27 @@ HIDE_X :: -20000 // park off-screen windows here (kept within X int16 range)
 PAGE_COLS :: 2 // columns that fit on screen before the strip starts scrolling
 PAGE_ROWS :: 1 // focused row shown between top/bottom neighbor previews
 TAB_BAR_HEIGHT :: i32(24)
+
+Resolve_Adaptive_Active_Width :: proc(
+    available, count, selected, inactive_width, active_max_width, natural_active_width: i32,
+) -> i32 {
+    compact := max(i32(1), inactive_width)
+    if selected < 0 || selected >= count { return 0 }
+    if available <= compact*count { return compact }
+    return min(
+        max(compact, min(active_max_width, natural_active_width)),
+        available - compact*(count-1),
+    )
+}
+
+Bar_Window_Action :: enum u8 { Focus, Minimize, Restore }
+
+Bar_Window_Click_Action :: proc(focused, minimized: bool) -> Bar_Window_Action {
+    if minimized { return .Restore }
+    if focused { return .Minimize }
+    return .Focus
+}
+
 SCROLL_PREVIEW_WIDTH :: i32(20)
 GAME_ANCHOR_PERCENT :: i32(75)
 GAME_COMPANION_ROWS :: 3
@@ -1140,7 +1161,7 @@ place_client_in_tile :: proc(ws: ^Workspace, cl: ^Client, tile: Rect, border: i3
 workspace_tiled_clients :: proc(ws: ^Workspace) -> [dynamic]^Client {
     clients := make([dynamic]^Client, 0, len(ws.Cols))
     for col in ws.Cols {
-        for cl in col.Wins { append(&clients, cl) }
+        for cl in col.Wins { if !cl.Minimized { append(&clients, cl) } }
     }
     return clients
 }
@@ -1235,14 +1256,15 @@ arrange_game_column :: proc(ws: ^Workspace, col: ^Column, tile, hide: Rect, p: L
     if col == nil || len(col.Wins) == 0 { return }
     if col.Layout == .Tabbed {
         active := col.Focus
-        if active == nil || !column_member(col, active) {
-            active = col.Wins[0]
+        if active == nil || active.Minimized || !column_member(col, active) {
+            active = nil
+            for cl in col.Wins { if !cl.Minimized { active = cl; break } }
             col.Focus = active
         }
         tab_h := min(TAB_BAR_HEIGHT, max(i32(0), tile.H - 1))
         content := Rect{X = tile.X, Y = tile.Y + tab_h, W = tile.W, H = tile.H - tab_h}
         for cl in col.Wins {
-            if cl == active { place_client_in_tile(ws, cl, content, p.Border) }
+            if cl == active && !cl.Minimized { place_client_in_tile(ws, cl, content, p.Border) }
             else { cl.Geom = hide; cl.Border = 0 }
         }
         return
@@ -1546,14 +1568,15 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
 
             if col.Layout == .Tabbed {
                 active := col.Focus
-                if active == nil || !column_member(col, active) {
-                    active = col.Wins[0]
+                if active == nil || active.Minimized || !column_member(col, active) {
+                    active = nil
+                    for cl in col.Wins { if !cl.Minimized { active = cl; break } }
                     col.Focus = active
                 }
                 tab_h := min(TAB_BAR_HEIGHT, max(i32(0), p.WorkH - 1))
                 tile := Rect { X = col_left, Y = p.WorkY + tab_h, W = col_w, H = p.WorkH - tab_h }
                 for cl in col.Wins {
-                    if cl == active {
+                    if cl == active && !cl.Minimized {
                         place_client_in_tile(ws, cl, tile, p.Border)
                     } else {
                         cl.Geom = hide
@@ -1770,7 +1793,7 @@ Arrange_All :: proc(m: ^Manager) {
     // Scratchpads are workspace-less while hidden, so no output layout pass
     // above sees them. Keep them mapped but safely outside the root geometry.
     for cl in m.Clients {
-        if cl.Stashed {
+        if cl.Stashed || cl.Minimized {
             cl.Geom = Rect { X = HIDE_X, Y = 0, W = max(cl.Geom.W, i32(1)), H = max(cl.Geom.H, i32(1)) }
             cl.Border = m.Cfg.BorderWidth
         }

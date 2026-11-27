@@ -12,6 +12,19 @@ Dir :: enum {
     Down,
 }
 
+column_focusable :: proc(col: ^Column, prefer_last: bool = false) -> ^Client {
+    if col == nil { return nil }
+    if col.Focus != nil && !col.Focus.Minimized && column_member(col, col.Focus) { return col.Focus }
+    if prefer_last {
+        for i := len(col.Wins)-1; i >= 0; i -= 1 {
+            if !col.Wins[i].Minimized { return col.Wins[i] }
+        }
+    } else {
+        for cl in col.Wins { if !cl.Minimized { return cl } }
+    }
+    return nil
+}
+
 // Column_Of exposes a client's current column to the X-facing policy layer
 // without exposing the package-private workspace search helper.
 Column_Of :: proc(cl: ^Client) -> (column_index: int, col: ^Column, row: int) {
@@ -128,7 +141,7 @@ Jump_To_Client :: proc(m: ^Manager, cl: ^Client) -> bool {
 // The Ws == nil guard is what keeps dock clients (which belong to no
 // workspace) permanently unfocusable.
 Focus_Client :: proc(m: ^Manager, cl: ^Client) {
-    if cl == nil || cl.Ws == nil { return }
+    if cl == nil || cl.Ws == nil || cl.Minimized { return }
     ws := cl.Ws
     o := cl.Out
     if o == nil { o = Output_Of_WS(m, ws); cl.Out = o }
@@ -193,7 +206,7 @@ Focus_Dir :: proc(m: ^Manager, dir: Dir) -> bool {
                 if target == nil || !column_member(ws.Cols[ci + 1], target) { target = ws.Cols[ci + 1].Wins[0] }
             }
         }
-        if target == nil || target == cl { return false }
+        if target == nil || target.Minimized || target == cl { return false }
         Focus_Client(m, target)
         return true
     }
@@ -214,24 +227,20 @@ Focus_Dir :: proc(m: ^Manager, dir: Dir) -> bool {
     switch effective_dir {
     case .Left:
         if ci > 0 {
-            tcol := ws.Cols[ci - 1]
-            target = tcol.Focus
-            if target == nil || !column_member(tcol, target) {
-                target = tcol.Wins[len(tcol.Wins) - 1]
-            }
+            target = column_focusable(ws.Cols[ci - 1], true)
         }
     case .Right:
         if ci + 1 < len(ws.Cols) {
-            tcol := ws.Cols[ci + 1]
-            target = tcol.Focus
-            if target == nil || !column_member(tcol, target) {
-                target = tcol.Wins[len(tcol.Wins) - 1]
-            }
+            target = column_focusable(ws.Cols[ci + 1], true)
         }
     case .Up:
-        if row > 0 { target = col.Wins[row - 1] }
+        for i := row-1; i >= 0; i -= 1 {
+            if !col.Wins[i].Minimized { target = col.Wins[i]; break }
+        }
     case .Down:
-        if row + 1 < len(col.Wins) { target = col.Wins[row + 1] }
+        for i := row+1; i < len(col.Wins); i += 1 {
+            if !col.Wins[i].Minimized { target = col.Wins[i]; break }
+        }
     }
 
     if target == nil || target == cl { return false }
@@ -246,6 +255,15 @@ in_column_focus_after_removal :: proc(col: ^Column, row: int) -> ^Client {
     if n <= 1 { return nil } // column will become empty; caller handles it
     if row < n - 1 { return col.Wins[row + 1] }
     return col.Wins[n - 2]
+}
+
+column_focus_after :: proc(col: ^Column, row: int) -> ^Client {
+    if col == nil || len(col.Wins) == 0 { return nil }
+    for offset in 1 ..= len(col.Wins) {
+        cl := col.Wins[(row + offset) % len(col.Wins)]
+        if !cl.Minimized { return cl }
+    }
+    return nil
 }
 
 // neighbor_focus_when_col_gone picks a focus when the removed client was the
@@ -268,14 +286,34 @@ neighbor_focus_when_col_gone :: proc(ws: ^Workspace, ci: int) -> ^Client {
 fallback_focus_for_ws :: proc(ws: ^Workspace) -> ^Client {
     if ws == nil { return nil }
     for col in ws.Cols {
-        if col.Focus != nil && column_member(col, col.Focus) {
+        if col.Focus != nil && !col.Focus.Minimized && column_member(col, col.Focus) {
             return col.Focus
         }
     }
     for col in ws.Cols {
-        if len(col.Wins) > 0 { return col.Wins[0] }
+        for cl in col.Wins { if !cl.Minimized { return cl } }
     }
+    for cl in ws.Floaters { if !cl.Minimized { return cl } }
     return nil
+}
+
+Set_Minimized :: proc(m: ^Manager, cl: ^Client, minimized: bool) -> bool {
+    if m == nil || cl == nil || cl.Dock || cl.Stashed || cl.Ws == nil || cl.Minimized == minimized {
+        return false
+    }
+    ws := cl.Ws
+    cl.Minimized = minimized
+    if minimized {
+        cl.Fullscreen = false
+        _, col, row := column_of(ws, cl)
+        if col != nil && col.Focus == cl { col.Focus = column_focus_after(col, row) }
+        if ws.Focus == cl { ws.Focus = col.Focus if col != nil else fallback_focus_for_ws(ws) }
+        if ws.Focus == nil { ws.Focus = fallback_focus_for_ws(ws) }
+        if ws == Current_WS(m) { m.Focused = ws.Focus }
+    } else {
+        Focus_Client(m, cl)
+    }
+    return true
 }
 
 // ----------------------------------------------------------------------------
@@ -1033,28 +1071,6 @@ Scratchpad_Register_Of :: proc(m: ^Manager, cl: ^Client) -> (int, bool) {
         if registered == cl { return number, true }
     }
     return 0, false
-}
-
-// Scratchpad_Stash_Client is the semantic "minimize to scratchpad" path used
-// by native decorations. It preserves an existing register or assigns the
-// first free positive register so the normal toggle workflow can restore it.
-Scratchpad_Stash_Client :: proc(m: ^Manager, cl: ^Client) -> (register: int, ok: bool) {
-    if m == nil || cl == nil || cl.Dock || cl.Stashed || cl.Ws == nil { return 0, false }
-    existing, registered := Scratchpad_Register_Of(m, cl)
-    register = existing
-    if !registered {
-        register = 1
-        for {
-            if _, used := m.Scratchpad_Registers[register]; !used { break }
-            register += 1
-        }
-        m.Scratchpad_Registers[register] = cl
-    }
-    if !Stash_Client(m, cl) {
-        if !registered { delete_key(&m.Scratchpad_Registers, register) }
-        return 0, false
-    }
-    return register, true
 }
 
 Scratchpad_Match_Field :: enum { AppId, Class, Instance, Title }

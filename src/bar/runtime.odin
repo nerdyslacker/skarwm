@@ -1,6 +1,7 @@
 package main
 
 import x11 "../x11"
+import c "../core"
 
 import "core:sys/posix"
 
@@ -11,7 +12,8 @@ window_by_xid :: proc(state: ^State, xid: u32) -> ^Bar_Window {
 
 hit_at :: proc(window: ^Bar_Window, x, y: i32) -> (Hitbox, bool) {
     if window == nil { return {}, false }
-    for hit in window.Hits {
+    for i := len(window.Hits) - 1; i >= 0; i -= 1 {
+        hit := window.Hits[i]
         if x >= hit.X && x < hit.X + hit.W && y >= hit.Y && y < hit.Y + hit.H {
             return hit, true
         }
@@ -88,6 +90,9 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
         if old.Position != state.Config.Position || old.Height != state.Config.Height ||
            old.Foreground != state.Config.Foreground || old.Background != state.Config.Background ||
            old.WorkspaceCount != state.Config.WorkspaceCount ||
+           old.WorkspaceMode != state.Config.WorkspaceMode ||
+           old.WindowInactiveWidth != state.Config.WindowInactiveWidth ||
+           old.WindowActiveMaxWidth != state.Config.WindowActiveMaxWidth ||
            old.WorkspaceForeground != state.Config.WorkspaceForeground ||
            old.WorkspaceBackground != state.Config.WorkspaceBackground ||
            old.BlockForeground != state.Config.BlockForeground ||
@@ -100,21 +105,48 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
     case u8(x11.EVENT_BUTTON_PRESS):
         button := (^x11.Button_Press_Event)(event)
         window := window_by_xid(state, button.event)
-        if hit, ok := hit_at(window, i32(button.event_x), i32(button.event_y)); ok &&
-           hit.BlockIndex >= 0 && hit.BlockIndex < len(state.Blocks) {
+        if hit, ok := hit_at(window, i32(button.event_x), i32(button.event_y)); ok && hit.Kind == .Window {
+            if button.detail == 1 { window.PressedWindow = hit.Window }
+        } else if ok && hit.BlockIndex >= 0 && hit.BlockIndex < len(state.Blocks) {
             block := &state.Blocks[hit.BlockIndex]
             if block.Ops.Click != nil { block.Ops.Click(block, state, window, hit.Payload, button.detail) }
+        }
+    case u8(x11.EVENT_BUTTON_RELEASE):
+        button := (^x11.Button_Press_Event)(event)
+        window := window_by_xid(state, button.event)
+        if window == nil || button.detail != 1 { return true }
+        pressed := window.PressedWindow
+        window.PressedWindow = 0
+        hit, ok := hit_at(window, i32(button.event_x), i32(button.event_y))
+        if !ok || hit.Kind != .Window || hit.Window != pressed { return true }
+        client := window_state_by_xid(state, pressed)
+        if client == nil || client.Output != window.Output || client.Dock || client.Scratchpad { return true }
+        active_workspace := 0
+        for workspace in state.Workspaces {
+            if workspace.Output == window.Output && workspace.Active {
+                active_workspace = workspace.Id
+                break
+            }
+        }
+        if client.Workspace != active_workspace { return true }
+        switch c.Bar_Window_Click_Action(client.Focused, client.Minimized) {
+        case .Focus:    ipc_window_action(state, "focus", pressed)
+        case .Minimize: ipc_window_action(state, "minimize", pressed)
+        case .Restore:  ipc_window_action(state, "restore", pressed)
         }
     case u8(x11.EVENT_MOTION_NOTIFY):
         motion := (^x11.Motion_Notify_Event)(event)
         window := window_by_xid(state, motion.event)
         if window == nil { return true }
         hovered := 0
+        hovered_window := u32(0)
         if hit, ok := hit_at(window, i32(motion.event_x), i32(motion.event_y)); ok {
-            hovered = hit.Payload
+            if hit.Kind == .Workspace { hovered = hit.Payload }
+            if hit.Kind == .Window { hovered_window = hit.Window }
         }
-        if hovered != window.HoverWorkspace {
+        if hovered != window.HoverWorkspace || hovered_window != window.HoverWindow {
             window.HoverWorkspace = hovered
+            window.HoverWindow = hovered_window
             draw_bar(state, window)
         }
         window.HoverBlock = -1
@@ -128,6 +160,7 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
         leave := (^x11.Enter_Notify_Event)(event)
         if window := window_by_xid(state, leave.event); window != nil {
             window.HoverBlock = -1
+            window.HoverWindow = 0
             if window.HoverWorkspace != 0 {
                 window.HoverWorkspace = 0
                 draw_bar(state, window)
@@ -143,13 +176,21 @@ refresh_hover_tooltip :: proc(state: ^State) {
     for &window in state.Windows {
         if window.HoverBlock < 0 || window.HoverBlock >= len(state.Blocks) { continue }
         block := &state.Blocks[window.HoverBlock]
+        hit, has_hit := hit_at(
+            &window, window.HoverRootX-window.Geom.X, window.HoverRootY-window.Geom.Y,
+        )
+        if has_hit && hit.Kind == .Window {
+            if client := window_state_by_xid(state, hit.Window); client != nil {
+                tooltip_show(state, window.HoverRootX, window.HoverRootY, client.Title)
+            }
+            return
+        }
         if block.Kind == .Layout {
             label := indicator_hover_text(block, state, &window)
             defer delete(label)
             if label != "" { tooltip_show(state, window.HoverRootX, window.HoverRootY, label) }
         } else if block.Kind == .Workspaces {
-            hit, ok := hit_at(&window, window.HoverRootX - window.Geom.X, window.HoverRootY - window.Geom.Y)
-            if ok {
+            if has_hit {
                 label := workspace_hover_text(state, hit.Payload)
                 defer delete(label)
                 if label != "" { tooltip_show(state, window.HoverRootX, window.HoverRootY, label) }

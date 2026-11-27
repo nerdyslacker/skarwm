@@ -60,6 +60,19 @@ ipc_switch_workspace :: proc(state: ^State, output: string, id: int) {
     if !ok { ipc_disconnect(state) }
 }
 
+ipc_window_action :: proc(state: ^State, action: string, xid: u32) {
+    if state.IpcFd < 0 { return }
+    command := fmt.aprintf("%s window %d", action, xid)
+    ok := ipc_send_request(state, .Command, command)
+    delete(command)
+    if !ok { ipc_disconnect(state) }
+}
+
+window_state_by_xid :: proc(state: ^State, xid: u32) -> ^Window_State {
+    for &client in state.WindowsState { if client.Id == xid { return &client } }
+    return nil
+}
+
 ipc_service :: proc(state: ^State) -> bool {
     buffer: [8192]u8
     for {
@@ -292,15 +305,24 @@ parse_workspace_object :: proc(state: ^State, object: []byte) {
 }
 
 parse_window_object :: proc(state: ^State, object: []byte) {
+    id, id_ok := json_int_field(object, "id")
+    workspace, workspace_ok := json_int_field(object, "workspace")
     title, title_ok := json_string_field(object, "title")
     output, output_ok := json_string_field(object, "output")
-    if !title_ok || !output_ok {
+    if !id_ok || id <= 0 || !workspace_ok || !title_ok || !output_ok {
         if title != "" { delete(title) }
         if output != "" { delete(output) }
         return
     }
-    append(&state.WindowsState, Window_State{Title = title, Output = output,
-        Focused = json_bool_field(object, "focused")})
+    append(&state.WindowsState, Window_State{
+        Id = u32(id), Title = title, Output = output, Workspace = workspace,
+        Focused = json_bool_field(object, "focused"),
+        WorkspaceFocused = json_bool_field(object, "workspace_focused"),
+        Minimized = json_bool_field(object, "minimized"),
+        Urgent = json_bool_field(object, "urgent"),
+        Dock = json_bool_field(object, "dock"),
+        Scratchpad = json_bool_field(object, "scratchpad"),
+    })
 }
 
 parse_window_snapshot :: proc(state: ^State, payload: []byte) {

@@ -16,7 +16,7 @@ import "core:time"
 BAR_CONFIG_ATOM :: "_SKARWM_BAR_CONFIG"
 BAR_BLOCKS_ATOM :: "_SKARWM_BAR_BLOCKS"
 BAR_FONT_ATOM :: "_SKARWM_BAR_FONT"
-BAR_CONFIG_VERSION :: u32(3)
+BAR_CONFIG_VERSION :: u32(4)
 BAR_RESTART_DELAY :: time.Second
 
 bar_write_escaped :: proc(builder: ^strings.Builder, value: string) {
@@ -203,6 +203,8 @@ bar_sync_config :: proc() {
         cfg.BarWorkspaceForeground, cfg.BarWorkspaceBackground,
         cfg.BarBlockForeground, cfg.BarBlockBackground,
         u32(cfg.BarFontSize), u32(cfg.BarFontWeight),
+        u32(cfg.BarWorkspaceMode), u32(cfg.BarWindowInactiveWidth),
+        u32(cfg.BarWindowActiveMaxWidth),
     }
     font := string(cfg.BarFont[:cfg.BarFontLen])
     x11.set_prop_text(g_wm.conn, g_wm.root, atom(BAR_FONT_ATOM), atom("UTF8_STRING"), font)

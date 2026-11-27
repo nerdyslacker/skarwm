@@ -156,7 +156,7 @@ animation_schedule_next :: proc(state: ^State, m: ^c.Manager, now: time.Tick) {
 }
 
 animation_map_client :: proc(conn: ^x11.Connection, cl: ^c.Client, on_mapped: Mapped_Callback) {
-    show_frame := cl.Decorated && cl.DecorationFrame != 0 && !cl.Fullscreen && !cl.Stashed && !cl.Dock
+    show_frame := cl.Decorated && cl.DecorationFrame != 0 && !cl.Fullscreen && !cl.Stashed && !cl.Minimized && !cl.Dock
     if show_frame && !cl.DecorationFrameMapped {
         x11.xcb_map_window(conn, cl.DecorationFrame)
         cl.DecorationFrameMapped = true

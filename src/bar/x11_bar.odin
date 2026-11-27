@@ -142,6 +142,7 @@ create_bar_window :: proc(state: ^State, monitor: Monitor) {
 
     xid := x11.xcb_generate_id(state.Conn)
     event_mask := x11.EVENT_MASK_EXPOSURE | x11.EVENT_MASK_BUTTON_PRESS |
+        x11.EVENT_MASK_BUTTON_RELEASE |
         x11.EVENT_MASK_STRUCTURE_NOTIFY | x11.EVENT_MASK_POINTER_MOTION |
         x11.EVENT_MASK_LEAVE_WINDOW | x11.EVENT_MASK_SUBSTRUCTURE_NOTIFY
     values := [2]u32{state.Config.Background, event_mask}

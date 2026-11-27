@@ -21,6 +21,8 @@ Bar_Config :: struct {
     Foreground: u32,
     Background: u32,
     WorkspaceCount: i32,
+    WorkspaceMode: ipc.Bar_Workspace_Mode,
+    WindowInactiveWidth, WindowActiveMaxWidth: i32,
     WorkspaceForeground, WorkspaceBackground: u32,
     BlockForeground, BlockBackground: u32,
 }
@@ -31,6 +33,7 @@ Bar_Window :: struct {
     Geom: Monitor,
     Hits: [dynamic]Hitbox,
     HoverWorkspace: int,
+    HoverWindow, PressedWindow: u32,
     HoverBlock: int,
     HoverRootX, HoverRootY: i32,
     Canvas: X_Pixmap,
@@ -53,9 +56,11 @@ Workspace_State :: struct {
 }
 
 Window_State :: struct {
+    Id: u32,
     Title: string,
     Output: string,
-    Focused: bool,
+    Workspace: int,
+    Focused, WorkspaceFocused, Minimized, Urgent, Dock, Scratchpad: bool,
 }
 
 Workspace_Meta :: struct { Id: int, Icon, Name: string }
@@ -93,7 +98,7 @@ State :: struct {
 BAR_CONFIG_ATOM :: "_SKARWM_BAR_CONFIG"
 BAR_BLOCKS_ATOM :: "_SKARWM_BAR_BLOCKS"
 BAR_FONT_ATOM :: "_SKARWM_BAR_FONT"
-BAR_CONFIG_VERSION :: u32(3)
+BAR_CONFIG_VERSION :: u32(4)
 
 main :: proc() {
     cfg, ok := parse_args()
@@ -124,6 +129,8 @@ parse_args :: proc() -> (Bar_Config, bool) {
         FontSize = 11, FontWeight = .Normal,
         Foreground = 0xE6E6E6, Background = 0x1E1E2E,
         WorkspaceCount = 8,
+        WorkspaceMode = .Classic,
+        WindowInactiveWidth = 12, WindowActiveMaxWidth = 240,
         WorkspaceForeground = 0x262626, WorkspaceBackground = 0x5F87AF,
         BlockForeground = 0x262626, BlockBackground = 0xAF5F5F,
     }
@@ -307,6 +314,13 @@ read_managed_config :: proc(state: ^State) -> (enabled, found: bool) {
         if values[12] <= u32(Bar_Font_Weight.Bold) {
             state.Config.FontWeight = Bar_Font_Weight(values[12])
         }
+    }
+    if len(values) >= 16 {
+        if values[13] <= u32(ipc.Bar_Workspace_Mode.Integrated) {
+            state.Config.WorkspaceMode = ipc.Bar_Workspace_Mode(values[13])
+        }
+        state.Config.WindowInactiveWidth = clamp(i32(values[14]), i32(4), i32(64))
+        state.Config.WindowActiveMaxWidth = clamp(i32(values[15]), i32(40), i32(1024))
     }
     if font, font_ok := x11.get_text(state.Conn, state.Root, atom(state, BAR_FONT_ATOM)); font_ok {
         config_set_font(&state.Config, font)

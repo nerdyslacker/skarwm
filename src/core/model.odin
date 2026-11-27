@@ -82,6 +82,7 @@ Client :: struct {
     MaxRestoreFloatRect: Rect,
     MaxRestoreFloating: bool,
     Urgent:     bool, // ICCCM WM_HINTS urgency flag
+    Minimized:  bool, // hidden without leaving its workspace or layout slot
     Mapped:     bool, // the X layer has MapWindow'ed it
     Border:     i32, // border width to apply (0 while fullscreen), set by arrange
     SizeHints: Size_Hints,

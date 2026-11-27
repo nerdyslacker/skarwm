@@ -1420,20 +1420,14 @@ tiled_resize_motion :: proc(root_x, root_y: i32) {
     g_wm.mouse_root_y = i16(root_y)
 }
 
-decoration_stash_client :: proc(cl: ^c.Client) {
+set_client_minimized :: proc(cl: ^c.Client, minimized: bool) {
     if cl == nil { return }
     old_focus := g_wm.m.Focused
-    title := cl.Title
-    if title == "" { title = cl.Class }
-    if title == "" { title = "Window" }
-    register, ok := c.Scratchpad_Stash_Client(g_wm.m, cl)
-    if !ok { return }
+    if !c.Set_Minimized(g_wm.m, cl, minimized) { return }
+    if !minimized { raise_focused() }
     reflow()
     ipc_broadcast_focus_change(old_focus, g_wm.m.Focused)
     ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
-    notice := fmt.aprintf("%s moved to scratchpad %d", title, register)
-    defer delete(notice)
-    ui.Show_Notice(&g_wm.ui, g_wm.m, notice)
 }
 
 decoration_begin_drag :: proc(cl: ^c.Client, ev: ^x11.Button_Press_Event) {
@@ -1532,7 +1526,7 @@ decoration_button_press :: proc(cl: ^c.Client, ev: ^x11.Button_Press_Event) {
     case .Maximize:
         toggle_client_maximized(cl)
     case .Minimize:
-        decoration_stash_client(cl)
+        set_client_minimized(cl, true)
     case .Title:
         decoration_begin_drag(cl, ev)
     case .Resize_Top, .Resize_Bottom, .Resize_Left, .Resize_Right,
