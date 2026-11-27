@@ -1,1 +1,2 @@
-@theme "~/.config/rofi/themes/grimm.rasi"
+@import "theme.rasi"
+@import "themes/skarwm-base.rasi"

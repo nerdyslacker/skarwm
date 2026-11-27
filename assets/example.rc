@@ -201,8 +201,8 @@ rule : title : Network : floating
 rule : instance : firefox : workspace 3
 rule : title : "Mozilla Firefox" : floating
 
-# Optional theme switching: uncomment this repository-relative import. After
-# copying example.rc to ~/.config/skarwm/skarwm.rc, use `import : theme.rc`
-# instead. It is disabled by default so the bar palette above stays canonical.
-# import : config.d/theme.rc
+# Optional paired skarwm/Rofi themes from assets/config. When running this file
+# from the repository, use `import : config/skarwm/theme.rc`. After copying it
+# to ~/.config/skarwm/skarwm.rc, use `import : theme.rc` instead.
+import : config/skarwm/themes/nare-light.rc
 # import : config.d/keybindings.rc

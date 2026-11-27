@@ -59,6 +59,7 @@ install: build/skarwm build/skarwm-msg build/skarwm-bar
 	install -Dm644 assets/example.rc $(DESTDIR)$(SKARWMDIR)/skarwm.rc
 
 test: build/skarwm build/skarwm-msg build/skarwm-bar
+	tests/theme_switcher.sh
 	odin run tests/audio_tests
 	odin run tests/core_tests
 	scripts/itest.sh

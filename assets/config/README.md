@@ -37,11 +37,16 @@ files in `~/.config/skarwm/scripts/executables` to add them to the script
 picker. Wallpaper images default to `~/Pictures/backgrounds`; the
 fallback restored at login is `~/.config/skarwm/wallpaper.jpeg`.
 
-When running `assets/example.rc` directly, its import is
-`config/skarwm/theme.rc`, relative to the `assets` directory. After copying the
-example to `~/.config/skarwm/skarwm.rc`, change that line to `import : theme.rc`.
-The included file starts with the Grimm palette; add more `.rc` fragments to
-`~/.config/skarwm/themes`; the picker lists them.
+Srcery is the default dark theme. Nare Light is also included. Enable the theme
+import and the `skarwmThemeSwitcher.sh` binding in `example.rc` after copying
+the helper bundle. Use `import : config/skarwm/theme.rc` when running the
+repository example directly, or `import : theme.rc` in
+`~/.config/skarwm/skarwm.rc`.
+
+The picker lists paired themes. Add `name.rc` to
+`~/.config/skarwm/themes` and `name.rasi` to `~/.config/rofi/themes`; matching
+basenames appear as one menu item. Selecting one updates both active theme
+symlinks and reloads skarwm.
 
 The following optional environment variables override those paths:
 
@@ -50,3 +55,5 @@ The following optional environment variables override those paths:
 - `SKARWM_WALLPAPER_DIR`
 - `SKARWM_DEFAULT_WALLPAPER`
 - `SKARWM_LOCK_IMAGE`
+- `SKARWM_THEMES_DIR`
+- `SKARWM_ROFI_THEMES_DIR`

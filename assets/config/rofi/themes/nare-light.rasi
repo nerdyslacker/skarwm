@@ -1,0 +1,9 @@
+* {
+  bar-background: #E2E5E7;
+  bar-foreground: #40556B;
+  tag-background: #668FAE;
+  tag-foreground: #343B45;
+  block-background: #D2DCE5;
+  block-foreground: #343B45;
+  highlight: underline bold #668FAE;
+}

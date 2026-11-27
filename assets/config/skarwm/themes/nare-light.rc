@@ -1,0 +1,18 @@
+# Nare Light palette for skarwm and its built-in bar.
+norm_outer_border : #C4CCD2
+sel_outer_border : #668FAE
+
+decoration_accent : #668FAE
+decoration_active_background : #FAF6F0
+decoration_inactive_background : #E2E5E7
+decoration_active_foreground : #343B45
+decoration_inactive_foreground : #40556B
+decoration_active_border : #668FAE
+decoration_inactive_border : #C4CCD2
+
+bar_foreground : #40556B
+bar_background : #E2E5E7
+bar_tag_foreground : #343B45
+bar_tag_background : #668FAE
+bar_block_foreground : #343B45
+bar_block_background : #D2DCE5
