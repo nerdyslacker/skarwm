@@ -131,7 +131,14 @@ reflow_immediate :: proc() { reflow_inner(true, false) }
 // the model (client rects already account for the border ring). Also maps any
 // client that has not been mapped yet.
 push_geoms :: proc(animate: bool) {
-    rendering.Commit(&g_wm.rendering, g_wm.conn, g_wm.m, animate, ewmh_mark_mapped)
+    rendering.Commit(
+        &g_wm.rendering, g_wm.conn, g_wm.m, animate,
+        ewmh_mark_mapped, decoration_geometry_updated, close_client_now,
+    )
+}
+
+decoration_geometry_updated :: proc(cl: ^c.Client, geom: c.Rect) {
+    ui.Set_Decoration_Geometry(&g_wm.ui, g_wm.m, cl, geom)
 }
 
 // render_focus sets each window's border colour and normally applies X input
@@ -1166,7 +1173,7 @@ move_focused_to_ws :: proc(id: int) {
 // close_client politely asks any managed client to exit: WM_DELETE_WINDOW when
 // advertised, an X kill otherwise (ICCCM §4.2.4). Used by the close binding
 // and by EWMH _NET_CLOSE_WINDOW requests for arbitrary clients.
-close_client :: proc(cl: ^c.Client) {
+close_client_now :: proc(cl: ^c.Client) {
     if cl == nil { return }
     if client_has_protocol(cl.Xid, atom("WM_DELETE_WINDOW")) {
         send_client_message(cl.Xid, atom("WM_PROTOCOLS"), atom("WM_DELETE_WINDOW"), x11.CURRENT_TIME)
@@ -1174,6 +1181,11 @@ close_client :: proc(cl: ^c.Client) {
         x11.xcb_kill_client(g_wm.conn, cl.Xid)
         x11.xcb_flush(g_wm.conn)
     }
+}
+
+close_client :: proc(cl: ^c.Client) {
+    if cl == nil || rendering.Begin_Close(&g_wm.rendering, g_wm.m, cl) { return }
+    close_client_now(cl)
 }
 
 close_focused :: proc() {
@@ -1399,6 +1411,7 @@ show_tiled_drag_preview :: proc(cl: ^c.Client, root_x, root_y: i32, header_heigh
             W = preview.W,
             H = max(i32(1), preview.H - header_h),
         },
+        decoration_geometry_updated,
     )
     g_wm.mouse_preview = preview
     return preview

@@ -10,12 +10,12 @@ import c "../core"
 import "core:time"
 
 Client_Animation :: struct {
-    Start, Current, Target: c.Rect,
+    Start, Current, Target, LayoutTarget: c.Rect,
     Start_Border, Current_Border, Target_Border: i32,
     Started: time.Tick,
     Duration: time.Duration,
     Easing: c.Animation_Easing,
-    Active: bool,
+    Active, Closing: bool,
 }
 
 Window_Shape_State :: struct {
@@ -35,6 +35,8 @@ State :: struct {
 }
 
 Mapped_Callback :: proc(cl: ^c.Client)
+Geometry_Callback :: proc(cl: ^c.Client, geom: c.Rect)
+Close_Callback :: proc(cl: ^c.Client)
 
 Init :: proc(state: ^State, conn: ^x11.Connection) {
     state.Animations = make(map[u32]^Client_Animation)
@@ -89,7 +91,10 @@ configure_client_geometry :: proc(
 // Preview_Client moves a dragged tile without changing its authoritative core
 // geometry. Synchronizing the animation state lets the eventual drop animate
 // smoothly from this pointer-following preview into its new tiled position.
-Preview_Client :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, cl: ^c.Client, geom: c.Rect) {
+Preview_Client :: proc(
+    state: ^State, conn: ^x11.Connection, m: ^c.Manager,
+    cl: ^c.Client, geom: c.Rect, on_geometry: Geometry_Callback = nil,
+) {
     if state == nil || conn == nil || m == nil || cl == nil { return }
     st := state.Animations[cl.Xid]
     if st == nil {
@@ -99,6 +104,7 @@ Preview_Client :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, cl: 
     st.Start = geom
     st.Current = geom
     st.Target = geom
+    st.LayoutTarget = geom
     st.Start_Border = cl.Border
     st.Current_Border = cl.Border
     st.Target_Border = cl.Border
@@ -106,6 +112,7 @@ Preview_Client :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, cl: 
     // A drag preview intentionally follows the pointer across outputs; its
     // ownership is updated only when the drop completes.
     configure_client_geometry(state, conn, m, cl, geom, cl.Border, false)
+    if on_geometry != nil { on_geometry(cl, geom) }
 }
 
 animation_sample :: proc(st: ^Client_Animation, now: time.Tick) {
@@ -139,11 +146,11 @@ animation_outer_rect :: proc(geom: c.Rect, border: i32) -> c.Rect {
 }
 
 animation_is_decoration_only :: proc(st: ^Client_Animation, geom: c.Rect, border: i32) -> bool {
-    if st == nil || st.Active || (st.Target == geom && st.Target_Border == border) { return false }
+    if st == nil || st.Active || (st.LayoutTarget == geom && st.Target_Border == border) { return false }
     // Focused-only borders reserve their inset in core geometry even while
     // hidden, so the common focus path changes only the X border width.
-    if st.Target == geom { return true }
-    return animation_outer_rect(st.Target, st.Target_Border) == animation_outer_rect(geom, border)
+    if st.LayoutTarget == geom { return true }
+    return animation_outer_rect(st.LayoutTarget, st.Target_Border) == animation_outer_rect(geom, border)
 }
 
 animation_frame_interval :: proc(m: ^c.Manager) -> time.Duration {
@@ -177,14 +184,53 @@ animation_clear_states :: proc(state: ^State) {
     state.AnimationsActive = false
 }
 
-Commit :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, request_animation: bool, on_mapped: Mapped_Callback) {
+Begin_Close :: proc(state: ^State, m: ^c.Manager, cl: ^c.Client) -> bool {
+    if state == nil || m == nil || cl == nil || !m.Cfg.Animations ||
+       m.Cfg.AnimationDurationMs <= 0 || cl.Dock || cl.Fullscreen || cl.Stashed ||
+       cl.Minimized || animation_is_parked(cl, cl.Geom) {
+        return false
+    }
+    st := state.Animations[cl.Xid]
+    if st == nil { return false }
+    if st.Closing { return true }
+    now := time.tick_now()
+    animation_sample(st, now)
+    st.Start = st.Current
+    st.Target = c.Animation_Scale_From_Center(st.Current, 0)
+    st.LayoutTarget = cl.Geom
+    st.Start_Border = st.Current_Border
+    st.Target_Border = st.Current_Border
+    st.Started = now
+    st.Duration = time.Duration(m.Cfg.AnimationDurationMs)*time.Millisecond
+    st.Easing = m.Cfg.AnimationEasing
+    st.Active = st.Start != st.Target
+    st.Closing = st.Active
+    state.AnimationsActive = state.AnimationsActive || st.Active
+    if st.Active { animation_schedule_next(state, m, now) }
+    return st.Active
+}
+
+Commit :: proc(
+    state: ^State, conn: ^x11.Connection, m: ^c.Manager,
+    request_animation: bool, on_mapped: Mapped_Callback,
+    on_geometry: Geometry_Callback = nil, on_close: Close_Callback = nil,
+) {
     cfg := &m.Cfg
     // Preserve the old direct path when animation is disabled: no per-client
     // animation allocations, clock deadline, timer wakeup, or map lookup.
     if !cfg.Animations || cfg.AnimationDurationMs <= 0 {
+        if on_close != nil {
+            for cl in m.Clients {
+                if st := state.Animations[cl.Xid]; st != nil && st.Closing {
+                    st.Closing = false
+                    on_close(cl)
+                }
+            }
+        }
         if len(state.Animations) > 0 { animation_clear_states(state) }
         for cl in m.Clients {
             configure_client_geometry(state, conn, m, cl, cl.Geom, cl.Border)
+            if on_geometry != nil { on_geometry(cl, cl.Geom) }
             animation_map_client(conn, cl, on_mapped)
         }
         return
@@ -198,28 +244,57 @@ Commit :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, request_anim
         st := state.Animations[cl.Xid]
         if st == nil {
             st = new(Client_Animation)
-            st.Start = cl.Geom
-            st.Current = cl.Geom
+            opening := cl.Geom
+            can_open := enabled && !cl.Dock && !cl.Fullscreen && !cl.Stashed &&
+                !cl.Minimized && !animation_is_parked(cl, cl.Geom)
+            if can_open { opening = c.Animation_Scale_From_Center(cl.Geom, 80) }
+            st.Start = opening
+            st.Current = opening
             st.Target = cl.Geom
+            st.LayoutTarget = cl.Geom
             st.Start_Border = cl.Border
             st.Current_Border = cl.Border
             st.Target_Border = cl.Border
+            st.Started = now
             st.Duration = time.Duration(cfg.AnimationDurationMs) * time.Millisecond
             st.Easing = cfg.AnimationEasing
+            st.Active = can_open && opening != cl.Geom
             state.Animations[cl.Xid] = st
-            configure_client_geometry(state, conn, m, cl, cl.Geom, cl.Border)
+            configure_client_geometry(state, conn, m, cl, opening, cl.Border)
+            if on_geometry != nil { on_geometry(cl, opening) }
         } else {
+            if st.Closing {
+                st.LayoutTarget = cl.Geom
+                st.Target_Border = cl.Border
+                configure_client_geometry(state, conn, m, cl, st.Current, st.Current_Border)
+                if on_geometry != nil { on_geometry(cl, st.Current) }
+                if st.Active { any_active = true }
+                animation_map_client(conn, cl, on_mapped)
+                continue
+            }
             // Always sample first. If a second layout arrives mid-flight this
             // exact displayed rectangle becomes the new start, avoiding jumps.
             animation_sample(st, now)
-            changed := st.Target != cl.Geom || st.Target_Border != cl.Border
+            if !st.Active && st.Target != st.LayoutTarget {
+                st.Start, st.Current, st.Target = st.LayoutTarget, st.LayoutTarget, st.LayoutTarget
+            }
+            changed := st.LayoutTarget != cl.Geom || st.Target_Border != cl.Border
             decoration_only := animation_is_decoration_only(st, cl.Geom, cl.Border)
-            snap := !enabled || decoration_only || cl.Decorated ||
-                animation_is_parked(cl, st.Current) || animation_is_parked(cl, cl.Geom)
+            _, column, _ := c.Column_Of(cl)
+            tabbed_visibility := column != nil && column.Layout == .Tabbed &&
+                (animation_is_parked(cl, st.Current) || animation_is_parked(cl, cl.Geom))
+            snap := !enabled || decoration_only || tabbed_visibility ||
+                cl.Dock || cl.Fullscreen || cl.Stashed || cl.Minimized
             if changed && !snap {
-                st.Start = st.Current
+                current_parked := animation_is_parked(cl, st.Current)
+                target_parked := animation_is_parked(cl, cl.Geom)
+                output := cl.Out.Geom if cl.Out != nil else cl.Geom
+                st.Start, st.Target = c.Animation_Transition_Endpoints(
+                    st.Current, cl.Geom, output, current_parked, target_parked,
+                )
+                st.Current = st.Start
+                st.LayoutTarget = cl.Geom
                 st.Start_Border = st.Current_Border
-                st.Target = cl.Geom
                 st.Target_Border = cl.Border
                 st.Started = now
                 st.Duration = time.Duration(cfg.AnimationDurationMs) * time.Millisecond
@@ -229,12 +304,14 @@ Commit :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, request_anim
                 st.Start = cl.Geom
                 st.Current = cl.Geom
                 st.Target = cl.Geom
+                st.LayoutTarget = cl.Geom
                 st.Start_Border = cl.Border
                 st.Current_Border = cl.Border
                 st.Target_Border = cl.Border
                 st.Active = false
             }
             configure_client_geometry(state, conn, m, cl, st.Current, st.Current_Border)
+            if on_geometry != nil { on_geometry(cl, st.Current) }
         }
 
         if st.Active { any_active = true }
@@ -245,14 +322,31 @@ Commit :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, request_anim
     if any_active { animation_schedule_next(state, m, now) }
 }
 
-Run_Frame :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager, now: time.Tick) {
+Run_Frame :: proc(
+    state: ^State, conn: ^x11.Connection, m: ^c.Manager,
+    now: time.Tick, on_geometry: Geometry_Callback = nil, on_close: Close_Callback = nil,
+) {
     if !state.AnimationsActive { return }
     any_active := false
     for cl in m.Clients {
         st := state.Animations[cl.Xid]
         if st == nil || !st.Active { continue }
         animation_sample(st, now)
-        configure_client_geometry(state, conn, m, cl, st.Current, st.Current_Border)
+        if !st.Active && st.Closing {
+            st.Closing = false
+            if on_close != nil { on_close(cl) }
+            st.Start = st.Current
+            st.Target = st.LayoutTarget
+            st.Started = now
+            st.Active = st.Start != st.Target
+        }
+        displayed := st.Current
+        if !st.Active && st.Target != st.LayoutTarget {
+            displayed = st.LayoutTarget
+            st.Start, st.Current, st.Target = displayed, displayed, displayed
+        }
+        configure_client_geometry(state, conn, m, cl, displayed, st.Current_Border)
+        if on_geometry != nil { on_geometry(cl, displayed) }
         if st.Active { any_active = true }
     }
     state.AnimationsActive = any_active
@@ -269,11 +363,14 @@ Poll_Timeout_Ms :: proc(state: ^State) -> i32 {
     return i32((ns + i64(time.Millisecond) - 1) / i64(time.Millisecond))
 }
 
-Run_Due_Frame :: proc(state: ^State, conn: ^x11.Connection, m: ^c.Manager) {
+Run_Due_Frame :: proc(
+    state: ^State, conn: ^x11.Connection, m: ^c.Manager,
+    on_geometry: Geometry_Callback = nil, on_close: Close_Callback = nil,
+) {
     if !state.AnimationsActive { return }
     now := time.tick_now()
     if time.tick_diff(state.NextFrame, now) >= 0 {
-        Run_Frame(state, conn, m, now)
+        Run_Frame(state, conn, m, now, on_geometry, on_close)
     }
 }
 

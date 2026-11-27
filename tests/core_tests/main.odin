@@ -712,6 +712,41 @@ test_animation_math :: proc() {
         c.Rect{X = 51, Y = 0, W = 151, H = 75},
         "rect interpolation rounds consistently",
     )
+    eq(
+        c.Animation_Scale_From_Center(c.Rect{X = 100, Y = 50, W = 800, H = 600}, 80),
+        c.Rect{X = 180, Y = 110, W = 640, H = 480},
+        "opening geometry contracts around the final window center",
+    )
+    eq(
+        c.Animation_Scale_From_Center(c.Rect{X = 100, Y = 50, W = 800, H = 600}, 0),
+        c.Rect{X = 500, Y = 350, W = 1, H = 1},
+        "closing geometry remains a valid X rectangle",
+    )
+    output := c.Rect{X = 0, Y = 0, W = 1280, H = 800}
+    eq(
+        c.Animation_Nearest_Edge_Rect(c.Rect{X = 10, Y = 100, W = 300, H = 500}, output),
+        c.Rect{X = -300, Y = 100, W = 300, H = 500},
+        "left-side scrolling clients leave through the left output edge",
+    )
+    eq(
+        c.Animation_Nearest_Edge_Rect(c.Rect{X = 200, Y = 600, W = 880, H = 180}, output),
+        c.Rect{X = 200, Y = 800, W = 880, H = 180},
+        "bottom rows enter and leave through the bottom output edge",
+    )
+    parked := c.Rect{X = c.HIDE_X, Y = 0, W = 1280, H = 800}
+    visible := c.Rect{X = 10, Y = 10, W = 600, H = 780}
+    transition_start, transition_end := c.Animation_Transition_Endpoints(
+        parked, visible, output, true, false,
+    )
+    eq(transition_start, c.Rect{X = -600, Y = 10, W = 600, H = 780},
+        "parked clients enter from the nearest output edge")
+    eq(transition_end, visible, "entering clients retain their layout target")
+    transition_start, transition_end = c.Animation_Transition_Endpoints(
+        visible, parked, output, false, true,
+    )
+    eq(transition_start, visible, "leaving clients start at their displayed rectangle")
+    eq(transition_end, c.Rect{X = -600, Y = 10, W = 600, H = 780},
+        "leaving clients stop at the edge before being parked")
 }
 
 test_resize_math :: proc() {

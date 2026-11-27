@@ -67,6 +67,12 @@ decoration_frame :: proc(state: ^State, xid: u32) -> ^Frame_Decoration {
     return nil
 }
 
+decoration_visual_geom :: proc(frame: ^Frame_Decoration) -> c.Rect {
+    if frame == nil || frame.Client == nil { return {} }
+    if c.rect_empty(frame.VisualGeom) { return frame.Client.Geom }
+    return frame.VisualGeom
+}
+
 Ensure_Decoration :: proc(state: ^State, m: ^c.Manager, cl: ^c.Client) -> bool {
     if state == nil || state.Conn == nil || m == nil || cl == nil || cl.Dock || !cl.Decorated { return false }
     if cl.DecorationFrame != 0 { return true }
@@ -102,7 +108,7 @@ Update_Decoration_Cursor :: proc(state: ^State, m: ^c.Manager, xid: u32, x, y: i
     if decoration == nil || decoration.Client == nil || m == nil { return }
     cl := decoration.Client
     init_decoration_cursors(state)
-    frame := c.Decoration_Layout_Frame_Rect(cl.Geom, m.Cfg.BorderWidth)
+    frame := c.Decoration_Layout_Frame_Rect(decoration_visual_geom(decoration), m.Cfg.BorderWidth)
     hit := c.Decoration_Hit_Test(frame.W, frame.H, x, y, m.Cfg.Decoration, decoration.AudioVisible)
     cursor := state.DecorationCursors[decoration_cursor_index(hit)]
     if cursor != 0 { x11.xcb_change_window_attributes(state.Conn, xid, x11.CW_CURSOR, &cursor) }
@@ -254,7 +260,7 @@ Show_Decoration_Audio_Popup :: proc(state: ^State, m: ^c.Manager, cl: ^c.Client)
     if state == nil || m == nil || cl == nil || !ensure_decoration_audio_popup(state, m) { return }
     frame := decoration_frame(state, cl.DecorationFrame)
     if frame == nil || !frame.AudioVisible { return }
-    root_frame := c.Decoration_Layout_Frame_Rect(cl.Geom, m.Cfg.BorderWidth)
+    root_frame := c.Decoration_Layout_Frame_Rect(decoration_visual_geom(frame), m.Cfg.BorderWidth)
     layout := c.Decoration_Audio_Layout_For(root_frame.W, root_frame.H, m.Cfg.Decoration, true)
     if layout.Mode != .Compact { return }
     popup_h := max(i32(24), m.Cfg.Decoration.TitlebarHeight+8)
@@ -306,7 +312,7 @@ Decoration_Audio_Popup_Hit :: proc(state: ^State, x, y: i32) -> c.Decoration_Hit
 Decoration_Audio_Hit :: proc(state: ^State, m: ^c.Manager, xid: u32, x, y: i32) -> c.Decoration_Hit {
     frame := decoration_frame(state, xid)
     if frame == nil || frame.Client == nil { return .None }
-    rect := c.Decoration_Layout_Frame_Rect(frame.Client.Geom, m.Cfg.BorderWidth)
+    rect := c.Decoration_Layout_Frame_Rect(decoration_visual_geom(frame), m.Cfg.BorderWidth)
     return c.Decoration_Hit_Test(rect.W, rect.H, x, y, m.Cfg.Decoration, frame.AudioVisible)
 }
 
@@ -315,7 +321,7 @@ Decoration_Audio_Value_At :: proc(state: ^State, m: ^c.Manager, xid: u32, x: i32
     if xid == state.DecorationAudioPopup && state.DecorationAudioPopupClient != nil {
         slider = popup_slider_rect(state)
     } else if frame := decoration_frame(state, xid); frame != nil && frame.Client != nil {
-        rect := c.Decoration_Layout_Frame_Rect(frame.Client.Geom, m.Cfg.BorderWidth)
+        rect := c.Decoration_Layout_Frame_Rect(decoration_visual_geom(frame), m.Cfg.BorderWidth)
         slider = c.Decoration_Audio_Layout_For(rect.W, rect.H, m.Cfg.Decoration, frame.AudioVisible).Slider
     }
     if slider.W <= 0 { return 0, false }
@@ -328,7 +334,7 @@ Draw_Decoration :: proc(state: ^State, m: ^c.Manager, xid: u32) {
     cl := decoration.Client
     if cl == nil || cl.DecorationFrame == 0 || cl.Fullscreen || cl.Stashed || cl.Minimized { return }
     cfg := m.Cfg.Decoration
-    frame := c.Decoration_Layout_Frame_Rect(cl.Geom, m.Cfg.BorderWidth)
+    frame := c.Decoration_Layout_Frame_Rect(decoration_visual_geom(decoration), m.Cfg.BorderWidth)
     w, h := max(i32(1), frame.W), max(i32(1), frame.H)
     b := clamp(cfg.BorderWidth, i32(0), min(w, h)/2)
     title_h := min(max(i32(0), cfg.TitlebarHeight), max(i32(0), h-2*b))
@@ -447,6 +453,14 @@ Draw_Decoration :: proc(state: ^State, m: ^c.Manager, xid: u32) {
         if audio_layout.Mode == .Compact { Show_Decoration_Audio_Popup(state, m, cl) }
         else { Hide_Decoration_Audio_Popup(state) }
     }
+}
+
+Set_Decoration_Geometry :: proc(state: ^State, m: ^c.Manager, cl: ^c.Client, geom: c.Rect) {
+    if state == nil || cl == nil || cl.DecorationFrame == 0 { return }
+    frame := decoration_frame(state, cl.DecorationFrame)
+    if frame == nil { return }
+    frame.VisualGeom = geom
+    Draw_Decoration(state, m, frame.Xid)
 }
 
 Draw_All_Decorations :: proc(state: ^State, m: ^c.Manager) {

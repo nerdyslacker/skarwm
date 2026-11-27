@@ -64,7 +64,7 @@ for changes. A single `skarwm.rc` works without imports.
 | `decoration_inactive_border : #45475A` | Explicit inactive frame colour. |
 | `focus_follows_mouse : true` | Focus a window when the pointer enters it. |
 | `preview_hover_delay_ms : 250` | Delay before a stationary pointer reveals a scroll preview, `0..5000`. |
-| `animations : true` | Enable layout transitions. |
+| `animations : true` | Enable client open, close, layout, scroll and reorder transitions. |
 | `animation_duration_ms : 180` | Transition duration, `0..5000`. |
 | `animation_fps : 60` | Animation target rate, `1..240`. |
 | `animation_easing : ease_out_cubic` | `linear` or `ease_out_cubic`. |

@@ -14,6 +14,7 @@ Tab_Decoration :: struct {
 Frame_Decoration :: struct {
     Xid: u32,
     Client: ^c.Client,
+    VisualGeom: c.Rect,
     AudioVisible: bool,
     AudioVolume: u32,
     AudioMuted, AudioMixed: bool,

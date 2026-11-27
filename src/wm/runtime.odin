@@ -289,7 +289,10 @@ event_loop :: proc() {
                 if ev == nil { break }
                 handle_event(ev)
                 x11.free_libc(ev)
-                rendering.Run_Due_Frame(&g_wm.rendering, g_wm.conn, g_wm.m)
+                rendering.Run_Due_Frame(
+                    &g_wm.rendering, g_wm.conn, g_wm.m,
+                    decoration_geometry_updated, close_client_now,
+                )
                 ui.Hide_Due_Notice(&g_wm.ui)
                 reminder_run_due()
                 preview_hover_run_due()
@@ -328,7 +331,10 @@ event_loop :: proc() {
         delete(pfds)
         // A busy X or IPC stream cannot starve animation frames: check the
         // monotonic deadline after dispatch as well as through poll's timeout.
-        rendering.Run_Due_Frame(&g_wm.rendering, g_wm.conn, g_wm.m)
+        rendering.Run_Due_Frame(
+            &g_wm.rendering, g_wm.conn, g_wm.m,
+            decoration_geometry_updated, close_client_now,
+        )
         ui.Hide_Due_Notice(&g_wm.ui)
         reminder_run_due()
         preview_hover_run_due()
