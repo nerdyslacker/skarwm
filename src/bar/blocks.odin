@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
+import "core:time"
 
 Block_Alignment :: enum u8 { Left, Center, Right }
 Block_Kind :: enum u8 { Workspaces, Workspace_Meta, Layout, Title, Clock, Battery, Script, Systray, Button, Audio, Bluetooth, Network }
@@ -298,6 +299,10 @@ blocks_read_managed :: proc(state: ^State) -> bool {
 }
 
 blocks_reload :: proc(state: ^State) {
+    for &window in state.Windows {
+        window.PressedWindow = 0
+        window.WindowDragging = false
+    }
     blocks_destroy(state)
     state.Blocks = make([dynamic]Block, 0, 4)
     if !blocks_read_managed(state) {
@@ -375,14 +380,85 @@ window_strip_info :: proc(state: ^State, window: ^Bar_Window, workspace: int) ->
         if !bar_window_eligible(&client, window, workspace) { continue }
         if !client.Minimized && (client.Focused || client.WorkspaceFocused) {
             selected = count
-            natural_active = text_width(state, client.Title) + 16
-            if window_icon_available(state, client.Id) {
-                natural_active += min(i32(WINDOW_ICON_SIZE), max(i32(1), window.Geom.H-6)) + 4
-            }
+            natural_active = window_client_natural_width(state, window, &client)
         }
         count += 1
     }
     return
+}
+
+window_client_natural_width :: proc(state: ^State, window: ^Bar_Window, client: ^Window_State) -> i32 {
+    if client == nil { return 0 }
+    width := text_width(state, client.Title)+16
+    if window_icon_available(state, client.Id) {
+        width += min(i32(WINDOW_ICON_SIZE), max(i32(1), window.Geom.H-6))+4
+    }
+    return width
+}
+
+selected_window_for_bar :: proc(state: ^State, window: ^Bar_Window) -> u32 {
+    workspace := active_workspace_id(state, window)
+    for &client in state.WindowsState {
+        if bar_window_eligible(&client, window, workspace) && !client.Minimized &&
+           (client.Focused || client.WorkspaceFocused) {
+            return client.Id
+        }
+    }
+    return 0
+}
+
+window_target_width :: proc(state: ^State, window: ^Bar_Window, xid: u32) -> i32 {
+    compact := state.Config.WindowInactiveWidth
+    client := window_state_by_xid(state, xid)
+    if client == nil { return compact }
+    return max(compact, min(state.Config.WindowActiveMaxWidth,
+        window_client_natural_width(state, window, client)))
+}
+
+window_animation_current_width :: proc(state: ^State, window: ^Bar_Window, xid: u32) -> i32 {
+    compact := state.Config.WindowInactiveWidth
+    elapsed := window_animation_elapsed_ms(state, window)
+    if xid != 0 && xid == window.SelectedWindow {
+        from := window.SelectedFromWidth
+        if from <= 0 { from = compact }
+        return c.Bar_Animate_Width(
+            from, window_target_width(state, window, xid), elapsed,
+            state.Config.AnimationDurationMs,
+        )
+    }
+    if xid != 0 && xid == window.PreviousSelectedWindow {
+        from := window.PreviousFromWidth
+        if from <= 0 { from = window_target_width(state, window, xid) }
+        return c.Bar_Animate_Width(
+            from, compact, elapsed, state.Config.AnimationDurationMs,
+        )
+    }
+    return compact
+}
+
+window_animation_sync :: proc(state: ^State, window: ^Bar_Window) {
+    selected := selected_window_for_bar(state, window)
+    if selected == window.SelectedWindow { return }
+    selected_from := window_animation_current_width(state, window, selected)
+    previous_from := window_animation_current_width(state, window, window.SelectedWindow)
+    window.PreviousSelectedWindow = window.SelectedWindow
+    window.SelectedWindow = selected
+    window.SelectedFromWidth = selected_from
+    window.PreviousFromWidth = previous_from
+    if state.Config.Animations && state.Config.AnimationDurationMs > 0 {
+        window.AnimationStarted = time.tick_now()
+    } else {
+        window.PreviousSelectedWindow = 0
+        window.SelectedFromWidth, window.PreviousFromWidth = 0, 0
+        window.AnimationStarted = {}
+    }
+}
+
+window_animation_elapsed_ms :: proc(state: ^State, window: ^Bar_Window) -> i32 {
+    if window.AnimationStarted == {} || !state.Config.Animations { return state.Config.AnimationDurationMs }
+    elapsed := time.tick_diff(window.AnimationStarted, time.tick_now())
+    if elapsed <= 0 { return 0 }
+    return min(state.Config.AnimationDurationMs, i32(i64(elapsed)/i64(time.Millisecond)))
 }
 
 window_strip_measure :: proc(state: ^State, window: ^Bar_Window, workspace: int) -> i32 {
@@ -393,7 +469,59 @@ window_strip_measure :: proc(state: ^State, window: ^Bar_Window, workspace: int)
         i32(0x7fffffff), count, selected, compact,
         state.Config.WindowActiveMaxWidth, natural,
     )
-    return compact*count + max(i32(0), active-compact)
+    elapsed := window_animation_elapsed_ms(state, window)
+    width := compact*count
+    if selected >= 0 {
+        width += c.Bar_Animate_Width(
+            max(compact, window.SelectedFromWidth), active,
+            elapsed, state.Config.AnimationDurationMs,
+        )-compact
+    }
+    if window.PreviousSelectedWindow != 0 && window.PreviousSelectedWindow != window.SelectedWindow {
+        if previous := window_state_by_xid(state, window.PreviousSelectedWindow);
+           previous != nil && bar_window_eligible(previous, window, workspace) {
+            width += c.Bar_Animate_Width(
+                max(compact, window.PreviousFromWidth), compact, elapsed,
+                state.Config.AnimationDurationMs,
+            )-compact
+        }
+    }
+    return width
+}
+
+workspace_natural_measure :: proc(state: ^State, window: ^Bar_Window) -> i32 {
+    width := i32(0)
+    for id := 1; id <= int(state.Config.WorkspaceCount); id += 1 {
+        ws := workspace_for_slot(state, window, id)
+        label := workspace_label(state, id, ws)
+        width += workspace_width(state, label, ws != nil && ws.Occupied)
+        if state.Config.WorkspaceMode == .Integrated && ws != nil && ws.Active {
+            width += window_strip_measure(state, window, ws.Id)
+        }
+        delete(label)
+    }
+    return width
+}
+
+adaptive_block_available :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32 {
+    reserved := i32(0)
+    count := 0
+    for &other in state.Blocks {
+        if &other == block || other.Ops.Measure == nil { continue }
+        width := i32(0)
+        if other.Kind == .Workspaces {
+            width = workspace_natural_measure(state, window)
+        } else if other.Kind == .Title && state.Config.WorkspaceMode == .Separate {
+            width = window_strip_measure(state, window, active_workspace_id(state, window))
+        } else {
+            width = other.Ops.Measure(&other, state, window)
+        }
+        if width <= 0 { continue }
+        reserved += width
+        count += 1
+    }
+    if count > 0 { reserved += BLOCK_GAP*i32(count) }
+    return max(i32(0), window.Geom.W-2*BAR_PAD-reserved)
 }
 
 title_prefix_for_width :: proc(state: ^State, title: string, width: i32) -> string {
@@ -417,14 +545,41 @@ window_strip_draw :: proc(
     count, selected, natural := window_strip_info(state, window, workspace)
     if count <= 0 { return 0 }
     compact := state.Config.WindowInactiveWidth
-    active := c.Resolve_Adaptive_Active_Width(
-        available, count, selected, compact, state.Config.WindowActiveMaxWidth, natural,
-    )
+    first, last := c.Resolve_Fixed_Visible_Range(count, available, compact, selected)
+    if last <= first { return 0 }
+    visible_count := last-first
+    visible_selected := selected-first
+    if selected < first || selected >= last { visible_selected = -1 }
+    elapsed := window_animation_elapsed_ms(state, window)
+    active := i32(0)
+    extra_budget := max(i32(0), available-compact*visible_count)
+    if visible_selected >= 0 {
+        target := max(compact, min(state.Config.WindowActiveMaxWidth, natural))
+        animated := c.Bar_Animate_Width(
+            max(compact, window.SelectedFromWidth), target,
+            elapsed, state.Config.AnimationDurationMs,
+        )
+        active = compact+min(extra_budget, animated-compact)
+        extra_budget -= active-compact
+    }
+    previous_width := compact
+    if previous := window_state_by_xid(state, window.PreviousSelectedWindow); previous != nil {
+        animated := c.Bar_Animate_Width(
+            max(compact, window.PreviousFromWidth), compact,
+            elapsed, state.Config.AnimationDurationMs,
+        )
+        previous_width = compact+min(extra_budget, animated-compact)
+    }
     x, index := start_x, i32(0)
     for &client in state.WindowsState {
         if !bar_window_eligible(&client, window, workspace) { continue }
+        if index < first || index >= last { index += 1; continue }
         width := compact
-        if index == selected { width = max(compact, active) }
+        if index == selected {
+            width = max(compact, active)
+        } else if client.Id == window.PreviousSelectedWindow {
+            width = previous_width
+        }
         background := state.Config.Background
         foreground := state.Config.Foreground
         if client.Minimized {
@@ -480,32 +635,49 @@ window_strip_draw :: proc(
 }
 
 workspace_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32 {
-    _ = block
-    width := i32(0)
-    for id := 1; id <= int(state.Config.WorkspaceCount); id += 1 {
-        label := workspace_label(state, id, workspace_for_slot(state, window, id))
-        ws := workspace_for_slot(state, window, id)
-        width += workspace_width(state, label, ws != nil && ws.Occupied)
-        if state.Config.WorkspaceMode == .Integrated && ws != nil && ws.Active {
-            width += window_strip_measure(state, window, ws.Id)
-        }
-        delete(label)
-    }
-    return width
+    return min(workspace_natural_measure(state, window), adaptive_block_available(block, state, window))
 }
 
 workspace_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, start_x: i32, block_index: int) {
     x := start_x
+    budget := workspace_measure(block, state, window)
+    if budget <= 0 { return }
     base_background := block_background(block, state)
     base_foreground := block_foreground(block, state)
+    label_widths := make([]i32, int(state.Config.WorkspaceCount))
+    defer delete(label_widths)
+    selected := 0
     for id := 1; id <= int(state.Config.WorkspaceCount); id += 1 {
         ws := workspace_for_slot(state, window, id)
         label := workspace_label(state, id, ws)
+        label_widths[id-1] = workspace_width(state, label, ws != nil && ws.Occupied)
+        if ws != nil && ws.Active { selected = id-1 }
+        delete(label)
+    }
+    label_budget := budget
+    if state.Config.WorkspaceMode == .Integrated && budget > state.Config.WindowInactiveWidth {
+        ws := workspace_for_slot(state, window, selected+1)
+        if count, _, _ := window_strip_info(state, window, ws != nil ? ws.Id : 0);
+           ws != nil && ws.Active && count > 0 {
+            label_budget -= state.Config.WindowInactiveWidth
+        }
+    }
+    first, last := c.Resolve_Selected_Visible_Range(label_widths, label_budget, selected)
+    labels_width := i32(0)
+    for index in first ..< last {
+        labels_width += min(label_widths[index], label_budget-labels_width)
+    }
+    children_available := max(i32(0), budget-labels_width)
+    for index in first ..< last {
+        id := int(index)+1
+        ws := workspace_for_slot(state, window, id)
+        label := workspace_label(state, id, ws)
         occupied := ws != nil && ws.Occupied
-        width := workspace_width(state, label, occupied)
+        width := min(label_widths[index], max(i32(0), start_x+budget-x))
+        if width <= 0 { delete(label); break }
         children_width := i32(0)
         if state.Config.WorkspaceMode == .Integrated && ws != nil && ws.Active {
-            children_width = window_strip_measure(state, window, ws.Id)
+            children_width = min(window_strip_measure(state, window, ws.Id), children_available)
         }
         background := block.BackgroundSet ? base_background : state.Config.WorkspaceBackground
         foreground := block.ForegroundSet ? base_foreground : state.Config.WorkspaceForeground
@@ -525,7 +697,8 @@ workspace_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, start_
             )
         }
         fill_rect(state, X_Drawable(window.Canvas), x, 0, width+children_width, window.Geom.H, background)
-        draw_text_centered(state, window, x, 0, width, window.Geom.H, label, foreground, occupied)
+        visible_label := title_prefix_for_width(state, label, max(i32(0), width-20))
+        draw_text_centered(state, window, x, 0, width, window.Geom.H, visible_label, foreground, occupied)
         if occupied {
             fill_rect(
                 state, X_Drawable(window.Canvas), x + 6, window.Geom.H - 2,
@@ -539,7 +712,7 @@ workspace_draw :: proc(block: ^Block, state: ^State, window: ^Bar_Window, start_
         if children_width > 0 {
             drawn := window_strip_draw(
                 block, state, window, ws.Id, x+width,
-                max(i32(0), window.Geom.W-BAR_PAD-x-width), block_index,
+                children_width, block_index,
             )
             children_width = drawn
         }
@@ -552,6 +725,7 @@ workspace_click :: proc(block: ^Block, state: ^State, window: ^Bar_Window, works
     _ = block
     target := workspace_id
     if button == 4 || button == 5 {
+        if !state.Config.ScrollNavigation { return }
         target = 1
         for ws in state.Workspaces {
             if ws.Output == window.Output && ws.Active { target = ws.Id; break }
@@ -564,6 +738,27 @@ workspace_click :: proc(block: ^Block, state: ^State, window: ^Bar_Window, works
     if button != 1 && button != 4 && button != 5 { return }
     if target < 1 || target > int(state.Config.WorkspaceCount) { return }
     ipc_switch_workspace(state, window.Output, target)
+}
+
+window_cycle :: proc(state: ^State, window: ^Bar_Window, xid: u32, direction: int) {
+    client := window_state_by_xid(state, xid)
+    if client == nil { return }
+    count, current := 0, -1
+    for &candidate in state.WindowsState {
+        if !bar_window_eligible(&candidate, window, client.Workspace) { continue }
+        if candidate.Id == xid { current = count }
+        count += 1
+    }
+    target := c.Bar_Cycle_Index(count, current, direction)
+    index := 0
+    for &candidate in state.WindowsState {
+        if !bar_window_eligible(&candidate, window, client.Workspace) { continue }
+        if index == target {
+            ipc_window_action(state, candidate.Minimized ? "restore" : "focus", candidate.Id)
+            return
+        }
+        index += 1
+    }
 }
 
 indicator_label :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> string {
@@ -617,7 +812,10 @@ layout_glyph :: proc(layout: string) -> string {
 indicator_measure :: proc(block: ^Block, state: ^State, window: ^Bar_Window) -> i32 {
     if block.Kind == .Title && state.Config.WorkspaceMode == .Integrated { return 0 }
     if block.Kind == .Title && state.Config.WorkspaceMode == .Separate {
-        return window_strip_measure(state, window, active_workspace_id(state, window))
+        return min(
+            window_strip_measure(state, window, active_workspace_id(state, window)),
+            adaptive_block_available(block, state, window),
+        )
     }
     label := indicator_label(block, state, window)
     defer delete(label)

@@ -17,6 +17,7 @@ skarwm-msg workspace N|next|prev
 skarwm-msg workspace N output NAME
 skarwm-msg move workspace N
 skarwm-msg move workspace next|prev
+skarwm-msg move window XID workspace N output NAME
 skarwm-msg toggle-floating
 skarwm-msg toggle-always-on-top
 skarwm-msg toggle-fullscreen

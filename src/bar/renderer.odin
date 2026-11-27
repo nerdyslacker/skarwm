@@ -320,7 +320,7 @@ alignment_width :: proc(state: ^State, window: ^Bar_Window, alignment: Block_Ali
     return result
 }
 
-draw_alignment :: proc(state: ^State, window: ^Bar_Window, alignment: Block_Alignment, start: i32) {
+draw_alignment :: proc(state: ^State, window: ^Bar_Window, alignment: Block_Alignment, start: i32) -> i32 {
     x := start
     first := true
     for &block, index in state.Blocks {
@@ -332,10 +332,12 @@ draw_alignment :: proc(state: ^State, window: ^Bar_Window, alignment: Block_Alig
         x += width
         first = false
     }
+    return x
 }
 
 draw_bar :: proc(state: ^State, window: ^Bar_Window) {
     if state.GC == nil || window == nil || window.Xid == 0 || window.Canvas == 0 { return }
+    window_animation_sync(state, window)
     clear(&window.Hits)
     fill_rect(
         state, X_Drawable(window.Canvas), 0, 0, window.Geom.W, window.Geom.H,
@@ -343,9 +345,14 @@ draw_bar :: proc(state: ^State, window: ^Bar_Window) {
     )
     center_width := alignment_width(state, window, .Center)
     right_width := alignment_width(state, window, .Right)
-    draw_alignment(state, window, .Left, BAR_PAD)
-    draw_alignment(state, window, .Center, max(BAR_PAD, (window.Geom.W - center_width) / 2))
-    draw_alignment(state, window, .Right, max(BAR_PAD, window.Geom.W - BAR_PAD - right_width))
+    right_start := max(BAR_PAD, window.Geom.W-BAR_PAD-right_width)
+    left_end := draw_alignment(state, window, .Left, BAR_PAD)
+    center_min := left_end
+    if left_end > BAR_PAD && center_width > 0 { center_min += BLOCK_GAP }
+    center_max := max(BAR_PAD, right_start-center_width-(right_width > 0 ? BLOCK_GAP : 0))
+    center_start := clamp((window.Geom.W-center_width)/2, center_min, max(center_min, center_max))
+    _ = draw_alignment(state, window, .Center, center_start)
+    _ = draw_alignment(state, window, .Right, right_start)
     XCopyArea(
         state.Display, X_Drawable(window.Canvas), X_Drawable(window.Xid), state.GC,
         0, 0, c.uint(window.Geom.W), c.uint(window.Geom.H), 0, 0,

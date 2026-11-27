@@ -17,6 +17,9 @@ bar_tag_count : 8
 bar_workspace_mode : integrated
 bar_window_inactive_width : 12
 bar_window_active_max_width : 240
+bar_scroll_navigation : true
+bar_drag_to_workspace : false
+bar_drag_to_reorder : false
 ```
 
 The WM launches `skarwm-bar`, or the executable named by `$SKARWM_BAR`. During
@@ -68,6 +71,18 @@ clicking the globally focused window minimizes it, and clicking a minimized
 window restores and focuses it. Actions are validated against the latest IPC
 snapshot on button release, so a focus change during a click cannot minimize
 the wrong client. Hovering any window button shows its full title.
+
+Wheel navigation can cycle workspace labels and the eligible windows in the
+active workspace. Drag-to-workspace and presentation-only button reordering are
+disabled by default; enable them independently with the settings above. A drag
+starts after five pixels of pointer motion and is cancelled when its source or
+target disappears. Reordering is local to the running bar and never rearranges
+the WM layout.
+
+Adaptive widths use the global `animations` and `animation_duration_ms`
+settings. Frames are scheduled only while a width is changing. On narrow bars,
+workspace labels are allocated first, the selected label and focused window are
+kept visible, and remaining compact buttons are clipped as whole hit targets.
 
 Foreground and background are configurable:
 

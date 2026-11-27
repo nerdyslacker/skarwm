@@ -59,7 +59,7 @@ Ipc_Action :: enum {
     Focus_Left, Focus_Right, Focus_Up, Focus_Down,
     Move_Left, Move_Right, Move_Up, Move_Down,
     Workspace, Workspace_On_Output, Workspace_Next, Workspace_Prev,
-    Focus_Window, Minimize_Window, Restore_Window,
+    Focus_Window, Minimize_Window, Restore_Window, Move_Window_To_Workspace,
     Move_To_Workspace, Move_To_Workspace_Next, Move_To_Workspace_Prev,
     Toggle_Floating, Toggle_Always_On_Top, Toggle_Fullscreen,
     Layout_Floating, Layout_Tabbed, Layout_Stacked, Layout_Toggle,
@@ -82,6 +82,7 @@ Ipc_Action :: enum {
 Ipc_Command :: struct {
     action: Ipc_Action,
     arg:    int,
+    arg2:   int,
     text:   string, // non-owning view into the request payload during dispatch
     spawn:  string, // optional non-owning command for an unmatched target
     scratchpad_mode: Scratchpad_Mode,
@@ -820,6 +821,31 @@ ipc_parse_command :: proc(data: []byte) -> (cmd: Ipc_Command, err: string, ok: b
             return Ipc_Command{action = .Workspace_On_Output, arg = id, text = tokens[3]}, "", true
         }
         return {}, strings.clone("workspace output: expected workspace id and output name"), false
+    }
+
+    if len(tokens) == 7 && tokens[0] == "move" && tokens[1] == "window" &&
+       tokens[3] == "workspace" && tokens[5] == "output" {
+        xid: u64
+        workspace := 0
+        valid := tokens[2] != "" && len(tokens[2]) <= 10 &&
+                 tokens[4] != "" && tokens[6] != ""
+        for ch in tokens[2] {
+            if ch < '0' || ch > '9' { valid = false; break }
+            xid = xid*10+u64(ch-'0')
+            if xid > 0xffffffff { valid = false; break }
+        }
+        for ch in tokens[4] {
+            if ch < '0' || ch > '9' { valid = false; break }
+            workspace = workspace*10+int(ch-'0')
+            if workspace > IPC_MAX_WORKSPACE_ID { valid = false; break }
+        }
+        if valid && xid > 0 && workspace > 0 {
+            return Ipc_Command{
+                action = .Move_Window_To_Workspace, arg = int(xid),
+                arg2 = workspace, text = tokens[6],
+            }, "", true
+        }
+        return {}, strings.clone("move window: expected XID, workspace id and output name"), false
     }
 
     if len(tokens) == 3 &&

@@ -46,12 +46,88 @@ Resolve_Adaptive_Active_Width :: proc(
     )
 }
 
+// Resolve_Fixed_Visible_Range keeps fixed-width hit targets intact and shifts
+// the visible slice only far enough to reveal the selected item.
+Resolve_Fixed_Visible_Range :: proc(count, available, item_width, selected: i32) -> (first, last: i32) {
+    width := max(i32(1), item_width)
+    capacity := min(count, max(i32(0), available) / width)
+    if capacity <= 0 || count <= 0 { return }
+    if selected < 0 || selected >= count { return 0, capacity }
+    first = clamp(selected-capacity+1, i32(0), count-capacity)
+    return first, first+capacity
+}
+
+// Resolve_Selected_Visible_Range returns a contiguous label slice that always
+// contains the selected item. A selected label wider than the budget is clipped
+// by the renderer instead of being displaced by another label.
+Resolve_Selected_Visible_Range :: proc(widths: []i32, available: i32, selected: int) -> (first, last: i32) {
+    if len(widths) == 0 || available <= 0 { return }
+    selected_index := selected
+    if selected_index < 0 || selected_index >= len(widths) { selected_index = 0 }
+    first, last = i32(selected_index), i32(selected_index+1)
+    used := max(i32(0), widths[selected_index])
+    for first > 0 {
+        width := max(i32(0), widths[int(first)-1])
+        if used+width > available { break }
+        first -= 1
+        used += width
+    }
+    for int(last) < len(widths) {
+        width := max(i32(0), widths[int(last)])
+        if used+width > available { break }
+        used += width
+        last += 1
+    }
+    return
+}
+
 Bar_Window_Action :: enum u8 { Focus, Minimize, Restore }
 
 Bar_Window_Click_Action :: proc(focused, minimized: bool) -> Bar_Window_Action {
     if minimized { return .Restore }
     if focused { return .Minimize }
     return .Focus
+}
+
+BAR_DRAG_THRESHOLD :: i32(5)
+
+Bar_Drag_Exceeded :: proc(dx, dy: i32) -> bool {
+    return abs(dx) >= BAR_DRAG_THRESHOLD || abs(dy) >= BAR_DRAG_THRESHOLD
+}
+
+Bar_Cycle_Index :: proc(count, current, direction: int) -> int {
+    if count <= 0 { return -1 }
+    step := direction < 0 ? -1 : 1
+    return (current+step+count)%count
+}
+
+// Bar_Reorder_Ids changes presentation order only; the WM model is untouched.
+Bar_Reorder_Ids :: proc(ids: []u32, moved, before: u32) -> bool {
+    source, target := -1, -1
+    for id, index in ids {
+        if id == moved { source = index }
+        if id == before { target = index }
+    }
+    if source < 0 || target < 0 || moved == before { return false }
+    insert := target
+    if source < target { insert -= 1 }
+    if source < insert {
+        for index in source ..< insert { ids[index] = ids[index+1] }
+    } else if source > insert {
+        for index := source; index > insert; index -= 1 { ids[index] = ids[index-1] }
+    }
+    ids[insert] = moved
+    return true
+}
+
+Bar_Animate_Width :: proc(from, to, elapsed_ms, duration_ms: i32) -> i32 {
+    if duration_ms <= 0 || elapsed_ms >= duration_ms { return to }
+    if elapsed_ms <= 0 { return from }
+    duration := i64(duration_ms)
+    remaining := i64(duration_ms-elapsed_ms)
+    denominator := duration*duration*duration
+    eased := denominator-remaining*remaining*remaining
+    return from+i32(i64(to-from)*eased/denominator)
 }
 
 Net_Wm_Icon_Choice :: struct {

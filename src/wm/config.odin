@@ -164,6 +164,7 @@ Load_Scratch :: struct {
     bar_height, bar_tag_count, bar_font_size: i32,
     bar_workspace_mode: c.Bar_Workspace_Mode,
     bar_window_inactive_width, bar_window_active_max_width: i32,
+    bar_scroll_navigation, bar_drag_to_workspace, bar_drag_to_reorder: bool,
     bar_font: string,
     bar_font_weight: c.Bar_Font_Weight,
     bar_foreground, bar_background: u32,
@@ -183,6 +184,7 @@ Load_Scratch :: struct {
     decoration_inactive_border_set: bool,
     bar_enabled_set, bar_position_set, bar_height_set, bar_tag_count_set: bool,
     bar_workspace_mode_set, bar_window_inactive_width_set, bar_window_active_max_width_set: bool,
+    bar_scroll_navigation_set, bar_drag_to_workspace_set, bar_drag_to_reorder_set: bool,
     bar_font_set, bar_font_size_set, bar_font_weight_set: bool,
     bar_foreground_set, bar_background_set: bool,
     bar_tag_foreground_set, bar_tag_background_set: bool,
@@ -722,6 +724,9 @@ build_result :: proc(sc: ^Load_Scratch, errs: ^[dynamic]string) -> Config_Result
     if sc.bar_workspace_mode_set { r.cfg.BarWorkspaceMode = sc.bar_workspace_mode }
     if sc.bar_window_inactive_width_set { r.cfg.BarWindowInactiveWidth = sc.bar_window_inactive_width }
     if sc.bar_window_active_max_width_set { r.cfg.BarWindowActiveMaxWidth = sc.bar_window_active_max_width }
+    if sc.bar_scroll_navigation_set { r.cfg.BarScrollNavigation = sc.bar_scroll_navigation }
+    if sc.bar_drag_to_workspace_set { r.cfg.BarDragToWorkspace = sc.bar_drag_to_workspace }
+    if sc.bar_drag_to_reorder_set { r.cfg.BarDragToReorder = sc.bar_drag_to_reorder }
     if sc.bar_tag_foreground_set { r.cfg.BarWorkspaceForeground = sc.bar_tag_foreground }
     if sc.bar_tag_background_set { r.cfg.BarWorkspaceBackground = sc.bar_tag_background }
     if sc.bar_block_foreground_set { r.cfg.BarBlockForeground = sc.bar_block_foreground }
@@ -1075,6 +1080,21 @@ parse_setting :: proc(sc: ^Load_Scratch, key, value: string, errs: ^[dynamic]str
             return false
         }
         sc.bar_window_active_max_width = n; sc.bar_window_active_max_width_set = true
+        return true
+    case "bar_scroll_navigation", "bar_drag_to_workspace", "bar_drag_to_reorder":
+        enabled, ok := parse_bool_value(value)
+        if !ok {
+            append(errs, fmt.aprintf("%s: expected true/false, got %q", key, value))
+            return false
+        }
+        switch key {
+        case "bar_scroll_navigation":
+            sc.bar_scroll_navigation = enabled; sc.bar_scroll_navigation_set = true
+        case "bar_drag_to_workspace":
+            sc.bar_drag_to_workspace = enabled; sc.bar_drag_to_workspace_set = true
+        case "bar_drag_to_reorder":
+            sc.bar_drag_to_reorder = enabled; sc.bar_drag_to_reorder_set = true
+        }
         return true
     case "bar_tag_foreground", "bar_workspace_foreground":
         v, ok := parse_color(value)

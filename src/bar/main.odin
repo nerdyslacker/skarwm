@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:sys/posix"
+import "core:time"
 
 Bar_Position :: enum u8 { Top, Bottom }
 Bar_Font_Weight :: enum u8 { Normal, Medium, Bold }
@@ -23,6 +24,9 @@ Bar_Config :: struct {
     WorkspaceCount: i32,
     WorkspaceMode: ipc.Bar_Workspace_Mode,
     WindowInactiveWidth, WindowActiveMaxWidth: i32,
+    Animations: bool,
+    AnimationDurationMs: i32,
+    ScrollNavigation, DragToWorkspace, DragToReorder: bool,
     WorkspaceForeground, WorkspaceBackground: u32,
     BlockForeground, BlockBackground: u32,
 }
@@ -34,6 +38,11 @@ Bar_Window :: struct {
     Hits: [dynamic]Hitbox,
     HoverWorkspace: int,
     HoverWindow, PressedWindow: u32,
+    PressRootX, PressRootY: i32,
+    WindowDragging: bool,
+    SelectedWindow, PreviousSelectedWindow: u32,
+    SelectedFromWidth, PreviousFromWidth: i32,
+    AnimationStarted: time.Tick,
     HoverBlock: int,
     HoverRootX, HoverRootY: i32,
     Canvas: X_Pixmap,
@@ -95,6 +104,7 @@ State :: struct {
     Blocks: [dynamic]Block,
     Workspaces: [dynamic]Workspace_State,
     WindowsState: [dynamic]Window_State,
+    WindowOrder: [dynamic]u32,
     WindowIcons: map[u32]Window_Icon,
     WorkspaceMeta: [dynamic]Workspace_Meta,
     LogicalMonitors: [dynamic]Monitor,
@@ -107,7 +117,7 @@ State :: struct {
 BAR_CONFIG_ATOM :: "_SKARWM_BAR_CONFIG"
 BAR_BLOCKS_ATOM :: "_SKARWM_BAR_BLOCKS"
 BAR_FONT_ATOM :: "_SKARWM_BAR_FONT"
-BAR_CONFIG_VERSION :: u32(4)
+BAR_CONFIG_VERSION :: u32(5)
 
 main :: proc() {
     cfg, ok := parse_args()
@@ -140,6 +150,8 @@ parse_args :: proc() -> (Bar_Config, bool) {
         WorkspaceCount = 8,
         WorkspaceMode = .Classic,
         WindowInactiveWidth = 12, WindowActiveMaxWidth = 240,
+        Animations = true, AnimationDurationMs = 180,
+        ScrollNavigation = true,
         WorkspaceForeground = 0x262626, WorkspaceBackground = 0x5F87AF,
         BlockForeground = 0x262626, BlockBackground = 0xAF5F5F,
     }
@@ -259,6 +271,7 @@ connect :: proc(state: ^State) -> bool {
     state.Windows = make([dynamic]Bar_Window, 0, 4)
     state.Workspaces = make([dynamic]Workspace_State, 0, 16)
     state.WindowsState = make([dynamic]Window_State, 0, 16)
+    state.WindowOrder = make([dynamic]u32, 0, 16)
     state.WindowIcons = make(map[u32]Window_Icon)
     state.WorkspaceMeta = make([dynamic]Workspace_Meta, 0, 8)
     state.LogicalMonitors = make([dynamic]Monitor, 0, 4)
@@ -281,6 +294,7 @@ shutdown :: proc(state: ^State) {
     renderer_shutdown(state)
     clear_workspaces(state)
     clear_windows_state(state)
+    delete(state.WindowOrder)
     if state.WindowIcons != nil { delete(state.WindowIcons) }
     clear_workspace_meta(state)
     clear_logical_monitors(state)
@@ -332,6 +346,13 @@ read_managed_config :: proc(state: ^State) -> (enabled, found: bool) {
         }
         state.Config.WindowInactiveWidth = clamp(i32(values[14]), i32(4), i32(64))
         state.Config.WindowActiveMaxWidth = clamp(i32(values[15]), i32(40), i32(1024))
+    }
+    if len(values) >= 21 {
+        state.Config.Animations = values[16] != 0
+        state.Config.AnimationDurationMs = clamp(i32(values[17]), i32(0), i32(5000))
+        state.Config.ScrollNavigation = values[18] != 0
+        state.Config.DragToWorkspace = values[19] != 0
+        state.Config.DragToReorder = values[20] != 0
     }
     if font, font_ok := x11.get_text(state.Conn, state.Root, atom(state, BAR_FONT_ATOM)); font_ok {
         config_set_font(&state.Config, font)

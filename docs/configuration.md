@@ -80,6 +80,9 @@ for changes. A single `skarwm.rc` works without imports.
 | `bar_workspace_mode : classic` | `classic` keeps the existing workspace/title blocks, `separate` makes the title block an adaptive window strip, and `integrated` nests that strip in the selected workspace. |
 | `bar_window_inactive_width : 12` | Width of compact window buttons, `4..64` pixels. |
 | `bar_window_active_max_width : 240` | Maximum width of the expanded selected-window button, `40..1024` pixels. |
+| `bar_scroll_navigation : true` | Cycle workspaces or eligible windows with the pointer wheel. |
+| `bar_drag_to_workspace : false` | Allow dragging a window button onto a workspace label, including another monitor. |
+| `bar_drag_to_reorder : false` | Allow presentation-only window-button reordering; this never changes client layout. |
 | `bar_tag_foreground : #262626` | Workspace-slot text colour. |
 | `bar_tag_background : #5F87AF` | Workspace-slot wrapper colour. |
 | `bar_block_foreground : #262626` | Script/status block text colour. |

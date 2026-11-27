@@ -14,6 +14,7 @@ usage :: proc() {
     fmt.eprintln("queries: get-workspaces | get-windows | get-outputs | get-topology | get-version")
     fmt.eprintln("events:  subscribe [workspace] [window] [output]")
     fmt.eprintln("actions: focus DIR | focus|minimize|restore window XID | move DIR | workspace N|next|prev | move workspace N")
+    fmt.eprintln("         move window XID workspace N output NAME")
     fmt.eprintln("         layout scrolling-tile|vertical-scroller|game|dwindle|monocle|floating|next")
     fmt.eprintln("         layout tabbed|stacked|toggle | toggle-floating")
     fmt.eprintln("         switch-layout | toggle-tabbed | show-bindings")

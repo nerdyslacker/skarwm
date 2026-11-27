@@ -450,6 +450,25 @@ ipc_run_command :: proc(cmd: c.Ipc_Command) {
             set_client_minimized(cl, cmd.action == .Minimize_Window)
         }
         return
+    case .Move_Window_To_Workspace:
+        cl := g_wm.m.ByXid[u32(cmd.arg)]
+        output := c.Find_Output(g_wm.m, cmd.text)
+        if cl == nil || output == nil || cl.Dock || cl.Stashed { return }
+        src := cl.Ws
+        old_focus := g_wm.m.Focused
+        created := c.Find_WS_On_Output(output, cmd.arg2) == nil
+        if c.Move_Client_To_WS(g_wm.m, cl, output, cmd.arg2) {
+            if created {
+                ipc_broadcast_ws_event(c.IPC_CHANGE_INIT, c.Find_WS_On_Output(output, cmd.arg2), nil)
+            }
+            if src != nil && c.Ws_Is_Empty(src) {
+                ipc_broadcast_ws_event(c.IPC_CHANGE_EMPTY, src, nil)
+            }
+            reflow()
+            ipc_broadcast_window_event(c.IPC_WINDOW_LAYOUT, cl)
+            ipc_broadcast_focus_change(old_focus, g_wm.m.Focused)
+        }
+        return
     case .Set_Gaps:
         gap := i32(cmd.arg)
         g_wm.m.Cfg.Gap = 0

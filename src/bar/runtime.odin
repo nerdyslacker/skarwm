@@ -4,6 +4,7 @@ import x11 "../x11"
 import c "../core"
 
 import "core:sys/posix"
+import "core:time"
 
 window_by_xid :: proc(state: ^State, xid: u32) -> ^Bar_Window {
     for &window in state.Windows { if window.Xid == xid { return &window } }
@@ -19,6 +20,17 @@ hit_at :: proc(window: ^Bar_Window, x, y: i32) -> (Hitbox, bool) {
         }
     }
     return {}, false
+}
+
+hit_at_root :: proc(state: ^State, root_x, root_y: i32) -> (^Bar_Window, Hitbox, bool) {
+    for &window in state.Windows {
+        if root_x < window.Geom.X || root_x >= window.Geom.X+window.Geom.W ||
+           root_y < window.Geom.Y || root_y >= window.Geom.Y+window.Geom.H { continue }
+        if hit, ok := hit_at(&window, root_x-window.Geom.X, root_y-window.Geom.Y); ok {
+            return &window, hit, true
+        }
+    }
+    return nil, {}, false
 }
 
 handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
@@ -93,12 +105,21 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
             config_font(&old) != config_font(&state.Config) ||
             old.FontSize != state.Config.FontSize || old.FontWeight != state.Config.FontWeight
         if font_changed { renderer_load_fonts(state) }
+        if old.DragToReorder && !state.Config.DragToReorder {
+            clear(&state.WindowOrder)
+            ipc_request_windows(state)
+        }
         if old.Position != state.Config.Position || old.Height != state.Config.Height ||
            old.Foreground != state.Config.Foreground || old.Background != state.Config.Background ||
            old.WorkspaceCount != state.Config.WorkspaceCount ||
            old.WorkspaceMode != state.Config.WorkspaceMode ||
            old.WindowInactiveWidth != state.Config.WindowInactiveWidth ||
            old.WindowActiveMaxWidth != state.Config.WindowActiveMaxWidth ||
+           old.Animations != state.Config.Animations ||
+           old.AnimationDurationMs != state.Config.AnimationDurationMs ||
+           old.ScrollNavigation != state.Config.ScrollNavigation ||
+           old.DragToWorkspace != state.Config.DragToWorkspace ||
+           old.DragToReorder != state.Config.DragToReorder ||
            old.WorkspaceForeground != state.Config.WorkspaceForeground ||
            old.WorkspaceBackground != state.Config.WorkspaceBackground ||
            old.BlockForeground != state.Config.BlockForeground ||
@@ -112,7 +133,13 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
         button := (^x11.Button_Press_Event)(event)
         window := window_by_xid(state, button.event)
         if hit, ok := hit_at(window, i32(button.event_x), i32(button.event_y)); ok && hit.Kind == .Window {
-            if button.detail == 1 { window.PressedWindow = hit.Window }
+            if button.detail == 1 {
+                window.PressedWindow = hit.Window
+                window.PressRootX, window.PressRootY = i32(button.root_x), i32(button.root_y)
+                window.WindowDragging = false
+            } else if state.Config.ScrollNavigation && (button.detail == 4 || button.detail == 5) {
+                window_cycle(state, window, hit.Window, button.detail == 4 ? -1 : 1)
+            }
         } else if ok && hit.BlockIndex >= 0 && hit.BlockIndex < len(state.Blocks) {
             block := &state.Blocks[hit.BlockIndex]
             if block.Ops.Click != nil { block.Ops.Click(block, state, window, hit.Payload, button.detail) }
@@ -123,7 +150,33 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
         if window == nil || button.detail != 1 { return true }
         pressed := window.PressedWindow
         window.PressedWindow = 0
+        dragging := window.WindowDragging
+        window.WindowDragging = false
         hit, ok := hit_at(window, i32(button.event_x), i32(button.event_y))
+        if dragging {
+            target_window, target_hit, target_ok := hit_at_root(
+                state, i32(button.root_x), i32(button.root_y),
+            )
+            if target_ok && target_hit.Kind == .Workspace && state.Config.DragToWorkspace {
+                client := window_state_by_xid(state, pressed)
+                if client != nil && target_window != nil &&
+                   (client.Output != target_window.Output || client.Workspace != target_hit.Payload) {
+                    ipc_move_window_to_workspace(
+                        state, pressed, target_window.Output, target_hit.Payload,
+                    )
+                }
+            } else if target_ok && target_hit.Kind == .Window && state.Config.DragToReorder &&
+                      pressed != target_hit.Window {
+                source := window_state_by_xid(state, pressed)
+                target := window_state_by_xid(state, target_hit.Window)
+                if source != nil && target != nil && source.Output == target.Output &&
+                   source.Workspace == target.Workspace &&
+                   window_order_reorder(state, pressed, target_hit.Window) {
+                    draw_all_bars(state)
+                }
+            }
+            return true
+        }
         if !ok || hit.Kind != .Window || hit.Window != pressed { return true }
         client := window_state_by_xid(state, pressed)
         if client == nil || client.Output != window.Output || client.Dock || client.Scratchpad { return true }
@@ -144,6 +197,14 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
         motion := (^x11.Motion_Notify_Event)(event)
         window := window_by_xid(state, motion.event)
         if window == nil { return true }
+        if window.PressedWindow != 0 && !window.WindowDragging &&
+           (state.Config.DragToWorkspace || state.Config.DragToReorder) &&
+           c.Bar_Drag_Exceeded(
+               i32(motion.root_x)-window.PressRootX,
+               i32(motion.root_y)-window.PressRootY,
+           ) {
+            window.WindowDragging = true
+        }
         hovered := 0
         hovered_window := u32(0)
         if hit, ok := hit_at(window, i32(motion.event_x), i32(motion.event_y)); ok {
@@ -210,6 +271,35 @@ refresh_hover_tooltip :: proc(state: ^State) {
     }
 }
 
+bar_animation_poll_timeout :: proc(state: ^State) -> i32 {
+    timeout := i32(-1)
+    now := time.tick_now()
+    for &window in state.Windows {
+        if window.AnimationStarted == {} { continue }
+        elapsed := time.tick_diff(window.AnimationStarted, now)
+        remaining := time.Duration(state.Config.AnimationDurationMs)*time.Millisecond-elapsed
+        if remaining <= 0 { return 0 }
+        milliseconds := i32((i64(remaining)+i64(time.Millisecond)-1)/i64(time.Millisecond))
+        milliseconds = min(i32(16), max(i32(1), milliseconds))
+        if timeout < 0 || milliseconds < timeout { timeout = milliseconds }
+    }
+    return timeout
+}
+
+bar_animations_service :: proc(state: ^State) {
+    now := time.tick_now()
+    for &window in state.Windows {
+        if window.AnimationStarted == {} { continue }
+        draw_bar(state, &window)
+        elapsed := time.tick_diff(window.AnimationStarted, now)
+        if elapsed >= time.Duration(state.Config.AnimationDurationMs)*time.Millisecond {
+            window.AnimationStarted = {}
+            window.PreviousSelectedWindow = 0
+            window.SelectedFromWidth, window.PreviousFromWidth = 0, 0
+        }
+    }
+}
+
 run_event_loop :: proc(state: ^State) {
     xfd := posix.FD(x11.xcb_get_file_descriptor(state.Conn))
     running := true
@@ -223,6 +313,10 @@ run_event_loop :: proc(state: ^State) {
         descriptors[0] = posix.pollfd{fd = xfd, events = {.IN}}
         if count == 2 { descriptors[1] = posix.pollfd{fd = state.IpcFd, events = {.IN}} }
         timeout := scripts_poll_timeout(state)
+        animation_timeout := bar_animation_poll_timeout(state)
+        if animation_timeout >= 0 && (timeout < 0 || animation_timeout < timeout) {
+            timeout = animation_timeout
+        }
         if state.IpcFd < 0 && (timeout < 0 || timeout > 1000) { timeout = 1000 }
         if state.Tray.Enabled && state.Tray.Owner == 0 && (timeout < 0 || timeout > 1000) {
             timeout = 1000
@@ -247,5 +341,6 @@ run_event_loop :: proc(state: ^State) {
             if !alive { ipc_disconnect(state) }
         }
         scripts_service(state)
+        bar_animations_service(state)
     }
 }

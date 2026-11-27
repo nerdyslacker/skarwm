@@ -68,6 +68,14 @@ ipc_window_action :: proc(state: ^State, action: string, xid: u32) {
     if !ok { ipc_disconnect(state) }
 }
 
+ipc_move_window_to_workspace :: proc(state: ^State, xid: u32, output: string, workspace: int) {
+    if state.IpcFd < 0 { return }
+    command := fmt.aprintf("move window %d workspace %d output %s", xid, workspace, output)
+    ok := ipc_send_request(state, .Command, command)
+    delete(command)
+    if !ok { ipc_disconnect(state) }
+}
+
 window_state_by_xid :: proc(state: ^State, xid: u32) -> ^Window_State {
     for &client in state.WindowsState { if client.Id == xid { return &client } }
     return nil
@@ -348,7 +356,41 @@ parse_window_snapshot :: proc(state: ^State, payload: []byte) {
             if depth == 1 && start >= 0 { parse_window_object(state, payload[start:index + 1]); start = -1 }
         }
     }
+    window_order_sync(state)
     window_icons_sync(state)
+}
+
+window_order_has :: proc(state: ^State, xid: u32) -> bool {
+    for ordered in state.WindowOrder { if ordered == xid { return true } }
+    return false
+}
+
+window_order_sync :: proc(state: ^State) {
+    for index := 0; index < len(state.WindowOrder); {
+        if window_state_by_xid(state, state.WindowOrder[index]) == nil {
+            ordered_remove(&state.WindowOrder, index)
+        } else {
+            index += 1
+        }
+    }
+    for client in state.WindowsState {
+        if !window_order_has(state, client.Id) { append(&state.WindowOrder, client.Id) }
+    }
+    for wanted, index in state.WindowOrder {
+        for current := index; current < len(state.WindowsState); current += 1 {
+            if state.WindowsState[current].Id == wanted {
+                state.WindowsState[index], state.WindowsState[current] =
+                    state.WindowsState[current], state.WindowsState[index]
+                break
+            }
+        }
+    }
+}
+
+window_order_reorder :: proc(state: ^State, moved, before: u32) -> bool {
+    if !protocol.Bar_Reorder_Ids(state.WindowOrder[:], moved, before) { return false }
+    window_order_sync(state)
+    return true
 }
 
 parse_workspace_snapshot :: proc(state: ^State, payload: []byte) {
