@@ -259,8 +259,26 @@ col_left_px :: proc(p: Layout_Params, idx: int) -> i32 {
 // instead of drawing the maximized client over them.
 column_has_maximized :: proc(col: ^Column) -> bool {
     if col == nil { return false }
-    for cl in col.Wins { if cl.Maximized { return true } }
+    for cl in col.Wins { if cl.Maximized && !cl.Minimized { return true } }
     return false
+}
+
+column_visible_client_count :: proc(col: ^Column) -> int {
+    if col == nil { return 0 }
+    count := 0
+    for cl in col.Wins { if !cl.Minimized { count += 1 } }
+    return count
+}
+
+column_has_visible_clients :: proc(col: ^Column) -> bool {
+    return column_visible_client_count(col) > 0
+}
+
+workspace_visible_column_count :: proc(ws: ^Workspace) -> int {
+    if ws == nil { return 0 }
+    count := 0
+    for col in ws.Cols { if column_has_visible_clients(col) { count += 1 } }
+    return count
 }
 
 column_width :: proc(p: Layout_Params, col: ^Column) -> i32 {
@@ -271,7 +289,7 @@ column_width :: proc(p: Layout_Params, col: ^Column) -> i32 {
 
 workspace_has_custom_widths :: proc(ws: ^Workspace) -> bool {
     if ws == nil { return false }
-    for col in ws.Cols { if col.Width > 0 { return true } }
+    for col in ws.Cols { if column_has_visible_clients(col) && col.Width > 0 { return true } }
     return false
 }
 
@@ -283,6 +301,7 @@ custom_partial_columns :: proc(ws: ^Workspace, p: Layout_Params) -> (left, right
     if ws == nil { return }
     work_right := p.WorkX + p.WorkW
     for col, ci in ws.Cols {
+        if !column_has_visible_clients(col) { continue }
         x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, ci)
         w := column_width(p, col)
         if x < p.WorkX && x + w > p.WorkX { left = ci }
@@ -315,20 +334,21 @@ expose_missing_custom_preview :: proc(ws: ^Workspace, p: Layout_Params) {
 
 Column_Width_At :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, index: int) -> i32 {
     if m == nil || o == nil || ws == nil || index < 0 || index >= len(ws.Cols) { return 0 }
-    p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+    p := compute_params(m.Cfg, o.Geom, workspace_visible_column_count(ws), o.Reserved)
     return column_width(p, ws.Cols[index])
 }
 
 Default_Column_Width :: proc(m: ^Manager, o: ^Output, ws: ^Workspace) -> i32 {
     if m == nil || o == nil || ws == nil { return 0 }
-    p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+    p := compute_params(m.Cfg, o.Geom, workspace_visible_column_count(ws), o.Reserved)
     return p.ColW
 }
 
 vertical_row_height :: proc(p: Layout_Params, ws: ^Workspace, index: int) -> i32 {
     if ws == nil || index < 0 || index >= len(ws.Cols) { return 0 }
     if column_has_maximized(ws.Cols[index]) { return p.WorkH }
-    count := i32(min(len(ws.Cols), PAGE_ROWS))
+    count := i32(min(workspace_visible_column_count(ws), PAGE_ROWS))
+    if count <= 0 { return 0 }
     natural := (p.WorkH - p.Inner * (count - 1)) / count
     natural = clamp(natural, i32(40), p.WorkH)
     if ws.Cols[index].Height > 0 {
@@ -341,17 +361,21 @@ workspace_row_top :: proc(ws: ^Workspace, p: Layout_Params, idx: int) -> i32 {
     y := i32(0)
     if ws == nil { return y }
     for i in 0 ..< min(idx, len(ws.Cols)) {
+        if !column_has_visible_clients(ws.Cols[i]) { continue }
         y += vertical_row_height(p, ws, i) + p.Inner
     }
     return y
 }
 
 workspace_vertical_total :: proc(ws: ^Workspace, p: Layout_Params) -> i32 {
-    if ws == nil || len(ws.Cols) == 0 { return 0 }
+    if ws == nil { return 0 }
     total := i32(0)
-    for _, i in ws.Cols {
+    count := 0
+    for col, i in ws.Cols {
+        if !column_has_visible_clients(col) { continue }
+        if count > 0 { total += p.Inner }
         total += vertical_row_height(p, ws, i)
-        if i + 1 < len(ws.Cols) { total += p.Inner }
+        count += 1
     }
     return total
 }
@@ -411,17 +435,21 @@ workspace_col_left :: proc(ws: ^Workspace, p: Layout_Params, idx: int) -> i32 {
     x := i32(0)
     if ws == nil { return x }
     for i in 0 ..< min(idx, len(ws.Cols)) {
+        if !column_has_visible_clients(ws.Cols[i]) { continue }
         x += column_width(p, ws.Cols[i]) + p.Inner
     }
     return x
 }
 
 workspace_strip_total :: proc(ws: ^Workspace, p: Layout_Params) -> i32 {
-    if ws == nil || len(ws.Cols) == 0 { return 0 }
+    if ws == nil { return 0 }
     total := i32(0)
-    for col, i in ws.Cols {
+    count := 0
+    for col in ws.Cols {
+        if !column_has_visible_clients(col) { continue }
+        if count > 0 { total += p.Inner }
         total += column_width(p, col)
-        if i + 1 < len(ws.Cols) { total += p.Inner }
+        count += 1
     }
     return total
 }
@@ -465,6 +493,7 @@ scroll_preview_columns :: proc(ws: ^Workspace, p: Layout_Params) -> (left, right
     work_left := p.WorkX
     work_right := p.WorkX + p.WorkW
     for col, ci in ws.Cols {
+        if !column_has_visible_clients(col) { continue }
         x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, ci)
         w := column_width(p, col)
         if x + w <= work_left {
@@ -486,7 +515,8 @@ vertical_scroll_preview_rows :: proc(ws: ^Workspace, p: Layout_Params) -> (top, 
     for col in ws.Cols { if column_has_maximized(col) { return } }
     work_top := p.WorkY
     work_bottom := p.WorkY + p.WorkH
-    for _, ci in ws.Cols {
+    for col, ci in ws.Cols {
+        if !column_has_visible_clients(col) { continue }
         y := p.WorkY - ws.ViewportY + workspace_row_top(ws, p, ci)
         h := vertical_row_height(p, ws, ci)
         if y + h <= work_top {
@@ -523,6 +553,7 @@ scroll_normal_col_rect :: proc(ws: ^Workspace, p: Layout_Params, wanted: int) ->
     count, ordinal := 0, -1
     desired_total, desired_before, desired_w := i32(0), i32(0), i32(0)
     for col, ci in ws.Cols {
+        if !column_has_visible_clients(col) { continue }
         logical_x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, ci)
         logical_w := column_width(p, col)
         if logical_x < p.WorkX || logical_x + logical_w > work_right { continue }
@@ -551,7 +582,7 @@ Scroll_Previews :: proc(m: ^Manager, o: ^Output) -> [dynamic]Scroll_Preview {
     if m == nil || o == nil || o.Current == nil { return result }
     ws := o.Current
     if ws.Layout == .Vertical_Scroller {
-        p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+        p := compute_params(m.Cfg, o.Geom, workspace_visible_column_count(ws), o.Reserved)
         top, bottom := vertical_scroll_preview_rows(ws, p)
         indices := [2]int{top, bottom}
         for ci, edge in indices {
@@ -575,7 +606,7 @@ Scroll_Previews :: proc(m: ^Manager, o: ^Output) -> [dynamic]Scroll_Preview {
         return result
     }
     if ws.Layout != .Scroller { return result }
-    p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+    p := compute_params(m.Cfg, o.Geom, workspace_visible_column_count(ws), o.Reserved)
     partial_left, partial_right := custom_partial_columns(ws, p)
     if workspace_has_custom_widths(ws) && (partial_left >= 0 || partial_right >= 0) {
         hidden_left, hidden_right := scroll_preview_columns(ws, p)
@@ -667,7 +698,7 @@ Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) ->
         return {}, false
     }
     if ws.Layout == .Game {
-        p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+        p := compute_params(m.Cfg, o.Geom, workspace_visible_column_count(ws), o.Reserved)
         if column_has_maximized(ws.Cols[col_index]) || p.WorkH <= 1 { return {}, false }
         tile := Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}
         if len(ws.Cols) > 1 {
@@ -686,7 +717,7 @@ Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) ->
         return tile, true
     }
     if ws.Layout == .Vertical_Scroller {
-        p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+        p := compute_params(m.Cfg, o.Geom, workspace_visible_column_count(ws), o.Reserved)
         top, bottom := vertical_scroll_preview_rows(ws, p)
         if col_index == top || col_index == bottom || column_has_maximized(ws.Cols[col_index]) {
             return {}, false
@@ -700,7 +731,7 @@ Tab_Bar_Rect :: proc(m: ^Manager, o: ^Output, ws: ^Workspace, col_index: int) ->
         return Rect{X = p.WorkX, Y = y, W = p.WorkW, H = h}, true
     }
     if ws.Layout != .Scroller { return {}, false }
-    p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+    p := compute_params(m.Cfg, o.Geom, workspace_visible_column_count(ws), o.Reserved)
     if p.ColW <= 0 || p.WorkH <= 1 { return {}, false }
     col_w := column_width(p, ws.Cols[col_index])
     x := p.WorkX - ws.ViewportX + workspace_col_left(ws, p, col_index)
@@ -955,7 +986,7 @@ Drop_Targets :: proc(m: ^Manager, dragged: ^Client = nil) -> [dynamic]Drop_Targe
     for o in m.Outputs {
         ws := o.Current
         if ws == nil { continue }
-        p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+        p := compute_params(m.Cfg, o.Geom, workspace_visible_column_count(ws), o.Reserved)
         work := Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}
         if rect_empty(work) { continue }
         // Preserve the existing directional target geometry, but activate it
@@ -1143,7 +1174,7 @@ Column_Drop_Target_At_Point :: proc(m: ^Manager, x, y: i32, member: ^Client) -> 
     o := Output_At_Point(m, x, y)
     if o == nil || o.Current == nil { return {} }
     ws := o.Current
-    p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+    p := compute_params(m.Cfg, o.Geom, workspace_visible_column_count(ws), o.Reserved)
 
     if len(ws.Cols) == 0 {
         r := Rect{X = p.WorkX, Y = p.WorkY, W = p.WorkW, H = p.WorkH}
@@ -1474,8 +1505,11 @@ arrange_vertical_scroller :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect) 
         bottom_reserve = min(SCROLL_PREVIEW_WIDTH, vertical_row_height(p, ws, preview_bottom)) + p.Inner
     }
     for col, ci in ws.Cols {
-        nw := len(col.Wins)
-        if nw == 0 { continue }
+        nw := column_visible_client_count(col)
+        if nw == 0 {
+            for cl in col.Wins { cl.Geom = hide; cl.Border = 0 }
+            continue
+        }
         row_h := vertical_row_height(p, ws, ci)
         row_top := p.WorkY - ws.ViewportY + workspace_row_top(ws, p, ci)
         is_preview := ci == preview_top || ci == preview_bottom
@@ -1500,15 +1534,16 @@ arrange_vertical_scroller :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect) 
         }
         if col.Layout == .Tabbed {
             active := col.Focus
-            if active == nil || !column_member(col, active) {
-                active = col.Wins[0]
+            if active == nil || active.Minimized || !column_member(col, active) {
+                active = nil
+                for cl in col.Wins { if !cl.Minimized { active = cl; break } }
                 col.Focus = active
             }
             tab_h := i32(0)
             if !is_preview { tab_h = min(TAB_BAR_HEIGHT, max(i32(0), row_h - 1)) }
             tile := Rect{X = p.WorkX, Y = row_top + tab_h, W = p.WorkW, H = row_h - tab_h}
             for cl in col.Wins {
-                if cl == active { place_client_in_tile(ws, cl, tile, p.Border) }
+                if cl == active && !cl.Minimized { place_client_in_tile(ws, cl, tile, p.Border) }
                 else { cl.Geom = hide; cl.Border = 0 }
             }
             continue
@@ -1519,6 +1554,7 @@ arrange_vertical_scroller :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect) 
         total_weight := f64(0)
         positive_weights := 0
         for cl in col.Wins {
+            if cl.Minimized { continue }
             if cl.TileWeight > 0 { total_weight += cl.TileWeight; positive_weights += 1 }
         }
         default_weight := f64(1)
@@ -1527,18 +1563,29 @@ arrange_vertical_scroller :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect) 
         widths := make([]i32, nw)
         used := i32(0)
         distributable := content - i32(nw)
-        for cl, i in col.Wins {
+        visible_index := 0
+        for cl in col.Wins {
+            if cl.Minimized { continue }
             weight := cl.TileWeight
             if weight <= 0 { weight = default_weight }
-            widths[i] = 1 + i32(f64(distributable) * weight / total_weight)
-            used += widths[i]
+            widths[visible_index] = 1 + i32(f64(distributable) * weight / total_weight)
+            used += widths[visible_index]
+            visible_index += 1
         }
         rem := content - used
         for i := 0; rem > 0; i = (i + 1) % nw { widths[i] += 1; rem -= 1 }
         x := p.WorkX
-        for cl, i in col.Wins {
-            place_client_in_tile(ws, cl, Rect{X = x, Y = row_top, W = widths[i], H = row_h}, p.Border)
-            x += widths[i] + p.Inner
+        visible_index = 0
+        for cl in col.Wins {
+            if cl.Minimized {
+                cl.Geom = hide
+                cl.Border = 0
+                continue
+            }
+            place_client_in_tile(ws, cl,
+                Rect{X = x, Y = row_top, W = widths[visible_index], H = row_h}, p.Border)
+            x += widths[visible_index] + p.Inner
+            visible_index += 1
         }
         delete(widths)
     }
@@ -1616,7 +1663,7 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
         }
         for ci in 0 ..< n_cols {
             col := ws.Cols[ci]
-            nw := len(col.Wins)
+            nw := column_visible_client_count(col)
             if nw == 0 { continue }
             col_w := column_width(p, col)
             col_left := base_x + workspace_col_left(ws, p, ci)
@@ -1709,6 +1756,7 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             total_weight := f64(0)
             positive_weights := 0
             for cl in col.Wins {
+                if cl.Minimized { continue }
                 if cl.TileWeight > 0 {
                     total_weight += cl.TileWeight
                     positive_weights += 1
@@ -1723,11 +1771,14 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             heights := make([]i32, nw)
             used := i32(0)
             distributable := content - i32(nw)
-            for cl, i in col.Wins {
+            visible_index := 0
+            for cl in col.Wins {
+                if cl.Minimized { continue }
                 weight := cl.TileWeight
                 if weight <= 0 { weight = default_weight }
-                heights[i] = 1 + i32(f64(distributable) * weight / total_weight)
-                used += heights[i]
+                heights[visible_index] = 1 + i32(f64(distributable) * weight / total_weight)
+                used += heights[visible_index]
+                visible_index += 1
             }
             // Flooring leaves fewer than nw pixels. Match the historic layout
             // by handing remainder pixels to rows from the top downward.
@@ -1738,12 +1789,18 @@ arrange_workspace :: proc(ws: ^Workspace, p: Layout_Params, geom: Rect, on_scree
             }
 
             y := p.WorkY
-            for i in 0 ..< nw {
-                h := heights[i]
+            visible_index = 0
+            for cl in col.Wins {
+                if cl.Minimized {
+                    cl.Geom = hide
+                    cl.Border = 0
+                    continue
+                }
+                h := heights[visible_index]
                 tile := Rect { X = col_left, Y = y, W = col_w, H = h }
-                cl := col.Wins[i]
                 place_client_in_tile(ws, cl, tile, p.Border)
                 y += h + p.Inner
+                visible_index += 1
             }
             delete(heights)
         }
@@ -1866,12 +1923,12 @@ Arrange_All :: proc(m: ^Manager) {
     for o in m.Outputs {
         cur := o.Current
         if cur != nil {
-            p := compute_params(m.Cfg, o.Geom, len(cur.Cols), o.Reserved)
+            p := compute_params(m.Cfg, o.Geom, workspace_visible_column_count(cur), o.Reserved)
             arrange_workspace(cur, p, o.Geom, true)
         }
         for ws in o.Ws {
             if ws == cur { continue }
-            p := compute_params(m.Cfg, o.Geom, len(ws.Cols), o.Reserved)
+            p := compute_params(m.Cfg, o.Geom, workspace_visible_column_count(ws), o.Reserved)
             arrange_workspace(ws, p, o.Geom, false)
         }
         // Docks belong to an output rather than a workspace and remain visible

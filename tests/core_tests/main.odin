@@ -104,6 +104,81 @@ main :: proc() {
 }
 
 test_minimize_restore :: proc() {
+    {
+        m := mk_man()
+        defer c.Destroy_Manager(m)
+        c.Ensure_WS(m, 1)
+        c.Switch_WS_Id(m, 1)
+        left := add_tiled(m, 8991)
+        right := add_tiled(m, 8992)
+        c.Arrange_All(m)
+        left_before, right_before := left.Geom, right.Geom
+
+        ok(c.Set_Minimized(m, left, true), "minimize scrolling column")
+        c.Arrange_All(m)
+        eq(right.Geom.W, left_before.W+right_before.W+2*m.Cfg.BorderWidth+m.Cfg.InnerGap,
+            "remaining scrolling window fills the minimized column gap")
+        eq(right.Geom.X, left_before.X, "remaining scrolling window moves into the first visible slot")
+
+        ok(c.Set_Minimized(m, left, false), "restore scrolling column")
+        c.Arrange_All(m)
+        eq(left.Geom, left_before, "restored scrolling window returns to its exact layout slot")
+        eq(right.Geom, right_before, "restoring a scrolling window restores neighboring geometry")
+    }
+
+    {
+        m := mk_man()
+        defer c.Destroy_Manager(m)
+        c.Ensure_WS(m, 1)
+        c.Switch_WS_Id(m, 1)
+        top := add_tiled(m, 8996)
+        bottom := add_tiled(m, 8997)
+        c.Set_Workspace_Layout(m, .Vertical_Scroller)
+        c.Arrange_All(m)
+        top_before, bottom_before := top.Geom, bottom.Geom
+        work := c.Output_Work_Area(m, c.Active_Output(m))
+
+        ok(c.Set_Minimized(m, top, true), "minimize vertical scrolling row")
+        c.Arrange_All(m)
+        eq(bottom.Geom.Y, top_before.Y, "remaining vertical-scroller row moves into the first slot")
+        eq(bottom.Geom.H, work.H-2*m.Cfg.BorderWidth,
+            "remaining vertical-scroller row fills the minimized gap")
+
+        ok(c.Set_Minimized(m, top, false), "restore vertical scrolling row")
+        c.Arrange_All(m)
+        eq(top.Geom, top_before, "restored vertical-scroller row returns to its exact slot")
+        eq(bottom.Geom, bottom_before, "vertical-scroller neighbor returns to its exact slot")
+    }
+
+    {
+        m := mk_man()
+        defer c.Destroy_Manager(m)
+        c.Ensure_WS(m, 1)
+        c.Switch_WS_Id(m, 1)
+        top := add_tiled(m, 8993)
+        middle := add_tiled(m, 8994)
+        bottom := add_tiled(m, 8995)
+        c.Focus_Client(m, middle)
+        c.Move_Dir(m, .Left)
+        c.Focus_Client(m, bottom)
+        c.Move_Dir(m, .Left)
+        c.Arrange_All(m)
+        top_before, middle_before, bottom_before := top.Geom, middle.Geom, bottom.Geom
+
+        ok(c.Set_Minimized(m, middle, true), "minimize scrolling stack row")
+        c.Arrange_All(m)
+        eq(bottom.Geom.Y, top.Geom.Y+top.Geom.H+2*m.Cfg.BorderWidth+m.Cfg.InnerGap,
+            "remaining scrolling rows close the minimized row gap")
+        ok(top.Geom.H > top_before.H && bottom.Geom.H > bottom_before.H,
+            "remaining scrolling rows divide the released height")
+
+        ok(c.Set_Minimized(m, middle, false), "restore scrolling stack row")
+        c.Arrange_All(m)
+        eq(top.Geom, top_before, "restoring a scrolling row restores the preceding geometry")
+        eq(middle.Geom, middle_before, "restored scrolling row returns to its exact stack slot")
+        eq(bottom.Geom, bottom_before, "restoring a scrolling row restores the following geometry")
+    }
+
     m := mk_man()
     defer c.Destroy_Manager(m)
     ws := c.Ensure_WS(m, 1)
