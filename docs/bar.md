@@ -60,8 +60,10 @@ reconnects after WM restarts.
 - `integrated` nests window buttons in the selected workspace and hides the duplicate title block.
 
 The selected window expands up to `bar_window_active_max_width`; other windows
-remain `bar_window_inactive_width` pixels wide. Minimized windows stay in the
-strip and use a horizontal marker. Clicking an inactive window focuses it,
+remain `bar_window_inactive_width` pixels wide. Buttons use the client's
+`_NET_WM_ICON` image when available. Minimized icons render dimmed; clients
+without an icon keep the vertical or horizontal fallback marker. Clicking an
+inactive window focuses it,
 clicking the globally focused window minimizes it, and clicking a minimized
 window restores and focuses it. Actions are validated against the latest IPC
 snapshot on button release, so a focus change during a click cannot minimize

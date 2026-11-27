@@ -63,6 +63,14 @@ Window_State :: struct {
     Focused, WorkspaceFocused, Minimized, Urgent, Dock, Scratchpad: bool,
 }
 
+WINDOW_ICON_SIZE :: 16
+
+Window_Icon :: struct {
+    Pixels: [WINDOW_ICON_SIZE * WINDOW_ICON_SIZE]u32,
+    W, H: i32,
+    Available: bool,
+}
+
 Workspace_Meta :: struct { Id: int, Icon, Name: string }
 
 State :: struct {
@@ -87,6 +95,7 @@ State :: struct {
     Blocks: [dynamic]Block,
     Workspaces: [dynamic]Workspace_State,
     WindowsState: [dynamic]Window_State,
+    WindowIcons: map[u32]Window_Icon,
     WorkspaceMeta: [dynamic]Workspace_Meta,
     LogicalMonitors: [dynamic]Monitor,
     LogicalMonitorsReady: bool,
@@ -250,6 +259,7 @@ connect :: proc(state: ^State) -> bool {
     state.Windows = make([dynamic]Bar_Window, 0, 4)
     state.Workspaces = make([dynamic]Workspace_State, 0, 16)
     state.WindowsState = make([dynamic]Window_State, 0, 16)
+    state.WindowIcons = make(map[u32]Window_Icon)
     state.WorkspaceMeta = make([dynamic]Workspace_Meta, 0, 8)
     state.LogicalMonitors = make([dynamic]Monitor, 0, 4)
     state.IpcFd = -1
@@ -271,6 +281,7 @@ shutdown :: proc(state: ^State) {
     renderer_shutdown(state)
     clear_workspaces(state)
     clear_windows_state(state)
+    if state.WindowIcons != nil { delete(state.WindowIcons) }
     clear_workspace_meta(state)
     clear_logical_monitors(state)
     if state.Atoms != nil { delete(state.Atoms) }

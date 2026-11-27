@@ -348,6 +348,7 @@ parse_window_snapshot :: proc(state: ^State, payload: []byte) {
             if depth == 1 && start >= 0 { parse_window_object(state, payload[start:index + 1]); start = -1 }
         }
     }
+    window_icons_sync(state)
 }
 
 parse_workspace_snapshot :: proc(state: ^State, payload: []byte) {

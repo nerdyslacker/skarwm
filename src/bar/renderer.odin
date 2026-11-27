@@ -1,6 +1,7 @@
 package main
 
 import x11 "../x11"
+import core "../core"
 
 import c "core:c"
 import "core:fmt"
@@ -8,6 +9,112 @@ import "core:strings"
 
 BAR_PAD :: i32(6)
 BLOCK_GAP :: i32(4)
+X_Z_PIXMAP :: c.int(2)
+
+window_icon_load :: proc(state: ^State, xid: u32) -> Window_Icon {
+    result: Window_Icon
+    error: ^x11.Error
+    reply := x11.xcb_get_property_reply(
+        state.Conn,
+        x11.xcb_get_property(
+            state.Conn, 0, xid, atom(state, "_NET_WM_ICON"), atom(state, "CARDINAL"),
+            0, u32(x11.PROPERTY_MAX_BYTES/4),
+        ),
+        &error,
+    )
+    if error != nil { x11.free_libc(error); return result }
+    if reply == nil { return result }
+    defer x11.free_libc(reply)
+    if reply.type_ != atom(state, "CARDINAL") || reply.format != x11.ATOM_FORMAT_32 ||
+       reply.bytes_after != 0 || reply.value_len < 3 ||
+       u64(reply.value_len)*4 > x11.PROPERTY_MAX_BYTES {
+        return result
+    }
+    value := x11.xcb_get_property_value(reply)
+    if value == nil { return result }
+    values := ([^]u32)(value)[:int(reply.value_len)]
+    choice, found := core.Select_Net_Wm_Icon(values, WINDOW_ICON_SIZE)
+    if !found { return result }
+
+    width, height := WINDOW_ICON_SIZE, WINDOW_ICON_SIZE
+    if choice.Width > choice.Height {
+        height = max(1, choice.Height*WINDOW_ICON_SIZE/choice.Width)
+    } else if choice.Height > choice.Width {
+        width = max(1, choice.Width*WINDOW_ICON_SIZE/choice.Height)
+    }
+    for y in 0 ..< height {
+        source_y := y*choice.Height/height
+        for x in 0 ..< width {
+            source_x := x*choice.Width/width
+            result.Pixels[y*WINDOW_ICON_SIZE+x] =
+                values[choice.PixelOffset+source_y*choice.Width+source_x]
+        }
+    }
+    result.W, result.H, result.Available = i32(width), i32(height), true
+    return result
+}
+
+window_icons_sync :: proc(state: ^State) {
+    for client in state.WindowsState {
+        if _, cached := state.WindowIcons[client.Id]; cached { continue }
+        state.WindowIcons[client.Id] = window_icon_load(state, client.Id)
+        mask := u32(x11.EVENT_MASK_PROPERTY_CHANGE)
+        cookie := x11.xcb_change_window_attributes_checked(
+            state.Conn, client.Id, x11.CW_EVENT_MASK, &mask,
+        )
+        if error := x11.xcb_request_check(state.Conn, cookie); error != nil {
+            x11.free_libc(error)
+        }
+    }
+    for xid in state.WindowIcons {
+        if window_state_by_xid(state, xid) == nil { delete_key(&state.WindowIcons, xid) }
+    }
+}
+
+window_icon_available :: proc(state: ^State, xid: u32) -> bool {
+    icon, found := state.WindowIcons[xid]
+    return found && icon.Available
+}
+
+draw_window_icon :: proc(
+    state: ^State, window: ^Bar_Window, xid: u32, x, y, size: i32,
+    background: u32, opacity: u32 = 255,
+) -> bool {
+    icon, found := state.WindowIcons[xid]
+    if !found || !icon.Available || size <= 0 || state.Display == nil || state.GC == nil {
+        return false
+    }
+    width, height := size, size
+    if icon.W > icon.H {
+        height = max(1, icon.H*size/icon.W)
+    } else if icon.H > icon.W {
+        width = max(1, icon.W*size/icon.H)
+    }
+    bytes := x_calloc(c.size_t(width*height), c.size_t(4))
+    if bytes == nil { return false }
+    image := XCreateImage(
+        state.Display, state.Visual, c.uint(XDefaultDepth(state.Display, state.ScreenNumber)),
+        X_Z_PIXMAP, 0, bytes, c.uint(width), c.uint(height), 32, 0,
+    )
+    if image == nil { x_free(bytes); return false }
+    defer XDestroyImage(image)
+    for destination_y in 0 ..< height {
+        source_y := destination_y*icon.H/height
+        for destination_x in 0 ..< width {
+            source_x := destination_x*icon.W/width
+            pixel := icon.Pixels[source_y*WINDOW_ICON_SIZE+source_x]
+            XPutPixel(
+                image, destination_x, destination_y,
+                c.ulong(core.Blend_Argb_Over_Rgb(pixel, background, opacity)),
+            )
+        }
+    }
+    XPutImage(
+        state.Display, X_Drawable(window.Canvas), state.GC, image, 0, 0,
+        x+(size-width)/2, y+(size-height)/2, c.uint(width), c.uint(height),
+    )
+    return true
+}
 
 renderer_init :: proc(state: ^State) {
     state.Display = XOpenDisplay(nil)

@@ -376,6 +376,9 @@ window_strip_info :: proc(state: ^State, window: ^Bar_Window, workspace: int) ->
         if !client.Minimized && (client.Focused || client.WorkspaceFocused) {
             selected = count
             natural_active = text_width(state, client.Title) + 16
+            if window_icon_available(state, client.Id) {
+                natural_active += min(i32(WINDOW_ICON_SIZE), max(i32(1), window.Geom.H-6)) + 4
+            }
         }
         count += 1
     }
@@ -438,13 +441,33 @@ window_strip_draw :: proc(
             background = blend_colour(background, block_background(block, state), 30)
         }
         fill_rect(state, X_Drawable(window.Canvas), x, 2, width, window.Geom.H-4, background)
+        icon_size := min(i32(WINDOW_ICON_SIZE), max(i32(1), min(width-2, window.Geom.H-6)))
+        icon_opacity := u32(255)
+        if client.Minimized { icon_opacity = 110 }
         if index == selected && width > compact {
-            label := title_prefix_for_width(state, client.Title, width-12)
-            draw_text(state, window, x+6, label, foreground, client.Focused)
-        } else if client.Minimized {
-            fill_rect(state, X_Drawable(window.Canvas), x+3, window.Geom.H/2, max(i32(1), width-6), 2, foreground)
+            text_x := x+6
+            text_width_available := width-12
+            if draw_window_icon(
+                state, window, client.Id, x+4, (window.Geom.H-icon_size)/2,
+                icon_size, background, icon_opacity,
+            ) {
+                text_x = x+icon_size+8
+                text_width_available = width-icon_size-14
+            }
+            label := title_prefix_for_width(state, client.Title, text_width_available)
+            draw_text(state, window, text_x, label, foreground, client.Focused)
         } else {
-            fill_rect(state, X_Drawable(window.Canvas), x+width/2-1, 6, 2, max(i32(2), window.Geom.H-12), foreground)
+            icon_drawn := draw_window_icon(
+                state, window, client.Id, x+(width-icon_size)/2, (window.Geom.H-icon_size)/2,
+                icon_size, background, icon_opacity,
+            )
+            if !icon_drawn {
+                if client.Minimized {
+                    fill_rect(state, X_Drawable(window.Canvas), x+3, window.Geom.H/2, max(i32(1), width-6), 2, foreground)
+                } else {
+                    fill_rect(state, X_Drawable(window.Canvas), x+width/2-1, 6, 2, max(i32(2), window.Geom.H-12), foreground)
+                }
+            }
         }
         append(&window.Hits, Hitbox{
             X = x, Y = 0, W = width, H = window.Geom.H,

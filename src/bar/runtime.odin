@@ -72,8 +72,14 @@ handle_x_event :: proc(state: ^State, event: ^x11.Event) -> bool {
             draw_all_bars(state)
         }
     case u8(x11.EVENT_PROPERTY_NOTIFY):
-        if !state.Config.Managed { return true }
         property := (^x11.Property_Notify_Event)(event)
+        if property.atom == atom(state, "_NET_WM_ICON") &&
+           window_state_by_xid(state, property.window) != nil {
+            state.WindowIcons[property.window] = window_icon_load(state, property.window)
+            draw_all_bars(state)
+            return true
+        }
+        if !state.Config.Managed { return true }
         if property.window != state.Root { return true }
         if property.atom == atom(state, BAR_BLOCKS_ATOM) {
             blocks_reload(state)

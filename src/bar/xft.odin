@@ -9,6 +9,7 @@ import c "core:c"
 X_Display :: struct {}
 X_Visual :: struct {}
 X_GC :: struct {}
+X_Image :: struct {}
 Xft_Draw :: struct {}
 Fc_Char_Set :: struct {}
 Fc_Pattern :: struct {}
@@ -38,6 +39,7 @@ X_Glyph_Info :: struct {
 
 foreign import xlib "system:X11"
 foreign import xft "system:Xft"
+foreign import libc "system:c"
 
 @(default_calling_convention = "c")
 foreign xlib {
@@ -64,6 +66,25 @@ foreign xlib {
     ) -> c.int ---
     XFlush :: proc(display: ^X_Display) -> c.int ---
     XSync :: proc(display: ^X_Display, discard: c.int) -> c.int ---
+    XCreateImage :: proc(
+        display: ^X_Display, visual: ^X_Visual, depth: c.uint, format, offset: c.int,
+        data: rawptr, width, height: c.uint, bitmap_pad, bytes_per_line: c.int,
+    ) -> ^X_Image ---
+    XPutPixel :: proc(image: ^X_Image, x, y: c.int, pixel: c.ulong) -> c.int ---
+    XPutImage :: proc(
+        display: ^X_Display, drawable: X_Drawable, gc: ^X_GC, image: ^X_Image,
+        source_x, source_y, destination_x, destination_y: c.int,
+        width, height: c.uint,
+    ) -> c.int ---
+    XDestroyImage :: proc(image: ^X_Image) -> c.int ---
+}
+
+@(default_calling_convention = "c")
+foreign libc {
+    @(link_name = "calloc")
+    x_calloc :: proc(count, size: c.size_t) -> rawptr ---
+    @(link_name = "free")
+    x_free :: proc(memory: rawptr) ---
 }
 
 @(default_calling_convention = "c")

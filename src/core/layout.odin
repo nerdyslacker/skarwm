@@ -54,6 +54,46 @@ Bar_Window_Click_Action :: proc(focused, minimized: bool) -> Bar_Window_Action {
     return .Focus
 }
 
+Net_Wm_Icon_Choice :: struct {
+    PixelOffset, Width, Height: int,
+}
+
+Select_Net_Wm_Icon :: proc(values: []u32, target_size: int) -> (Net_Wm_Icon_Choice, bool) {
+    target := max(1, target_size)
+    best: Net_Wm_Icon_Choice
+    best_size := 0
+    best_large := false
+    found := false
+    offset := 0
+    for offset + 2 <= len(values) {
+        width, height := values[offset], values[offset + 1]
+        offset += 2
+        if width == 0 || height == 0 { break }
+        pixel_count := u64(width) * u64(height)
+        if pixel_count > u64(len(values) - offset) { break }
+        size := int(min(width, height))
+        large := size >= target
+        if !found || (large && !best_large) ||
+           (large == best_large && ((large && size < best_size) || (!large && size > best_size))) {
+            best = Net_Wm_Icon_Choice{
+                PixelOffset = offset, Width = int(width), Height = int(height),
+            }
+            best_size, best_large, found = size, large, true
+        }
+        offset += int(pixel_count)
+    }
+    return best, found
+}
+
+Blend_Argb_Over_Rgb :: proc(argb, background, opacity: u32) -> u32 {
+    alpha := ((argb >> 24) & 0xff) * min(opacity, u32(255)) / 255
+    inverse := 255 - alpha
+    red := (((argb >> 16) & 0xff) * alpha + ((background >> 16) & 0xff) * inverse) / 255
+    green := (((argb >> 8) & 0xff) * alpha + ((background >> 8) & 0xff) * inverse) / 255
+    blue := ((argb & 0xff) * alpha + (background & 0xff) * inverse) / 255
+    return red << 16 | green << 8 | blue
+}
+
 SCROLL_PREVIEW_WIDTH :: i32(20)
 GAME_ANCHOR_PERCENT :: i32(75)
 GAME_COMPANION_ROWS :: 3

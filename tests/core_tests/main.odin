@@ -637,6 +637,29 @@ test_config :: proc() {
     eq(c.Bar_Window_Click_Action(false, true), c.Bar_Window_Action.Restore,
         "minimized window click restores")
 
+    icons := make([dynamic]u32, 0, 2 + 32*32 + 2 + 16*16)
+    defer delete(icons)
+    append(&icons, 32, 32)
+    for _ in 0 ..< 32*32 { append(&icons, 0xff323232) }
+    append(&icons, 16, 16)
+    for _ in 0 ..< 16*16 { append(&icons, 0xff161616) }
+    choice, found := c.Select_Net_Wm_Icon(icons[:], 12)
+    ok(found && choice.Width == 16 && choice.Height == 16 && choice.PixelOffset == 1028,
+        "app icon selection prefers the smallest icon large enough for the button")
+    choice, found = c.Select_Net_Wm_Icon(icons[:], 20)
+    ok(found && choice.Width == 32 && choice.Height == 32 && choice.PixelOffset == 2,
+        "app icon selection avoids upscaling when a larger icon exists")
+    _, found = c.Select_Net_Wm_Icon([]u32{4, 4, 0xff000000}, 12)
+    ok(!found, "truncated app icon properties are rejected")
+    _, found = c.Select_Net_Wm_Icon([]u32{0, 0, 1, 1, 0xffffffff}, 12)
+    ok(!found, "zero-sized app icon entries cannot turn pixel data into another header")
+    eq(c.Blend_Argb_Over_Rgb(0xffff0000, 0x0000ff, 255), u32(0xff0000),
+        "opaque app icon pixels replace the button background")
+    eq(c.Blend_Argb_Over_Rgb(0xffff0000, 0x000000, 128), u32(0x800000),
+        "minimized app icons blend at reduced opacity")
+    eq(c.Blend_Argb_Over_Rgb(0x00ffffff, 0x123456, 255), u32(0x123456),
+        "transparent app icon pixels preserve the button background")
+
 }
 
 test_animation_math :: proc() {
